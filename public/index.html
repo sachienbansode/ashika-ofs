@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OFS Desk — Ashika</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">OFS <span>Desk</span></div>
+  <div class="clock" id="clock">--:--:--</div>
+  <div class="sp"></div>
+  <button class="mini" id="btnRefresh">Refresh</button>
+  <select id="autoRefresh" title="Auto-refresh">
+    <option value="0">Manual</option>
+    <option value="5000" selected>5s</option>
+    <option value="15000">15s</option>
+    <option value="30000">30s</option>
+  </select>
+  <div class="who"><b id="whoName">—</b><span id="whoRole"></span></div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="dash" class="on">Dashboard</button>
+  <button data-tab="book">Bid book</button>
+  <button data-tab="place">Place bid</button>
+  <button data-tab="export">Exchange files</button>
+  <button data-tab="masters">Masters</button>
+</nav>
+
+<main>
+
+  <!-- ---------------- Dashboard ---------------- -->
+  <section class="pane" id="pane-dash">
+    <div class="kpis" id="kpis"></div>
+    <h2 class="sec">Open issues</h2>
+    <div class="cards" id="issueCards"></div>
+    <h2 class="sec">Latest bid activity</h2>
+    <div class="wrap"><table id="recentTbl"></table></div>
+  </section>
+
+  <!-- ---------------- Bid book ---------------- -->
+  <section class="pane hide" id="pane-book">
+    <div class="bar">
+      <select id="bkIssue"></select>
+      <select id="bkCat">
+        <option value="">All categories</option>
+        <option value="Retail">Retail</option>
+        <option value="HNI">HNI / Non-Retail</option>
+      </select>
+      <select id="bkStatus">
+        <option value="">Live &amp; modified</option>
+        <option value="Live">Live</option>
+        <option value="Modified">Modified</option>
+        <option value="Cancelled">Cancelled</option>
+        <option value="Rejected">Rejected</option>
+      </select>
+      <input type="text" id="bkQ" placeholder="UCC, symbol or bid ref">
+      <button class="btn ghost" id="bkGo">Search</button>
+      <div class="sp"></div>
+      <span class="tag" id="bkCount"></span>
+    </div>
+    <div class="wrap"><table id="bookTbl"></table></div>
+  </section>
+
+  <!-- ---------------- Place bid ---------------- -->
+  <section class="pane hide" id="pane-place">
+    <div class="cards">
+      <div class="card">
+        <h2 class="sec" style="margin-top:0">Bid on behalf of a client</h2>
+        <div class="grid2">
+          <label class="f"><span class="k">Issue</span><select id="pbIssue" style="width:100%"></select></label>
+          <label class="f"><span class="k">Client UCC</span><input type="text" id="pbUcc" placeholder="ASH1001" style="width:100%"></label>
+          <label class="f"><span class="k">Category</span>
+            <select id="pbCat" style="width:100%"><option value="Retail">Retail</option><option value="HNI">HNI / Non-Retail</option></select></label>
+          <label class="f"><span class="k">Quantity</span><input type="number" id="pbQty" min="1" step="1" style="width:100%"></label>
+          <label class="f"><span class="k">Price type</span>
+            <select id="pbType" style="width:100%"><option value="price">Price bid</option><option value="cutoff">Cut-off (Retail only)</option></select></label>
+          <label class="f"><span class="k">Price</span><input type="number" id="pbPrice" step="0.05" style="width:100%"></label>
+        </div>
+        <div class="bar" style="margin-top:12px">
+          <button class="btn ghost" id="pbCheck">Validate</button>
+          <button class="btn" id="pbPlace" disabled>Place bid</button>
+        </div>
+        <div id="pbResult"></div>
+      </div>
+      <div class="card">
+        <h2 class="sec" style="margin-top:0">Client &amp; margin</h2>
+        <div id="pbClient" class="note">Enter a UCC and validate to see client, margin and limits.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------- Exchange files ---------------- -->
+  <section class="pane hide" id="pane-export">
+    <div class="bar">
+      <select id="exExch"><option value="NSE">NSE — e-OFS bulk upload</option><option value="BSE">BSE — iBBS bulk bid</option></select>
+      <select id="exIssue"></select>
+      <select id="exCat"><option value="all">All categories</option><option value="Retail">Retail</option><option value="HNI">HNI</option></select>
+      <select id="exCanc"><option value="0">Exclude cancelled</option><option value="1">Include cancelled (C rows)</option></select>
+      <button class="btn ghost" id="exPreview">Preview</button>
+      <button class="btn" id="exDownload">Download file</button>
+    </div>
+    <div class="note">Column order is provisional. Pin the exact layout from the NSE OFS bulk-upload spec and BSE Notice 20120727-26 (3.3.4) on the member portals before go-live — see <code>lib/exchange/nse.js</code> and <code>lib/exchange/bse.js</code>.</div>
+    <div id="exSummary"></div>
+    <div class="wrap"><table id="exTbl"></table></div>
+    <h2 class="sec">Export audit log</h2>
+    <div class="wrap"><table id="exLogTbl"></table></div>
+  </section>
+
+  <!-- ---------------- Masters ---------------- -->
+  <section class="pane hide" id="pane-masters">
+    <div class="bar">
+      <button class="mini" data-mtab="issues">Issues</button>
+      <button class="mini" data-mtab="margins">Margins</button>
+      <button class="mini" data-mtab="settings">Settings</button>
+    </div>
+    <div id="mIssues">
+      <div class="bar"><button class="btn ghost" id="miNew">Add issue</button></div>
+      <div id="miForm" class="hide"></div>
+      <div class="wrap"><table id="issueTbl"></table></div>
+    </div>
+    <div id="mMargins" class="hide">
+      <div class="bar">
+        <input type="text" id="mgUcc" placeholder="Client UCC">
+        <input type="number" id="mgAmt" placeholder="Available margin" step="1" min="0">
+        <button class="btn" id="mgSet">Set margin</button>
+      </div>
+      <div class="wrap"><table id="marginTbl"></table></div>
+    </div>
+    <div id="mSettings" class="hide"><div class="wrap"><table id="setTbl"></table></div></div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
