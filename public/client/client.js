@@ -137,8 +137,10 @@ async function sendCode() {
     $('#otpHint').textContent = r.message || '';
 
     $('#demoOtp').innerHTML = r.test_mode
-      ? '<div class="demo-otp"><span>Test mode — no email sent. Code:</span><b>' + esc(r.test_code) + '</b></div>'
+      ? '<div class="demo-otp"><span>Test mode — nothing was sent. Code:</span><b>' +
+        esc(r.test_code) + '</b></div>'
       : '';
+    $('#testBanner').classList.toggle('hide', !r.test_mode);
 
     S.resendAt = Date.now() + (r.resend_after_s || 60) * 1000;
     buildOtpBoxes();

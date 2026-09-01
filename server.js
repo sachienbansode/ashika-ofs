@@ -169,6 +169,19 @@ const HOST = process.env.HOST || '127.0.0.1';   // bound to localhost; nginx in 
 async function start() {
   console.log('[boot] ofs db    :', ofsDb.label());
   console.log('[boot] ananta db :', ananta.label());
+  console.log('[boot] env       :', process.env.NODE_ENV || '(unset)', TLS ? '· TLS' : '· plain http');
+
+  // Test mode hands the OTP back in the API response, so anyone who knows a
+  // client's mobile or email can sign in as them and read that client's real data.
+  // Fine behind a restricted network, dangerous on an open one - say so every boot
+  // rather than leaving it to whoever remembers what is in .env.
+  if (require('./lib/otp').testMode()) {
+    console.warn('[boot] ***********************************************************');
+    console.warn('[boot] OTP TEST MODE IS ON - the sign-in code is returned by the API');
+    console.warn('[boot] anyone who knows a client mobile/email can sign in as them');
+    console.warn('[boot] restrict network access while this is on; never use in production');
+    console.warn('[boot] ***********************************************************');
+  }
   try { console.log('[boot] pages registered:', (await registerPages()).join(', ')); }
   catch (e) {
     // Not fatal - the app still serves - but nobody can be granted the page, so
