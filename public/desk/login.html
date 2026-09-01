@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OFS Desk — sign in | Ashika</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="/shared/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/shared/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/shared/icon-192.png">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/desk/login.css">
+</head>
+<body class="lg-body">
+
+<main class="lg-wrap">
+  <div class="lg-brand">
+    <img src="/shared/brand-logo.png" alt="Ashika" width="58" height="58">
+    <div>
+      <div class="t">OFS Desk</div>
+      <div class="s">Back office &middot; Offer for Sale</div>
+    </div>
+  </div>
+
+  <section class="lg-card" aria-labelledby="lgTitle">
+    <div class="strip"></div>
+    <div class="pad">
+      <h1 id="lgTitle" class="lg-h">Sign in</h1>
+      <p class="lg-sub" id="lgSub">Use your Ashika portal account.</p>
+
+      <div id="notice" class="lg-note hide" role="status" aria-live="polite"></div>
+
+      <!-- step 1 — credentials -->
+      <form id="paneCreds" novalidate>
+        <label class="fl" for="email">Work email</label>
+        <input id="email" class="inp" type="email" autocomplete="username"
+               placeholder="you@ashikagroup.com" spellcheck="false" enterkeyhint="next" autofocus>
+
+        <label class="fl" for="password">Password</label>
+        <div class="pw">
+          <input id="password" class="inp" type="password" autocomplete="current-password"
+                 placeholder="Your portal password" enterkeyhint="go">
+          <button class="rev" id="reveal" type="button" aria-label="Show password">Show</button>
+        </div>
+
+        <div class="err hide" id="credErr" role="alert"></div>
+        <button class="btn btn-p" id="signIn" type="submit">Sign in</button>
+      </form>
+
+      <!-- step 2 — one-time code -->
+      <form id="paneOtp" class="hide" novalidate>
+        <p class="lg-sub">A 6-digit code was sent to <b id="sentTo">your email</b>.</p>
+        <label class="fl" for="code">One-time code</label>
+        <input id="code" class="inp otp" inputmode="numeric" autocomplete="one-time-code"
+               maxlength="6" placeholder="------" enterkeyhint="go">
+        <div class="test hide" id="testCode"></div>
+        <div class="err hide" id="otpErr" role="alert"></div>
+        <button class="btn btn-p" id="verify" type="submit">Verify &amp; continue</button>
+        <button class="btn btn-o" id="startOver" type="button">Use a different account</button>
+      </form>
+
+      <div class="lg-alt">
+        <span>Already signed in to the portal?</span>
+        <a id="portalLink" class="hide" href="#">Open the desk from the portal</a>
+        <span id="portalNote">Open the OFS Desk link there — it signs you in without a second password.</span>
+      </div>
+    </div>
+  </section>
+
+  <p class="lg-foot">Ashika Stock Broking Ltd &middot; authorised users only. Access is logged.</p>
+</main>
+
+<script src="/config.js"></script>
+<script src="/desk/login.js"></script>
+</body>
+</html>

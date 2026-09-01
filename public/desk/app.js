@@ -951,8 +951,9 @@ function showGate(title, message, why) {
 }
 
 /**
- * There is no login form here by design: the portal authenticates (password, plus
- * OTP where the account requires it) and hands over a one-time ticket.
+ * Two doors lead here: the portal mints a one-time ticket (/auth/sso), or the user
+ * signs in directly at /desk/login.html against the same platform account. Either
+ * way this page only ever sees the resulting session cookie.
  */
 async function checkSession() {
   try {
@@ -962,8 +963,9 @@ async function checkSession() {
     $('#btnSignOut').classList.remove('hide');
 
     var pages = (me.permissions && me.permissions.pages) || [];
+    var DESK = ['ofs-desk', 'ofs-masters'];
     var granted = pages.indexOf('*') >= 0 || pages.some(function (p) {
-      return String(p).split(':')[0] === 'ofs-desk';
+      return DESK.indexOf(String(p).split(':')[0]) >= 0;
     });
     if (!granted) {
       showGate('No access to the OFS desk',
@@ -975,15 +977,13 @@ async function checkSession() {
     return true;
   } catch (e) {
     if (e.status === 401) {
+      // No session: go straight to the sign-in page rather than showing a wall
+      // that only tells the user where the door is.
       var stale = e.body && e.body.error === 'session_superseded';
-      showGate(stale ? 'Signed in elsewhere' : 'Sign in required',
-        stale
-          ? 'This session ended because the account signed in somewhere else. Open the OFS desk from the portal again.'
-          : 'Open the OFS desk from the portal — it signs you in and brings you straight back here.',
-        'The desk has no separate password: the portal handles sign-in, including OTP where your account requires it.');
-    } else {
-      showGate('Cannot reach the server', e.message, 'Check that the app is running and try again.');
+      location.replace('/desk/login.html' + (stale ? '?reason=superseded' : ''));
+      return false;
     }
+    showGate('Cannot reach the server', e.message, 'Check that the app is running and try again.');
     return false;
   }
 }

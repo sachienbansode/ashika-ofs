@@ -89,6 +89,7 @@ app.get('/readyz', async (req, res) => {
 });
 
 /* ---- session endpoints: deliberately BEFORE authMiddleware ---- */
+app.use('/auth/staff', require('./routes/staffAuth'));   // staff, email + password (+ OTP)
 app.use('/auth', require('./routes/auth'));                 // staff, via portal SSO
 app.use('/client/auth', apiLimiter, require('./routes/clientAuth'));   // clients, mobile + email + OTP
 

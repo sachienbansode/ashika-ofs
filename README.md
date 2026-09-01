@@ -138,23 +138,55 @@ not a platform user, holds no page grants, and can never satisfy `requirePage`; 
 desk's staff token can never satisfy `requireClient`. Both share `/shared/theme.css`
 so they look like one product.
 
-## Sign-in
+## Staff sign-in — two doors to `/desk`
 
-There is **no login form**. Staff authenticate at the existing portal (password,
-plus OTP where the account requires it); the portal mints a 60-second single-use
-ticket and redirects to `/auth/sso?t=…`, which redeems it and sets this app's own
-`ofs_session` cookie. The portal's cookie is scoped to its own origin and cannot
-reach this app, which is why OFS issues its own.
+Both doors lead to the **same** platform accounts in `"admin-staging-api".users` /
+`roles`. OFS never stores a staff password and never creates a staff account; it
+re-reads role and permissions on every request, so a revoked grant or a disabled
+account takes effect within seconds without a restart.
 
-The ticket asserts identity only — roles and permissions are re-read from
-`"admin-staging-api"` on every redemption **and** on every subsequent request, so a
-revoked grant or a disabled account takes effect immediately. It carries the portal's
-`sid`, checked against `users.active_sid`, so signing in elsewhere ends the OFS
-session too.
+### 1. Direct sign-in — `/desk/login.html`
+
+Email + portal password. If the role (`requires_mfa`) or the account
+(`mfa_enabled`) demands it, a 6-digit code follows, emailed to the address on file.
+Works today, with no change to the platform.
+
+* An M365 account is refused here — it has no password to check, so it must use the
+  portal.
+* An account whose role does not include `ofs-desk` (or `*`) is refused at sign-in
+  rather than handed a session that can only see an empty page.
+* Signing in rotates `users.active_sid`, exactly as the portal does. That is the
+  single-session rule working as intended: **signing in here ends an open portal
+  session, and a later portal sign-in ends this one.**
+* Switch it off with `OFS_STAFF_LOGIN=false` once SSO is deployed.
+
+Sign-in is rate limited to 10 attempts per IP per 15 minutes; a wrong password and
+an unknown email give the same message and take the same time.
+
+### 2. Portal SSO — `/auth/sso?t=…` (preferred)
+
+The portal authenticates, mints a 60-second single-use ticket and redirects here;
+OFS redeems it and sets its own `ofs_session` cookie. The portal's cookie is scoped
+to its own origin and cannot reach this app, which is why OFS issues its own. The
+ticket asserts identity only, carries the portal's `sid`, and is refused on replay.
+No second password prompt.
 
 **The platform needs a small addition for this** — a drop-in route and instructions
-are in [`docs/platform-patch/`](docs/platform-patch/). Until that is deployed and
-`OFS_SSO_SECRET` is set in both apps, the desk shows a sign-in prompt and nothing else.
+are in [`docs/platform-patch/`](docs/platform-patch/). Until it is deployed and
+`OFS_SSO_SECRET` is set in both apps, use door 1.
+
+### Roles
+
+| Role | Reaches the desk | PII unmasked |
+|---|---|---|
+| `SuperAdmin` (`{"pages":["*"]}`) | yes, nothing to grant | yes |
+| `Admin` | yes, `ofs-desk` granted on first app start | no |
+| `OFS-Backoffice` | yes | yes (`ofs-desk:pii`) |
+| anything else | only if granted `ofs-desk` | only with `:pii` |
+
+Create the role and its first user with
+[`docs/sql/ofs_backoffice_role.sql`](docs/sql/ofs_backoffice_role.sql), run in
+pgAdmin against the **Ananta** database.
 
 ## Archive
 

@@ -1,0 +1,47 @@
+/* Desk sign-in — same design language as the client journey, sized for one task. */
+.lg-body{min-height:100vh;display:grid;place-items:center;padding:28px 18px}
+.lg-wrap{width:100%;max-width:412px}
+.lg-brand{display:flex;align-items:center;gap:14px;margin:0 0 18px}
+.lg-brand img{display:block;border-radius:12px}
+.lg-brand .t{font-size:19px;font-weight:600;color:var(--navy);letter-spacing:-.01em}
+.lg-brand .s{font-size:12px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase}
+
+.lg-card{background:var(--white);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);overflow:hidden}
+.lg-card .strip{height:4px;background:linear-gradient(90deg,var(--navy),var(--teal) 55%,var(--cyan))}
+.lg-card .pad{padding:26px 26px 22px}
+.lg-h{font-size:20px;margin:0 0 5px}
+.lg-sub{margin:0 0 20px;color:var(--muted);font-size:13px}
+
+.fl{display:block;font-size:12px;font-weight:600;color:var(--ink);margin:0 0 6px}
+.inp{width:100%;padding:11px 13px;font:inherit;color:var(--ink);background:#fbfdfe;
+  border:1px solid var(--line);border-radius:var(--r-s);outline:none;transition:border-color .15s,box-shadow .15s}
+.inp:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(23,180,185,.16);background:#fff}
+.inp+.fl{margin-top:15px}
+.pw{position:relative}
+.pw .rev{position:absolute;right:6px;top:6px;bottom:6px;padding:0 10px;font-size:11.5px;font-weight:600;
+  color:var(--navy);background:transparent;border:0;border-radius:7px}
+.pw .rev:hover{background:var(--line-s)}
+.otp{font-family:var(--mono);font-size:22px;letter-spacing:.5em;text-align:center;padding:12px 13px}
+
+.btn{width:100%;margin-top:18px;padding:12px 14px;font-size:14px;font-weight:600;
+  border:1px solid transparent;border-radius:var(--r-s);transition:filter .15s,background .15s}
+.btn[disabled]{opacity:.6;cursor:not-allowed}
+.btn-p{color:#fff;background:linear-gradient(135deg,var(--navy),var(--navy-d))}
+.btn-p:hover:not([disabled]){filter:brightness(1.08)}
+.btn-o{margin-top:9px;color:var(--navy);background:#fff;border-color:var(--line)}
+.btn-o:hover{background:var(--line-s)}
+
+.err{margin-top:14px;padding:10px 12px;font-size:12.5px;border-radius:var(--r-s);
+  color:#8c2b34;background:rgba(214,69,80,.09);border:1px solid rgba(214,69,80,.2)}
+.lg-note{margin:0 0 16px;padding:10px 12px;font-size:12.5px;border-radius:var(--r-s);
+  color:#8a5a12;background:rgba(217,138,31,.11);border:1px solid rgba(217,138,31,.24)}
+.test{margin-top:12px;padding:10px 12px;font-size:12.5px;border-radius:var(--r-s);
+  color:#07845f;background:rgba(11,177,131,.1);border:1px solid rgba(11,177,131,.22)}
+.test b{font-family:var(--mono);font-size:15px;letter-spacing:.18em}
+
+.lg-alt{margin-top:22px;padding-top:16px;border-top:1px solid var(--line-s);
+  font-size:12px;color:var(--muted);line-height:1.7}
+.lg-alt a{font-weight:600;text-decoration:none}
+.lg-alt a:hover{text-decoration:underline}
+.lg-foot{margin:16px 2px 0;font-size:11.5px;color:var(--muted);text-align:center}
