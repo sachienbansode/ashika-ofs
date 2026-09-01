@@ -22,6 +22,8 @@ db/anantaAdapter.js     uat_ananta_staging pool (LD read + page_registry write)
 db/ldAdapter.js         client lookups: findByUcc / findMany / search / exists / enrich
 db/adminAdapter.js      "admin-staging-api" (users, roles, page_registry) on the Ananta pool
 db/smoke.js             npm run smoke - proves both connections and the LD columns
+scripts/check-env.js    npm run check-env - validates .env before anything connects
+deploy/nginx/ofs.conf   nginx server block (own block; never co-hosted)
 db/migrations/001_*.sql ofs schema: setting, issue, bid, margin(+log), allotment, export_log, audit
 lib/domain.js           SEBI/exchange bid rules ported from the prototype (server-side truth)
 lib/exchange/nse.js     NSE e-OFS bulk-upload mapping      <- pin columns from the member circular
@@ -37,8 +39,9 @@ tests/                  node --test: domain rules, NSE/BSE adapters, CSV parser
 
 ## Run
 ```bash
-cp .env.example .env         # fill both DB connections, JWT_SECRET, CORS_ORIGINS
+cp .env.example .env         # fill both DB connections, JWT_SECRET, API_KEY_SECRET, CORS_ORIGINS
 npm install
+npm run check-env            # missing or placeholder values, before anything connects
 npm run smoke                # verify both databases and the LD tables BEFORE migrating
 npm run migrate              # applies db/migrations/*.sql to ofs_bids, tracked in ofs._migration
 npm start                    # binds 127.0.0.1:4011, nginx in front
@@ -67,6 +70,13 @@ server-side). Exchange files: preview, then download the NSE or BSE file and upl
 ## Repository
 
 `git@github.com:sachienbansode/ashika-ofs.git` (private) — branch `main`.
+
+## Deploy
+
+**Azure VM (Ubuntu) — full runbook: [`docs/DEPLOY_AZURE.md`](docs/DEPLOY_AZURE.md).**
+Covers provisioning, the AWS security-group rule the cross-cloud DB hop needs, PM2,
+nginx + Let's Encrypt, and a symptom-to-cause table. nginx template:
+[`deploy/nginx/ofs.conf`](deploy/nginx/ofs.conf).
 
 ## Deploy — two blocks, always
 
