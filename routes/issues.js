@@ -5,6 +5,8 @@ const { SCHEMA, rows, one, query } = require('../db/ofsAdapter');
 const { requirePage, requireEdit } = require('../middleware/pageAccess');
 const { issueStatus, catStatus } = require('../lib/domain');
 const audit = require('../lib/audit');
+const { sourceFor } = require('../lib/issueSource');
+const { upsertIssues } = require('../lib/issueSync');
 
 const router = express.Router();
 const PAGE = 'ofs-masters';
@@ -97,6 +99,54 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
     await query(`DELETE FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [req.params.id]);
     await audit.log(req, 'delete', 'ofs_issue', req.params.id, before, null);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+/**
+ * GET /api/issues/sync/preview?exchange=BSE — fetch and report, write nothing.
+ * The desk sees what would land before anything does.
+ */
+router.get('/sync/preview', requirePage(PAGE), async (req, res, next) => {
+  try {
+    const src = sourceFor(req.query.exchange || 'BSE');
+    const out = await src.fetchIssues();
+    res.json({
+      exchange: src.EXCHANGE,
+      source: out.source,
+      found: out.issues.length,
+      issues: out.issues,
+      rejected: out.rejected.map((r) => ({ reason: r.reason })),
+      reachable: out.attempts.some((a) => a.ok),
+      attempts: out.attempts.map((a) => ({
+        url: a.url, status: a.status, rows: a.rows, error: a.error
+      }))
+    });
+  } catch (e) { next(e); }
+});
+
+/** POST /api/issues/sync { exchange } — fetch and write. */
+router.post('/sync', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    const src = sourceFor((req.body && req.body.exchange) || 'BSE');
+    const out = await src.fetchIssues();
+
+    if (!out.source) {
+      return res.status(502).json({
+        error: 'exchange_unreachable',
+        message: 'No endpoint returned usable issue data. Run `npm run fetch-issues -- --raw` on the server to see what came back.',
+        attempts: out.attempts.map((a) => ({ url: a.url, status: a.status, error: a.error }))
+      });
+    }
+
+    const r = await upsertIssues(out.issues, String(req.user.email || req.user.id));
+    await audit.log(req, 'sync_issues', 'ofs_issue', null, null,
+      { exchange: src.EXCHANGE, source: out.source, ...r, skippedRows: out.rejected.length });
+
+    res.json({
+      exchange: src.EXCHANGE, source: out.source,
+      found: out.issues.length, inserted: r.inserted, updated: r.updated,
+      unchanged: r.skipped, rejected: out.rejected.length, detail: r.detail
+    });
   } catch (e) { next(e); }
 });
 

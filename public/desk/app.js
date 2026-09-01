@@ -525,6 +525,42 @@ async function saveIssue() {
   } catch (e) { toast('Save failed', (e.body && e.body.field) || (e.body && e.body.error) || e.message, 'bad'); }
 }
 
+/**
+ * Pull the issue master from the exchange. Preview first, always: the desk sees what
+ * would land, and only then decides. The exchange owns the facts; a refresh never
+ * reopens an issue the desk has suspended.
+ */
+async function syncIssues() {
+  var ex = $('#miSyncEx').value;
+  var btn = $('#miSync');
+  btn.disabled = true; btn.textContent = 'Fetching ' + ex + '…';
+  try {
+    var p = await api('/issues/sync/preview?exchange=' + encodeURIComponent(ex));
+    if (!p.found) {
+      toast('Nothing found on ' + ex,
+        p.reachable ? 'Reached the exchange but no issue rows were returned — there may be none open.'
+                    : 'Could not reach the exchange from the server.', 'bad');
+      console.warn('[sync] attempts:', p.attempts);
+      return;
+    }
+    var lines = p.issues.slice(0, 10).map(function (i) {
+      return i.symbol + ' — floor ' + inr(i.floor_price) + ', ' + dt(i.hni_open) + ' → ' + dt(i.ret_close);
+    }).join('\n');
+    if (!window.confirm('Import ' + p.found + ' issue(s) from ' + ex + '?\n\n' + lines +
+        (p.found > 10 ? '\n…and ' + (p.found - 10) + ' more' : '') +
+        (p.rejected.length ? '\n\n' + p.rejected.length + ' row(s) will be skipped as incomplete.' : ''))) return;
+
+    var r = await api('/issues/sync', { method: 'POST', body: { exchange: ex } });
+    toast('Issue master updated',
+      r.inserted + ' new, ' + r.updated + ' updated, ' + r.unchanged + ' unchanged', 'ok');
+    loadIssues(); loadDash();
+  } catch (e) {
+    toast('Sync failed', (e.body && e.body.message) || e.message, 'bad');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Fetch from exchange';
+  }
+}
+
 async function loadMargins() {
   try {
     var d = await api('/margin');
@@ -847,6 +883,7 @@ async function boot() {
     if (b) downloadExport(b.dataset.part);
   });
   $('#miNew').addEventListener('click', issueForm);
+  $('#miSync').addEventListener('click', syncIssues);
   $('#miImport').addEventListener('click', importIssues);
   $('#miTemplate').addEventListener('click', function () { downloadText('ofs_issue_template.csv', ISSUE_TEMPLATE); });
   $('#mgSet').addEventListener('click', setMargin);

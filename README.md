@@ -156,6 +156,38 @@ session too.
 are in [`docs/platform-patch/`](docs/platform-patch/). Until that is deployed and
 `OFS_SSO_SECRET` is set in both apps, the desk shows a sign-in prompt and nothing else.
 
+## Masters are fetched, not typed
+
+Both masters come from upstream:
+
+- **Clients** — read live from LD on every request (`db/ldAdapter.js`). Never copied
+  into this database; only the UCC is stored as a reference.
+- **Issues** — pulled from the exchange (`lib/issueSource/`). Masters → *Fetch from
+  exchange* previews what would land, then writes it. Manual entry and CSV import
+  remain as a fallback for when a source is unreachable.
+
+The exchange owns the facts — floor price, windows, quantities — and the desk owns
+its own decisions, so a refresh updates exchange fields but never touches `status`:
+an issue the desk suspended stays suspended. A row missing a symbol, floor price,
+ISIN or a usable date is rejected with a reason rather than written half-formed.
+
+Both exchanges refuse plain programmatic requests — BSE answers 403 without
+browser-like headers, NSE needs cookies from a prior page view — so `lib/issueSource/http.js`
+sends a real User-Agent, a matching Referer and a cookie jar. The data is public;
+this is not a paywall, and request volume is kept low.
+
+**The endpoint paths are not documented and do move.** Each source therefore tries
+several candidates and reports what every one answered:
+
+```bash
+npm run fetch-issues                  # both exchanges, report only, writes nothing
+npm run fetch-issues -- --source BSE --raw
+npm run fetch-issues -- --apply       # write what was found
+```
+
+Run it on the server, where the exchange sites are reachable. If nothing parses,
+`--raw` prints what actually came back — that is what the parser gets matched to.
+
 ## Client sign-in
 
 The Ashika website links straight to `/` — there is no SSO token to trust, so the app

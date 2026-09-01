@@ -42,7 +42,7 @@ under Markets → Offer for Sale.
 | 3 | Website → module SSO | **No SSO.** The website simply links to the OFS app; the client signs in here | `routes/clientAuth.js` |
 | 4 | Client sign-in method | **Mobile + registered email, then a one-time code** to the address on file | `lib/clientAuth.js`, `public/client/` |
 | 5 | Staff sign-in | **Portal SSO handoff**, single-use ticket, MFA inherited from the portal | `lib/sso.js`, `docs/platform-patch/` |
-| 6 | Issue-master ingestion | **Manual entry + CSV import**; no exchange feed in Phase 1 | Masters → Import issues CSV |
+| 6 | Issue-master ingestion | **Auto-fetched from the exchange**, with manual entry and CSV as fallback | `lib/issueSource/`, Masters → Fetch from exchange |
 | 7 | Margin source | **Snapshot table**, set by the desk or imported by CSV — no RMS read API exists | `ofs.ofs_margin` |
 | 8 | Client eligibility | Only clients **Active** in the client master may bid (36,663 of 136,129) | `db/ldAdapter.js`, `lib/domain.js` |
 | 9 | Database topology | Own database `ofs_bids`; LD read from `uat_ananta_staging` | `db/pgConfig.js` |

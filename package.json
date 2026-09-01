@@ -14,7 +14,8 @@
     "migrate": "node db/migrate.js",
     "test": "node --test",
     "smoke": "node db/smoke.js",
-    "check-env": "node scripts/check-env.js"
+    "check-env": "node scripts/check-env.js",
+    "fetch-issues": "node scripts/fetch-issues.js"
   },
   "dependencies": {
     "compression": "^1.7.4",
