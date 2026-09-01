@@ -88,6 +88,25 @@ test('bid value uses the category minimum for a cut-off bid', () => {
   assert.equal(d.bidValue(ISSUE, 'HNI', 100, 390, false), 39000);
 });
 
+test('an inactive client cannot bid', () => {
+  const good = { category: 'HNI', qty: 1000, price: 390, is_cutoff: false, client_ucc: 'ASH2001' };
+  // no client context supplied (e.g. a dry-run) => the rule stays silent
+  assert.deepEqual(errs(good), []);
+  assert.deepEqual(errs(good, { client: { found: true, active: true } }), []);
+
+  const inactive = errs(good, { client: { found: true, active: false, status: 'Closed' } });
+  assert.ok(inactive.some((e) => /ASH2001 is not active \(Closed\)/.test(e)), inactive.join(' | '));
+
+  const unknown = errs(good, { client: { found: false, active: false } });
+  assert.ok(unknown.some((e) => /No client found/.test(e)));
+});
+
+test('an inactive client is refused even when everything else is valid', () => {
+  const e = errs({ category: 'HNI', qty: 1000, price: 390, is_cutoff: false },
+    { client: { found: true, active: false } });
+  assert.equal(e.length, 1, 'exactly one complaint: eligibility');
+});
+
 test('a suspended issue accepts nothing', () => {
   const issue = Object.assign({}, ISSUE, { status: 'Suspended' });
   assert.ok(d.validateBid(issue, { category: 'HNI', qty: 1000, price: 390, is_cutoff: false }, ctx())

@@ -51,6 +51,7 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
 
 async function loadContext(issueId, ucc, editingId) {
   const s = await settings.all();
+  const el = await ld.eligibility(ucc);
   const issue = await one(`SELECT * FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [issueId]);
   const margin = await one(`SELECT available FROM ${SCHEMA}.ofs_margin WHERE client_ucc = $1`, [ucc]);
   const used = await one(
@@ -67,6 +68,7 @@ async function loadContext(issueId, ucc, editingId) {
     editingId ? [ucc, issueId, editingId] : [ucc, issueId]);
   return {
     settings: s, issue,
+    client: { found: el.found, active: el.active, status: el.client && el.client.client_status },
     availableMargin: Number(margin && margin.available) || 0,
     marginUsed: Number(used && used.v) || 0,
     usedValueThisIssue: Number(usedIssue && usedIssue.v) || 0,
@@ -94,11 +96,8 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
     const b = normalise(req.body || {});
     if (!b.issue_id || !b.client_ucc) return res.status(400).json({ error: 'missing_field' });
 
-    if (!(await ld.exists(b.client_ucc))) {
-      return res.status(404).json({ error: 'unknown_client', ucc: b.client_ucc });
-    }
-
     const ctx = await loadContext(b.issue_id, b.client_ucc, null);
+    if (!ctx.client.found) return res.status(404).json({ error: 'unknown_client', ucc: b.client_ucc });
     if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });
 
     const errs = validateBid(ctx.issue, b, ctx);
@@ -184,7 +183,8 @@ router.post('/validate', requirePage(PAGE), async (req, res, next) => {
       value: bidValue(ctx.issue, b.category, b.qty, b.price, b.is_cutoff),
       min_price: minPrice(ctx.issue, b.category),
       available_margin: ctx.availableMargin,
-      free_margin: ctx.availableMargin - ctx.marginUsed
+      free_margin: ctx.availableMargin - ctx.marginUsed,
+      client_active: ctx.client.active
     });
   } catch (e) { next(e); }
 });

@@ -36,8 +36,14 @@
 | Schema | Use |
 |---|---|
 | `dwh.tbl_user_info` | Client master / KYC identity, keyed by **UCC** (upper/trim). Verified columns (2026-09-01): **ucc, pan, mobile, email, first_name, middle_name, last_name, client_name, name_asper_pan, ucc_client_category, depository, dp_name, dp_account_no, dpid, status, poa, dob, gender, occupation, address, city, state, country, pincode, is_new_user, mtf_status, etl_loaded_at**. ⚠️ There is **no `name`, `branch` or `category`** column - earlier drafts of this file said otherwise. Display name = `name_asper_pan` → `client_name` → `first/middle/last`; client type = `ucc_client_category`; branch comes from `stg.ask_clientmast.branch_id`. |
-| `stg.ask_clientmast` | `branch_id`, **`last_traded_date`** (authoritative — never derive traded-date elsewhere), `ctermcode`(UCC). |
+| `stg.ask_clientmast` | The richer client record — keyed by `ctermcode` (UCC). Verified columns (2026-09-01): **user_id, cclientname, ctermcode, cstatus, branch_id, first/middle/last_name, name_asper_pan, gender, salutation, marital_status, date_of_birth, occupation, mobile, email_id, email_cc, pan, aadhar, activation_status, client_category, annual_income, authorize_type, npoliticalexposed, income, networth, gst_no, refer_by, unique_id, account_opened, last_traded_date, address1-3, city, state, country, pin_code, residential_status, corr_address1-3, cmtfflag, modified_date, modified_status, etl_loaded_at, etl_load_type**. `last_traded_date` is authoritative — never derive traded-date elsewhere. **OFS deliberately does not select `aadhar`, `annual_income`, `income`, `networth` or `gst_no`** — a bidding desk has no need for them, and not fetching them keeps them out of every OFS view and export. |
 | `dwh.mis_branch_dim` | Branch names/regions if OFS needs branch labels. |
+
+**Client eligibility.** `ldAdapter` derives `is_active` from `ask_clientmast.cstatus`,
+`ask_clientmast.activation_status` and `tbl_user_info.status` — all must agree, and a client
+that cannot be positively confirmed active is treated as inactive. `validateBid` refuses a bid
+for such a client, so an ineligible UCC is caught at bid time instead of coming back as an
+exchange rejection after the desk has uploaded the file.
 
 > Identity join convention used across the app: normalise UCC as `upper(btrim(ucc))`; normalise phone to last-10-digits `right(regexp_replace(col,'[^0-9]','','g'),10)`. `db/ldAdapter.js` is the single place this SQL lives — `findByUcc`, `findMany`, `search`, `exists`, `enrich(rows)`. Never write a query that names `dwh.` or `stg.` from the OFS pool; it will not resolve.
 

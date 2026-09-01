@@ -54,7 +54,10 @@ async function main() {
         ['ucc', 'pan', 'mobile', 'email', 'client_name', 'first_name', 'middle_name', 'last_name',
          'ucc_client_category', 'depository', 'dp_name', 'dp_account_no', 'status', 'poa', 'city', 'state'],
         ['name_asper_pan', 'etl_loaded_at']],
-      [ananta.STG, 'ask_clientmast', ['ctermcode', 'branch_id', 'last_traded_date'], []]
+      [ananta.STG, 'ask_clientmast',
+        ['ctermcode', 'cclientname', 'cstatus', 'activation_status', 'branch_id',
+         'client_category', 'email_id', 'mobile', 'name_asper_pan', 'last_traded_date'],
+        ['account_opened', 'residential_status']]
     ]) {
       const cols = await columnsOf(schema, table);
       if (!cols.length) { fail(schema + '.' + table, 'not found or not visible to this user'); continue; }
@@ -92,11 +95,16 @@ async function main() {
       console.log('        sample ucc=' + c.ucc + ' name=' + (c.name ? 'resolved' : 'EMPTY') +
                   ' pan=' + String(c.pan || '').slice(0, 3) + '***' +
                   ' mobile=***' + String(c.mobile || '').slice(-4) +
-                  ' category=' + (c.category || '-') + ' branch_id=' + (c.branch_id || '-'));
+                  ' category=' + (c.category || '-') + ' branch_id=' + (c.branch_id || '-') +
+                  ' active=' + c.is_active);
       const hit = await ld.findByUcc(c.ucc);
       (hit ? ok : fail)('ldAdapter.findByUcc round-trips');
       const many = await ld.findMany(sample.map((x) => x.ucc));
       (many.size === sample.length ? ok : warn)('ldAdapter.findMany', many.size + '/' + sample.length + ' resolved');
+      const act = await ananta.one(
+        `SELECT count(*) FILTER (WHERE lower(COALESCE(cstatus,'')) = 'active')::bigint AS active,
+                count(*)::bigint AS total FROM ${ananta.STG}.ask_clientmast`);
+      ok('clients active in the client master', act.active + ' of ' + act.total);
     } else {
       warn('no client rows', 'the desk will reject every bid with unknown_client');
     }
