@@ -69,7 +69,8 @@
   <section class="pane hide" id="pane-place">
     <div class="cards">
       <div class="card">
-        <h2 class="sec" style="margin-top:0">Bid on behalf of a client</h2>
+        <h2 class="sec" style="margin-top:0" id="pbTitle">Bid on behalf of a client</h2>
+        <div id="pbEditBar" class="note hide"></div>
         <div class="grid2">
           <label class="f"><span class="k">Issue</span><select id="pbIssue" style="width:100%"></select></label>
           <label class="f"><span class="k">Client UCC</span><input type="text" id="pbUcc" placeholder="ASH1001" style="width:100%"></label>
@@ -117,8 +118,9 @@
       <button class="mini" data-mtab="margins">Margins</button>
       <button class="mini" data-mtab="settings">Settings</button>
     </div>
+    <div id="importPane" class="hide"></div>
     <div id="mIssues">
-      <div class="bar"><button class="btn ghost" id="miNew">Add issue</button></div>
+      <div class="bar"><button class="btn ghost" id="miNew">Add issue</button><button class="btn ghost" id="miImport">Import issues CSV</button><button class="mini" id="miTemplate">Download template</button></div>
       <div id="miForm" class="hide"></div>
       <div class="wrap"><table id="issueTbl"></table></div>
     </div>
@@ -127,6 +129,8 @@
         <input type="text" id="mgUcc" placeholder="Client UCC">
         <input type="number" id="mgAmt" placeholder="Available margin" step="1" min="0">
         <button class="btn" id="mgSet">Set margin</button>
+        <button class="btn ghost" id="mgImport">Import margins CSV</button>
+        <button class="mini" id="mgTemplate">Download template</button>
       </div>
       <div class="wrap"><table id="marginTbl"></table></div>
     </div>
@@ -135,7 +139,9 @@
 
 </main>
 
+<input type="file" id="filePick" accept=".csv,text/csv" class="hide">
 <div class="toast" id="toast"></div>
+<script src="csv.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

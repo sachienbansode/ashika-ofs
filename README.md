@@ -17,7 +17,8 @@ lib/pageRegistry.js     self-registers pages: ofs-desk, ofs-masters
 middleware/auth.js      JWT identity + live role/perm load each request
 middleware/pageAccess.js requirePage / requireEdit / canViewPII ('*' = full access only)
 routes/                 dashboard, issues, bids, clients, margin, export, allotment
-public/                 CSP-safe desk SPA (no inline script, no CDN, no chart lib)
+public/                 CSP-safe desk SPA (no inline script, no CDN, no chart lib); csv.js is shared with tests/
+tests/                  node --test: domain rules, NSE/BSE adapters, CSV parser
 ```
 
 ## Run
@@ -26,7 +27,15 @@ cp .env.example .env         # fill PG_*, PGPASSWORD, JWT_SECRET, CORS_ORIGINS
 npm install
 npm run migrate              # applies db/migrations/*.sql, tracked in ofs._migration
 npm start                    # binds 127.0.0.1:4011, nginx in front
+npm test                     # node --test: domain rules, exchange adapters, CSV parser (no DB needed)
 ```
+
+## Desk workflow
+Masters → Issues: add an issue by hand or **Import issues CSV** (a template download is next to the
+button). Masters → Margins: set one client, or **Import margins CSV** — RMS has no available-margin
+read API yet, so this snapshot is the gate on every bid. Dashboard watches the live book; Bid book
+filters it and offers **Modify** / **Cancel** per bid (modify reuses the place-bid form and re-validates
+server-side). Exchange files: preview, then download the NSE or BSE file and upload it on e-OFS / iBBS.
 
 ## API
 | Method | Path | Page gate |

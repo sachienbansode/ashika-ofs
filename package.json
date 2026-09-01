@@ -4,12 +4,15 @@
   "private": true,
   "description": "Ashika OFS module - OFS desk dashboard + NSE/BSE bid-file generation. Separate app; reuses omnenest-uploader-api platform services (see REUSE.md).",
   "main": "server.js",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
     "check": "node -e \"require('fs').readdirSync('.',{recursive:true}).filter(f=>f.endsWith('.js')&&!f.includes('node_modules')).forEach(f=>{require('child_process').execSync('node --check '+JSON.stringify(f));console.log('ok '+f)})\"",
-    "migrate": "node db/migrate.js"
+    "migrate": "node db/migrate.js",
+    "test": "node --test"
   },
   "dependencies": {
     "compression": "^1.7.4",
