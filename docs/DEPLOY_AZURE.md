@@ -198,3 +198,5 @@ pm2 logs ashika-ofs-app --lines 20
 | certbot fails validation | DNS is not pointing at the VM yet, or NSG/ufw is blocking port 80. |
 | Works, then dies after reboot | `pm2 startup systemd` was never run, or `pm2 save` was not re-run after it. |
 | `npm ci` → `EUSAGE ... existing package-lock.json` | The lockfile is missing from the checkout. `git pull` (it is committed), or fall back to `npm install --omit=dev`. |
+| `git pull` → "untracked working tree files would be overwritten" | An earlier `npm install` left its own `package-lock.json`. Deploy with `git fetch origin && git reset --hard origin/main` instead — it never merges, so this cannot happen. |
+| `password authentication failed for user ...` | The credential is wrong for that database. Compare the two `_PG_PASSWORD` values (`md5sum` them rather than printing), and quote any password containing `#` — dotenv treats an unquoted `#` as a comment and truncates the value. |
