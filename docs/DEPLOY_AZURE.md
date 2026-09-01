@@ -216,20 +216,20 @@ git commit -m "ofs: <change>"
 git push origin main
 ```
 
-Azure VM — **`git fetch` before `reset`**, the stale cached-ref bug has bitten
-repeatedly:
+Azure VM — one command:
 
 ```bash
-cd /var/apps/ashika-ofs-app
-git fetch origin
-git reset --hard origin/main
-npm ci --omit=dev          # only when package.json changed
-npm run migrate            # only when db/migrations/ changed
-pm2 restart ashika-ofs-app
-pm2 logs ashika-ofs-app --lines 20
+cd /var/apps/ashika-ofs-app && ./scripts/deploy.sh
 ```
 
-`git reset --hard` does not touch `.env` — it is gitignored.
+It fetches, resets to `origin/main`, reinstalls only if dependencies moved, migrates
+only if `db/migrations/` changed, restarts PM2 and fails loudly if `/readyz` is not
+healthy afterwards.
+
+**It never uses `git pull`.** A merge can be blocked by an untracked file — an
+npm-generated `package-lock.json` did exactly that — leaving the box on old code
+while the deploy appears to have worked. `fetch` + `reset --hard` makes the working
+tree match the remote outright. `.env` is gitignored, so it survives untouched.
 
 ---
 

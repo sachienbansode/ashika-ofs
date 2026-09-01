@@ -103,14 +103,10 @@ npm run migrate
 pm2 start ecosystem.config.js && pm2 save
 ```
 
-EC2 (`git fetch` BEFORE reset — stale cached-ref bug):
+Server — one command, and never `git pull` (a merge can be blocked by an untracked
+file, leaving the box on old code while the deploy looks fine):
 ```bash
-cd /var/apps/ashika-ofs-app
-git fetch origin
-git reset --hard origin/main
-npm ci --omit=dev
-pm2 restart ashika-ofs-app
-pm2 logs ashika-ofs-app --lines 20
+cd /var/apps/ashika-ofs-app && ./scripts/deploy.sh
 ```
 OFS migrations run against **`ofs_bids`** on `13.233.106.37` — never against `uat_ananta_staging`,
 which is production. Password via `PGPASSWORD` only.
