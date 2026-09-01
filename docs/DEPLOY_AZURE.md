@@ -126,6 +126,37 @@ pm2 startup systemd                     # prints a sudo command — run it, then
 `ecosystem.config.js` has `cwd: /var/apps/ashika-ofs-app`. If you cloned somewhere
 else, change it there rather than passing flags.
 
+## 6a. Reaching it on the IP first (no domain yet)
+
+To get the desk usable at `http://<vm-public-ip>/` before DNS and a certificate exist:
+
+```bash
+sudo cp deploy/nginx/ofs-ip.conf /etc/nginx/sites-available/ofs.conf
+sudo ln -s /etc/nginx/sites-available/ofs.conf /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+sudo ufw allow 'Nginx Full'
+```
+
+Open port 80 inbound in the Azure **NSG** as well — ufw and the NSG are independent
+layers. Restrict the source to your office/VPN range, not `0.0.0.0/0`.
+
+Then point the app at the same address, or the browser will refuse its own API calls:
+
+```bash
+# in .env
+CORS_ORIGINS=http://<vm-public-ip>
+APP_URL=http://<vm-public-ip>
+```
+```bash
+pm2 restart ashika-ofs-app
+curl -s http://<vm-public-ip>/healthz
+```
+
+⚠ There is no TLS on this path: the staff JWT and any unmasked client PII cross the
+network in clear text. Fine for internal testing from known addresses; move to the
+TLS config below before the desk places real bids.
+
 ## 6. nginx + TLS
 
 ```bash
@@ -198,5 +229,6 @@ pm2 logs ashika-ofs-app --lines 20
 | certbot fails validation | DNS is not pointing at the VM yet, or NSG/ufw is blocking port 80. |
 | Works, then dies after reboot | `pm2 startup systemd` was never run, or `pm2 save` was not re-run after it. |
 | `npm ci` → `EUSAGE ... existing package-lock.json` | The lockfile is missing from the checkout. `git pull` (it is committed), or fall back to `npm install --omit=dev`. |
+| `page registration failed: column "..." does not exist` | The OFS PAGES insert does not match the platform's page_registry shape (key, label, nav_ids TEXT[], sort_order, is_active — no `description`). The app still serves, but nobody can be granted the page. |
 | `git pull` → "untracked working tree files would be overwritten" | An earlier `npm install` left its own `package-lock.json`. Deploy with `git fetch origin && git reset --hard origin/main` instead — it never merges, so this cannot happen. |
 | `password authentication failed for user ...` | The credential is wrong for that database. Compare the two `_PG_PASSWORD` values (`md5sum` them rather than printing), and quote any password containing `#` — dotenv treats an unquoted `#` as a comment and truncates the value. |

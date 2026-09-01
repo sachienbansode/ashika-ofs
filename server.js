@@ -113,7 +113,12 @@ async function start() {
   console.log('[boot] ofs db    :', ofsDb.label());
   console.log('[boot] ananta db :', ananta.label());
   try { console.log('[boot] pages registered:', (await registerPages()).join(', ')); }
-  catch (e) { console.warn('[boot] page registration skipped:', e.message); }
+  catch (e) {
+    // Not fatal - the app still serves - but nobody can be granted the page, so
+    // say so plainly rather than leaving a one-line warning to be scrolled past.
+    console.error('[boot] PAGE REGISTRATION FAILED:', e.message);
+    console.error('[boot] the desk will show "ofs-desk grant required" until this is fixed');
+  }
   app.listen(PORT, HOST, () => console.log(`[boot] ashika-ofs-app listening on ${HOST}:${PORT}`));
 }
 
