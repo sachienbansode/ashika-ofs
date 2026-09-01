@@ -160,8 +160,14 @@ async function loadDash() {
     renderDash(d);
     fillIssueSelects();
   } catch (e) {
-    if (e.status === 401) toast('Not signed in', 'This desk needs a platform session with the ofs-desk grant.', 'bad');
-    else toast('Dashboard failed', e.message, 'bad');
+    if (e.status === 401) {
+      // The session died under us - stop polling and say so, rather than
+      // stacking an error toast every few seconds behind a stale dashboard.
+      if (STATE.timer) clearInterval(STATE.timer);
+      await checkSession();
+    } else {
+      toast('Dashboard failed', e.message, 'bad');
+    }
   }
 }
 
@@ -694,15 +700,63 @@ function setAutoRefresh() {
   }, ms);
 }
 
-async function boot() {
+/* ---------------- session ---------------- */
+function showGate(title, message, why) {
+  var portal = (window.OFS_PORTAL_URL || '').trim();
+  $('#gate').classList.remove('hide');
+  $('#gate').innerHTML = '<div class="box">' +
+    '<h1>' + esc(title) + '</h1>' +
+    '<p>' + esc(message) + '</p>' +
+    (portal ? '<a class="btn" href="' + esc(portal) + '">Open the portal</a>' : '') +
+    (why ? '<div class="why">' + esc(why) + '</div>' : '') +
+    '</div>';
+}
+
+/**
+ * There is no login form here by design: the portal authenticates (password, plus
+ * OTP where the account requires it) and hands over a one-time ticket.
+ */
+async function checkSession() {
   try {
     var me = await api('/me');
     $('#whoName').textContent = me.user.email || ('user #' + me.user.id);
     $('#whoRole').textContent = me.user.role || '';
+    $('#btnSignOut').classList.remove('hide');
+
+    var pages = (me.permissions && me.permissions.pages) || [];
+    var granted = pages.indexOf('*') >= 0 || pages.some(function (p) {
+      return String(p).split(':')[0] === 'ofs-desk';
+    });
+    if (!granted) {
+      showGate('No access to the OFS desk',
+        'Your account is signed in, but the ' + (me.user.role || 'assigned') +
+        ' role does not include the OFS desk.',
+        'An administrator grants the "ofs-desk" page to your role in the Admin console.');
+      return false;
+    }
+    return true;
   } catch (e) {
-    $('#whoName').textContent = 'Not signed in';
-    $('#whoRole').textContent = 'ofs-desk grant required';
+    if (e.status === 401) {
+      var stale = e.body && e.body.error === 'session_superseded';
+      showGate(stale ? 'Signed in elsewhere' : 'Sign in required',
+        stale
+          ? 'This session ended because the account signed in somewhere else. Open the OFS desk from the portal again.'
+          : 'Open the OFS desk from the portal — it signs you in and brings you straight back here.',
+        'The desk has no separate password: the portal handles sign-in, including OTP where your account requires it.');
+    } else {
+      showGate('Cannot reach the server', e.message, 'Check that the app is running and try again.');
+    }
+    return false;
   }
+}
+
+async function signOut() {
+  try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (e) {}
+  location.reload();
+}
+
+async function boot() {
+  var ready = await checkSession();
 
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
   $$('[data-mtab]').forEach(function (b) { b.addEventListener('click', function () { showMTab(b.dataset.mtab); }); });
@@ -735,10 +789,16 @@ async function boot() {
   $('#mgImport').addEventListener('click', importMargins);
   $('#mgTemplate').addEventListener('click', function () { downloadText('ofs_margin_template.csv', MARGIN_TEMPLATE); });
 
-  await loadDash();
-  setAutoRefresh();
+  $('#btnSignOut').addEventListener('click', signOut);
+
   tickClock();
   setInterval(tickClock, 1000);
+
+  // Nothing below is worth doing without a usable session - every call would 401.
+  if (!ready) return;
+
+  await loadDash();
+  setAutoRefresh();
 }
 
 document.addEventListener('DOMContentLoaded', boot);

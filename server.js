@@ -73,6 +73,9 @@ app.get('/readyz', async (req, res) => {
   res.status(out.ok ? 200 : 503).json(out);
 });
 
+/* ---- session endpoints: deliberately BEFORE authMiddleware ---- */
+app.use('/auth', require('./routes/auth'));
+
 /* ---- API: authenticated, and every mount gated with requirePage ---- */
 const api = express.Router();
 api.use(apiLimiter, authMiddleware);
@@ -96,6 +99,18 @@ api.use('/export',    require('./routes/export'));
 api.use('/allotment', require('./routes/allotment'));
 
 app.use('/api', api);
+
+/* ---- runtime config for the SPA ----
+   Served as a script rather than inlined, because the CSP allows 'self' scripts
+   only. Public values only: never put a secret here. */
+app.get('/config.js', (req, res) => {
+  const cfg = {
+    OFS_PORTAL_URL: process.env.PORTAL_URL || '',
+    OFS_APP_NAME: process.env.APP_NAME || 'ashika-ofs-app'
+  };
+  res.type('application/javascript').set('Cache-Control', 'no-store');
+  res.send(Object.keys(cfg).map((k) => 'window.' + k + ' = ' + JSON.stringify(cfg[k]) + ';').join('\n'));
+});
 
 /* ---- static desk UI ---- */
 app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html', maxAge: '5m' }));

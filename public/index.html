@@ -20,7 +20,10 @@
     <option value="30000">30s</option>
   </select>
   <div class="who"><b id="whoName">—</b><span id="whoRole"></span></div>
+  <button class="mini hide" id="btnSignOut">Sign out</button>
 </header>
+
+<div id="gate" class="hide"></div>
 
 <nav class="tabs" id="tabs">
   <button data-tab="dash" class="on">Dashboard</button>
@@ -141,6 +144,7 @@
 
 <input type="file" id="filePick" accept=".csv,text/csv" class="hide">
 <div class="toast" id="toast"></div>
+<script src="config.js"></script>
 <script src="csv.js"></script>
 <script src="app.js"></script>
 </body>

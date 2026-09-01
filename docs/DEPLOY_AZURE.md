@@ -187,6 +187,24 @@ the Admin console before the dashboard loads — until then the UI shows
 "ofs-desk grant required". Full access is `'*'` only; add `ofs-desk:pii` for the
 handful of users allowed to unmask client PII.
 
+## 7a. Single sign-on
+
+The desk has no login form — the portal signs users in. Apply the patch in
+`docs/platform-patch/` to `omnenest-uploader-api`, then set the **same** secret in
+both apps:
+
+```bash
+openssl rand -base64 48        # run once, paste into both .env files
+```
+
+| App | Keys |
+|---|---|
+| OFS | `OFS_SSO_SECRET`, `PORTAL_URL`, `COOKIE_SECURE` (true once on HTTPS) |
+| Platform | `OFS_SSO_SECRET` (same value), `OFS_APP_URL` |
+
+`npm run migrate` must have applied `002_sso_ticket.sql`, which is what enforces
+single use. Without the patch deployed, the desk shows a sign-in prompt and nothing else.
+
 ## 8. Routine deploys — two blocks, always
 
 Local (Windows PowerShell):
@@ -223,7 +241,11 @@ pm2 logs ashika-ofs-app --lines 20
 | `/readyz` 503, `no pg_hba.conf entry` | The DB reached you but rejects the host/user/SSL combination — check `pg_hba.conf` and that `*_PG_SSL=true`. |
 | 502 from nginx | Node is down or on another port: `pm2 logs`, then `curl localhost:4011/healthz`. |
 | Every login 401 | `JWT_SECRET` does not match the platform's. |
-| Dashboard says "ofs-desk grant required" | Token is valid; the role lacks the page grant (step 7). |
+| Dashboard says "No access to the OFS desk" | Signed in, but the role lacks the `ofs-desk` grant (step 7). |
+| Sign-in prompt that never goes away | The platform patch is not deployed, or `OFS_SSO_SECRET` differs between the two apps. |
+| `[sso] rejected: TICKET_REPLAYED` | The link was already redeemed — a refresh or a Back button. Open the desk from the portal again. Working as intended. |
+| `[sso] rejected: SSO_UNCONFIGURED` | `OFS_SSO_SECRET` is not set on this app. |
+| 401 `session_superseded` mid-session | The account signed in elsewhere; `users.active_sid` rotated. Also working as intended. |
 | Bids rejected `unknown_client` | The Ananta connection works but `dwh.tbl_user_info` has no such UCC — run `npm run smoke`. |
 | `/api/allotment/mail/status` → `password_undecryptable` | `API_KEY_SECRET` does not match the platform's. |
 | certbot fails validation | DNS is not pointing at the VM yet, or NSG/ufw is blocking port 80. |

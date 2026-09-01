@@ -66,6 +66,7 @@ server-side). Exchange files: preview, then download the NSE or BSE file and upl
 | GET | `/api/export/:exchange/preview`, `/download`, `/api/export/log` | ofs-desk |
 | GET/POST | `/api/allotment`, `/import`, `/mail`, `/mail/reset` | ofs-desk |
 | GET | `/api/allotment/mail/status` | ofs-desk |
+| GET | `/auth/sso?t=` · POST `/auth/sso/exchange` · POST `/auth/logout` | none — these establish the session |
 
 ## Repository
 
@@ -126,6 +127,24 @@ server {
   }
 }
 ```
+
+## Sign-in
+
+There is **no login form**. Staff authenticate at the existing portal (password,
+plus OTP where the account requires it); the portal mints a 60-second single-use
+ticket and redirects to `/auth/sso?t=…`, which redeems it and sets this app's own
+`ofs_session` cookie. The portal's cookie is scoped to its own origin and cannot
+reach this app, which is why OFS issues its own.
+
+The ticket asserts identity only — roles and permissions are re-read from
+`"admin-staging-api"` on every redemption **and** on every subsequent request, so a
+revoked grant or a disabled account takes effect immediately. It carries the portal's
+`sid`, checked against `users.active_sid`, so signing in elsewhere ends the OFS
+session too.
+
+**The platform needs a small addition for this** — a drop-in route and instructions
+are in [`docs/platform-patch/`](docs/platform-patch/). Until that is deployed and
+`OFS_SSO_SECRET` is set in both apps, the desk shows a sign-in prompt and nothing else.
 
 ## Allotment emails
 
