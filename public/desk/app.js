@@ -364,20 +364,36 @@ function endModify() {
 }
 
 /* ---------------- export ---------------- */
-function exportQuery() {
-  return ['issue_id=' + encodeURIComponent($('#exIssue').value || 'all'),
-          'category=' + encodeURIComponent($('#exCat').value),
-          'include_cancelled=' + encodeURIComponent($('#exCanc').value)].join('&');
+function exportQuery(part) {
+  var q = ['issue_id=' + encodeURIComponent($('#exIssue').value || 'all'),
+           'category=' + encodeURIComponent($('#exCat').value),
+           'include_cancelled=' + encodeURIComponent($('#exCanc').value)];
+  if (part) q.push('part=' + encodeURIComponent(part));
+  return q.join('&');
 }
 
 async function previewExport() {
   try {
     var d = await api('/export/' + $('#exExch').value + '/preview?' + exportQuery());
+    var parts = Number(d.parts) || 1;
     $('#exSummary').innerHTML = '<div class="bar"><span class="tag">' + esc(d.file_name) + '</span>' +
       '<span class="tag">' + d.row_count + ' row(s)</span>' +
       '<span class="tag">' + inr(d.total_qty, 0) + ' shares</span>' +
       '<span class="tag">' + crore(d.total_value) + '</span>' +
-      '<span class="tag">sha256 ' + esc(String(d.checksum).slice(0, 12)) + '…</span></div>';
+      '<span class="tag">sha256 ' + esc(String(d.checksum).slice(0, 12)) + '…</span>' +
+      (d.has_header_row === false ? '<span class="tag">no header row</span>' : '') +
+      '</div>' +
+      (parts > 1
+        ? '<div class="note">' + d.total_rows + ' bids exceed the ' + d.max_rows_per_file +
+          '-record limit for one file, so this exports as <b>' + parts + ' files</b>. ' +
+          'Download each part and upload all of them — the exchange takes only the first ' +
+          d.max_rows_per_file + ' rows of a single file.' +
+          '<div class="bar" style="margin:10px 0 0">' +
+          Array.from({ length: parts }, function (_, i) {
+            return '<button class="mini" data-part="' + (i + 1) + '">Download part ' +
+              (i + 1) + ' of ' + parts + '</button>';
+          }).join('') + '</div></div>'
+        : '');
     var lines = d.preview || [];
     if (!lines.length) { $('#exTbl').innerHTML = '<tbody><tr><td class="empty">No bid matches this selection.</td></tr></tbody>'; return; }
     var head = lines[0].split(',');
@@ -388,8 +404,8 @@ async function previewExport() {
   } catch (e) { toast('Preview failed', (e.body && e.body.error) || e.message, 'bad'); }
 }
 
-async function downloadExport() {
-  var url = '/api/export/' + $('#exExch').value + '/download?' + exportQuery();
+async function downloadExport(part) {
+  var url = '/api/export/' + $('#exExch').value + '/download?' + exportQuery(part);
   var headers = TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {};
   try {
     var res = await fetch(url, { headers: headers, credentials: 'same-origin' });
@@ -536,15 +552,59 @@ async function setMargin() {
   } catch (e) { toast('Failed', (e.body && e.body.error) || e.message, 'bad'); }
 }
 
+/**
+ * Settings are editable here rather than only in the database: the cut-off, the
+ * retail cap and the exchange category codes all change desk behaviour, and the
+ * desk should not need a DBA to move them. Each is validated server-side against
+ * what SEBI or the exchange actually permits, and each change is audited.
+ */
 async function loadSettings() {
   try {
     var d = await api('/settings');
-    var s = d.settings || {};
-    $('#setTbl').innerHTML = '<thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>' +
-      Object.keys(s).sort().map(function (k) {
-        return '<tr><td class="m">' + esc(k) + '</td><td class="m">' + esc(s[k]) + '</td></tr>';
+    var rows = d.editable || [];
+    $('#setTbl').innerHTML =
+      '<thead><tr><th>Setting</th><th style="width:180px">Value</th><th></th><th>What it does</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var input;
+        if (r.choices && r.choices.length > 1) {
+          input = '<select data-set="' + esc(r.key) + '">' + r.choices.map(function (c) {
+            return '<option' + (String(r.value) === c ? ' selected' : '') + '>' + esc(c) + '</option>';
+          }).join('') + '</select>';
+        } else if (r.kind === 'bool') {
+          input = '<select data-set="' + esc(r.key) + '">' +
+            '<option value="1"' + (String(r.value) === '1' ? ' selected' : '') + '>Yes</option>' +
+            '<option value="0"' + (String(r.value) === '0' ? ' selected' : '') + '>No</option></select>';
+        } else {
+          input = '<input type="' + (r.kind === 'number' ? 'number' : 'text') + '" ' +
+            'data-set="' + esc(r.key) + '" value="' + esc(r.value == null ? '' : r.value) + '"' +
+            (r.kind === 'time' ? ' placeholder="15:15"' : '') + ' style="width:100%">';
+        }
+        return '<tr>' +
+          '<td><b>' + esc(r.label) + '</b><br><span class="m" style="font-size:11px;color:var(--muted)">' +
+            esc(r.key) + '</span></td>' +
+          '<td>' + input + '</td>' +
+          '<td><button class="mini" data-save="' + esc(r.key) + '">Save</button></td>' +
+          '<td style="white-space:normal;font-size:11.5px;color:var(--muted);max-width:380px">' +
+            esc(r.hint) + '</td>' +
+        '</tr>';
       }).join('') + '</tbody>';
-  } catch (e) { /* route is page-gated; ignore */ }
+  } catch (e) {
+    $('#setTbl').innerHTML = '<tbody><tr><td class="empty">' + esc(e.message) + '</td></tr></tbody>';
+  }
+}
+
+async function saveSetting(key) {
+  var el = $('[data-set="' + key + '"]');
+  if (!el) return;
+  try {
+    var r = await api('/settings', { method: 'PUT', body: { key: key, value: el.value } });
+    if (r.unchanged) { toast('No change', key + ' is already ' + el.value); return; }
+    toast('Saved', key + ': ' + r.previous + ' → ' + r.value, 'ok');
+    loadDash();                       // the cut-off shows on the dashboard
+  } catch (e) {
+    toast('Not saved', (e.body && e.body.message) || e.message, 'bad');
+    loadSettings();                   // put the rejected value back
+  }
 }
 
 /* ---------------- CSV import (issue masters + margins) ---------------- */
@@ -781,13 +841,24 @@ async function boot() {
   });
   ['#exExch', '#exIssue', '#exCat', '#exCanc'].forEach(function (s) { $(s).addEventListener('change', previewExport); });
   $('#exPreview').addEventListener('click', previewExport);
-  $('#exDownload').addEventListener('click', downloadExport);
+  $('#exDownload').addEventListener('click', function () { downloadExport(); });
+  $('#exSummary').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-part]');
+    if (b) downloadExport(b.dataset.part);
+  });
   $('#miNew').addEventListener('click', issueForm);
   $('#miImport').addEventListener('click', importIssues);
   $('#miTemplate').addEventListener('click', function () { downloadText('ofs_issue_template.csv', ISSUE_TEMPLATE); });
   $('#mgSet').addEventListener('click', setMargin);
   $('#mgImport').addEventListener('click', importMargins);
   $('#mgTemplate').addEventListener('click', function () { downloadText('ofs_margin_template.csv', MARGIN_TEMPLATE); });
+  $('#setTbl').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-save]');
+    if (b) saveSetting(b.dataset.save);
+  });
+  $('#setTbl').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.dataset && e.target.dataset.set) saveSetting(e.target.dataset.set);
+  });
 
   $('#btnSignOut').addEventListener('click', signOut);
 

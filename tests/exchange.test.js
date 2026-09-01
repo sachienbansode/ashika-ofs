@@ -53,23 +53,91 @@ test('exchange files are CRLF and checksummed over the exact bytes', () => {
   assert.notEqual(nse.build(BIDS.slice(0, 2), SETTINGS, {}).checksum, out.checksum);
 });
 
-test('BSE file: member code, ISIN, cut-off flag, distinct checksum', () => {
-  const out = bse.build(BIDS, SETTINGS, { symbol: 'COALINDIA', memberCode: 'ASHIKA01' });
+test('BSE file matches the published guidelines layout', () => {
+  // BSE Comprehensive Amended Guidelines, OFS Segment — ten fields, no header row.
+  const out = bse.build(BIDS, SETTINGS, { symbol: 'COALINDIA' });
   const lines = out.text.split('\r\n').filter(Boolean);
-  assert.equal(lines[0], bse.HEADER.join(','));
-  assert.ok(lines[1].startsWith('ASHIKA01,533278,INE522F01014,ASH1001,RI,500,390,N,R1,N'), lines[1]);
-  assert.ok(lines[3].includes(',Y,'), 'cut-off is a flag on BSE, not a category');
-  assert.notEqual(out.checksum, nse.build(BIDS, SETTINGS, {}).checksum);
+
+  assert.equal(out.hasHeaderRow, false, 'iBBS reads the first line as data');
+  assert.notEqual(lines[0], bse.HEADER.join(','));
+  assert.equal(lines.length, 4, 'four bids, four lines');
+
+  const f = lines[0].split(',');
+  assert.equal(f.length, 10, 'exactly ten fields');
+  assert.equal(f[0], 'COALINDIA');   // OFS Symbol
+  assert.equal(f[1], 'RI');          // Category
+  assert.equal(f[3], 'ASH1001');     // UCC, uppercased
+  assert.equal(f[5], '500');         // Qty
+  assert.equal(f[6], '390.00');      // Price, two decimals
+  assert.equal(f[7], '2');           // Margin: 100% upfront
+  assert.equal(f[8], '0');           // Bid Id: 0 for a new record
+  assert.equal(f[9], 'N');           // Action
 });
 
-test('file names carry the exchange and symbol', () => {
+test('BSE cancellation is D, not C', () => {
+  const lines = bse.build(BIDS, SETTINGS, {}).text.split('\r\n').filter(Boolean);
+  assert.equal(lines[2].split(',')[9], 'D', 'the guidelines specify D for deletion');
+  assert.equal(lines[3].split(',')[9], 'M');
+  assert.equal(bse.actionCode({ status: 'Live' }), 'N');
+});
+
+test('BSE categories stay within the published set', () => {
+  assert.deepEqual(bse.VALID_CATEGORIES, ['MF', 'IC', 'OTHS', 'NII', 'RI']);
+  // an unrecognised code from settings must not reach the exchange
+  const odd = Object.assign({}, SETTINGS, { cat_retail: 'ZZ', cat_hni: 'QQ' });
+  assert.equal(bse.categoryCode({ category: 'Retail' }, odd), 'RI');
+  assert.equal(bse.categoryCode({ category: 'HNI' }, odd), 'NII');
+});
+
+test('BSE splits a book over 100 rows into numbered files', () => {
+  const many = [];
+  for (let i = 0; i < 250; i++) {
+    many.push(Object.assign({}, BIDS[0], { client_ucc: 'C' + i, ref: 'R' + i }));
+  }
+  const p1 = bse.build(many, SETTINGS, { symbol: 'X', part: 1 });
+  assert.equal(p1.parts, 3);
+  assert.equal(p1.rowCount, 100);
+  assert.equal(p1.totalRows, 250);
+  assert.match(p1.fileName, /_part1\.csv$/);
+
+  const p3 = bse.build(many, SETTINGS, { symbol: 'X', part: 3 });
+  assert.equal(p3.rowCount, 50, 'the remainder');
+  assert.notEqual(p3.checksum, p1.checksum);
+
+  // out-of-range parts clamp rather than producing an empty file
+  assert.equal(bse.build(many, SETTINGS, { part: 99 }).part, 3);
+  assert.equal(bse.build(many, SETTINGS, { part: 0 }).part, 1);
+  // a small book is still one part
+  assert.equal(bse.build(BIDS, SETTINGS, {}).parts, 1);
+});
+
+test('BSE accepts a pipe-separated file too', () => {
+  const out = bse.build(BIDS, SETTINGS, { pipe: true });
+  assert.ok(out.text.split('\r\n')[0].split('|').length === 10);
+});
+
+test('file names carry the exchange, symbol and part', () => {
   assert.match(nse.fileName('COALINDIA'), /^NSE_OFS_Bid_COALINDIA_\d{8}_\d{4}\.csv$/);
   assert.match(bse.fileName(null), /^BSE_OFS_Bid_ALL_\d{8}_\d{4}\.csv$/);
+  assert.match(bse.fileName('X', 2), /^BSE_OFS_Bid_X_\d{8}_\d{4}_part2\.csv$/);
 });
 
 test('a field containing a comma is quoted, not split', () => {
   const bids = [Object.assign({}, BIDS[0], { cp_code: 'A,B' })];
   assert.ok(nse.build(bids, SETTINGS, {}).text.includes('"A,B"'));
+  assert.ok(bse.build(bids, SETTINGS, {}).text.includes('"A,B"'));
+});
+
+test('BSE truncates to the published field lengths', () => {
+  const long = [Object.assign({}, BIDS[0], {
+    client_ucc: 'ASH1001234567890',           // UCC is alphanumeric(12)
+    cp_code: 'C'.repeat(30),                  // Client/CP code is alphanumeric(16)
+    issue: Object.assign({}, ISSUE, { symbol: 'VERYLONGSYMBOL' })  // symbol is (10)
+  })];
+  const f = bse.build(long, SETTINGS, {}).text.split('\r\n')[0].split(',');
+  assert.equal(f[0].length, 10);
+  assert.equal(f[2].length, 16);
+  assert.equal(f[3].length, 12);
 });
 
 test('an empty book produces a header-only file with zero rows', () => {

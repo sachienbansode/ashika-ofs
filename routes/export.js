@@ -39,7 +39,12 @@ async function buildFile(exchange, q) {
     const i = await one(`SELECT symbol FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [q.issue_id]);
     symbol = i && i.symbol;
   }
-  return adapter.build(bids, s, { symbol, memberCode: q.member_code });
+  return adapter.build(bids, s, {
+    symbol,
+    memberCode: q.member_code,
+    part: q.part,                      // BSE caps a file at 100 records
+    pipe: String(q.pipe || '') === '1'
+  });
 }
 
 /** GET /api/export/:exchange/preview - table + totals, no log entry. */
@@ -51,6 +56,11 @@ router.get('/:exchange/preview', requirePage(PAGE), async (req, res, next) => {
       exchange: out.exchange, file_name: out.fileName, header: out.header,
       row_count: out.rowCount, total_qty: out.totalQty, total_value: out.totalValue,
       checksum: out.checksum,
+      total_rows: out.totalRows == null ? out.rowCount : out.totalRows,
+      parts: out.parts || 1,
+      part: out.part || 1,
+      max_rows_per_file: out.maxRowsPerFile || null,
+      has_header_row: out.hasHeaderRow !== false,
       preview: lines.slice(0, 51)
     });
   } catch (e) { next(e); }
@@ -68,7 +78,10 @@ router.get('/:exchange/download', requirePage(PAGE), async (req, res, next) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [req.query.issue_id && req.query.issue_id !== 'all' ? req.query.issue_id : null,
        out.exchange, out.format, out.fileName, out.rowCount, out.totalQty, out.totalValue,
-       out.checksum, JSON.stringify(req.query), String(req.user.email || req.user.id)]);
+       out.checksum,
+       JSON.stringify(Object.assign({}, req.query,
+         out.parts > 1 ? { _part: out.part, _parts: out.parts } : {})),
+       String(req.user.email || req.user.id)]);
 
     await audit.log(req, 'export', 'ofs_export', out.fileName,
       null, { exchange: out.exchange, rows: out.rowCount, checksum: out.checksum });
@@ -77,6 +90,9 @@ router.get('/:exchange/download', requirePage(PAGE), async (req, res, next) => {
     res.setHeader('Content-Disposition', 'attachment; filename="' + out.fileName + '"');
     res.setHeader('X-OFS-Checksum', out.checksum);
     res.setHeader('X-OFS-Rows', String(out.rowCount));
+    if (out.parts > 1) {
+      res.setHeader('X-OFS-Part', out.part + '/' + out.parts);
+    }
     res.send(out.text);
   } catch (e) { next(e); }
 });

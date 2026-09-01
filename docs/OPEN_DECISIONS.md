@@ -4,6 +4,35 @@ Status as of 2026-09-01. "Settled" means we have an answer and the code reflects
 "Blocked" means the answer exists outside this project — a member circular, an RMS
 capability, or a compliance ruling — and no amount of building resolves it.
 
+## Recently closed
+
+**B — the BSE iBBS bulk-bid layout is now pinned** (2026-09-01), from BSE's own
+[Comprehensive Amended Guidelines — OFS Segment](https://www.bseindia.com/downloads1/BSEComprehensiveAmendedGuidelines_OFS_Segment.pdf).
+Ten fields, in order, **with no header row**:
+
+| # | Field | Type | Notes |
+|---|---|---|---|
+| 1 | OFS Symbol | alnum(10) | mandatory |
+| 2 | Category | alnum(5) | `MF` · `IC` · `OTHS` · `NII` · `RI` |
+| 3 | Client/CP code | alnum(16) | optional, institutional give-ups |
+| 4 | UCC | alnum(12) | mandatory |
+| 5 | Custodian clearing code | alnum(12) | optional |
+| 6 | Qty | num(11) | multiple of market lot |
+| 7 | Price | num(6,2) | at or above floor |
+| 8 | Margin | num(1) | `1` = 0% · `2` = 100% upfront |
+| 9 | Bid Id | num(16) | `0` for a new record |
+| 10 | Action Code | alnum(1) | `N` new · `M` modify · **`D` delete** |
+
+Two corrections this forced: cancellation is **D**, not the `C` the prototype used,
+and **a file carries at most 100 records**, so a larger book must be split — the desk
+now gets numbered parts and is told to upload all of them. Comma or pipe separated
+`.csv`/`.txt` are both accepted.
+
+Announcements: BSE issues a **T-2 notice** (company, seller, quantity, bid timing,
+allocation method) and a **T-1 floor price and activity schedule notice**, under
+Markets → Market Info → Notices/Circulars. Live and forthcoming issues are listed
+under Markets → Offer for Sale.
+
 ## Settled
 
 | # | Decision | Answer | Where it lives in the code |
@@ -23,9 +52,8 @@ capability, or a compliance ruling — and no amount of building resolves it.
 
 | # | Decision | Why it is still open | What it blocks | Who can answer |
 |---|---|---|---|---|
-| A | **Exact NSE bulk-upload columns** | The layout changes by circular. Ours is the representative field set from the spec and the prototype, not a pinned one. | Go-live. A wrong column order means every row rejected. | Ashika's desk, from the NSE member portal |
-| B | **Exact BSE iBBS layout** | Defined in BSE Notice 20120727-26 (3.3.4); we have the shape, not the file. Also needs the member/trading code. | Go-live on BSE | Ashika's desk, from the BSE member portal |
-| C | **Allotment file format** | We import parsed rows; nobody has seen the exchange's actual return file. | Automated allotment import | Ashika, after any OFS |
+| A | **Exact NSE bulk-upload columns** | NSE's layout is not public. The e-OFS FAQ points to the Web API protocol docs and to **circular NSE/CMTR/72975 (24 Feb 2026)**, both member-only. Our NSE adapter currently mirrors BSE's documented layout and emits `C` for a cancellation — BSE documents `D`, so at least one is wrong for NSE. | Go-live on NSE | Ashika's desk, from the NSE member portal, or msm@nse.co.in |
+| C | **Allotment file format** | BSE returns an **Allocation File** in iBBS (OFS → Downloads → Bid Download) from 17:30 on T-day, with EOD trade files on the extranet from 18:00. Layouts are in **BSE Notice 20130129-23**, which we do not have. | Automated allotment import | Ashika's desk, from the BSE member portal |
 | D | **RMS available-margin API** | `routes/rms.js` on the platform only *writes* RMS config. A read endpoint may not exist at all. | Live margin instead of a snapshot | Ashika IT / RMS vendor |
 | E | **AP → client mapping** | User indicated `stg.branchho`; the logic itself is still to be shared. | The whole AP journey | Ashika (logic promised) |
 | F | **Client authorisation model** | Consent/POA for bidding on a client's behalf, whether OTP is required per bid as well as at sign-in, and whether the client must see the live indicative price before confirming. | Desk bidding on behalf; per-bid OTP | Ashika compliance |

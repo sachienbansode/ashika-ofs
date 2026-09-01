@@ -106,10 +106,8 @@ api.get('/me', (req, res) => res.json({
   user: { id: req.user.id, email: req.user.email, role: req.user.role },
   permissions: req.user.permissions
 }));
-api.get('/settings', requirePage('ofs-desk', 'ofs-masters'), async (req, res, next) => {
-  try { res.json({ settings: await settings.all() }); } catch (e) { next(e); }
-});
 
+api.use('/settings',  require('./routes/settings'));
 api.use('/dashboard', require('./routes/dashboard'));
 api.use('/issues',    require('./routes/issues'));
 api.use('/bids',      require('./routes/bids'));
