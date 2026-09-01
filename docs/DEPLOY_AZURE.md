@@ -240,6 +240,7 @@ tree match the remote outright. `.env` is gitignored, so it survives untouched.
 | `/readyz` 503, `ETIMEDOUT` | AWS security group is not allowing the VM's public IP on 5432. |
 | `/readyz` 503, `no pg_hba.conf entry` | The DB reached you but rejects the host/user/SSL combination — check `pg_hba.conf` and that `*_PG_SSL=true`. |
 | 502 from nginx | Node is down or on another port: `pm2 logs`, then `curl localhost:4011/healthz`. |
+| Page renders with no CSS and no JavaScript, yet `curl -I` shows 200 for every asset | CSP `upgrade-insecure-requests` rewriting asset URLs to `https://` on a plain-http deployment. It is emitted only when `COOKIE_SECURE`/`FORCE_HTTPS` is true. curl does not enforce CSP, which is why it looks fine from the shell — check the browser console instead. |
 | Every login 401 | `JWT_SECRET` does not match the platform's. |
 | Dashboard says "No access to the OFS desk" | Signed in, but the role lacks the `ofs-desk` grant (step 7). |
 | Sign-in prompt that never goes away | The platform patch is not deployed, or `OFS_SSO_SECRET` differs between the two apps. |

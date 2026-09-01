@@ -19,8 +19,21 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
+/*
+ * Are we actually being served over TLS? Two CSP/HSTS features are actively
+ * harmful when we are not:
+ *   upgrade-insecure-requests — the browser rewrites every asset request to
+ *     https://, which on a plain-http deployment goes nowhere. The HTML loads and
+ *     every stylesheet and script silently fails, while curl (which does not
+ *     enforce CSP) reports 200 for all of them.
+ *   HSTS — pins the browser to https for the host.
+ * Both are switched on the moment the desk is behind a certificate.
+ */
+const TLS = String(process.env.FORCE_HTTPS || process.env.COOKIE_SECURE || 'false') === 'true';
+
 /* ---- security headers (CSP on; no inline/external script) ---- */
 app.use(helmet({
+  hsts: TLS,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -32,7 +45,9 @@ app.use(helmet({
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
       baseUri: ["'self'"],
-      formAction: ["'self'"]
+      formAction: ["'self'"],
+      // null removes helmet's default; [] enables it once TLS is on.
+      upgradeInsecureRequests: TLS ? [] : null
     }
   },
   crossOriginEmbedderPolicy: false,
