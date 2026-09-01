@@ -7,7 +7,10 @@
 const express = require('express');
 const { SCHEMA, rows, one, query, tx } = require('../db/ofsAdapter');
 const ld = require('../db/ldAdapter');
-const { requirePage, requireEdit } = require('../middleware/pageAccess');
+const mailer = require('../lib/mailer');
+const { allotmentEmail } = require('../lib/templates/allotment');
+const { maskRows } = require('../lib/pii');
+const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAccess');
 const audit = require('../lib/audit');
 
 const router = express.Router();
@@ -73,27 +76,102 @@ router.post('/import', requirePage(PAGE), requireEdit(PAGE), async (req, res, ne
   } catch (e) { next(e); }
 });
 
+/** GET /api/allotment/mail/status - is SMTP usable? Drives the UI badge. */
+router.get('/mail/status', requirePage(PAGE), async (req, res, next) => {
+  try { res.json(await mailer.status()); } catch (e) { next(e); }
+});
+
+/** The pending queue for an issue, with LD name/email merged in. */
+async function mailQueue(issueId) {
+  const pending = await rows(
+    `SELECT a.id, a.client_ucc, a.allot_qty, a.allot_price, a.allot_value,
+            i.symbol, i.company, b.qty AS bid_qty, b.price AS bid_price
+       FROM ${SCHEMA}.ofs_allotment a
+       LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = a.issue_id
+       LEFT JOIN ${SCHEMA}.ofs_bid   b ON b.id = a.bid_id
+      WHERE a.issue_id = $1 AND a.mail_status = 'pending'
+      ORDER BY a.client_ucc`, [issueId]);
+  return ld.enrich(pending, 'client_ucc');
+}
+
 /**
- * POST /api/allotment/mail  { issue_id }
- * TODO(Phase 1 finish): call the platform mailer and lib/emailLog.logFromInfo so the
- * send is captured like every other platform email (REUSE.md 3). Until the shared
- * mailer module is vendored into this repo, this marks rows and returns the queue.
+ * POST /api/allotment/mail  { issue_id, confirm }
+ *
+ * Without confirm:true this returns the queue and sends NOTHING. These emails go
+ * to real clients about real money, so the send is a deliberate second action —
+ * the desk sees exactly who would be written to, and how many, first.
+ *
+ * Every send is recorded by lib/emailLog, so it appears in Admin -> Email & OTP Logs
+ * next to every other platform email, and each row's mail_status is settled either way.
  */
 router.post('/mail', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const issueId = req.body.issue_id;
     if (!issueId) return res.status(400).json({ error: 'missing_input' });
-    const pending = await rows(
-      `SELECT a.client_ucc, a.allot_qty, a.allot_price, a.allot_value, i.symbol, i.company
-         FROM ${SCHEMA}.ofs_allotment a
-         LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = a.issue_id
-        WHERE a.issue_id = $1 AND a.mail_status = 'pending' AND a.allot_qty > 0`, [issueId]);
-    const queue = await ld.enrich(pending, 'client_ucc');   // email/name come from LD
-    res.status(501).json({
-      error: 'mailer_not_wired',
-      message: 'Shared platform mailer + lib/emailLog not yet vendored into the OFS repo.',
-      queued: queue.length
-    });
+
+    const queue = await mailQueue(issueId);
+    const sendable = queue.filter((q) => q.email);
+    const missing = queue.filter((q) => !q.email);
+
+    if (!req.body.confirm) {
+      return res.json({
+        preview: true,
+        smtp: await mailer.status(),
+        to_send: sendable.length,
+        no_email: missing.length,
+        queue: maskRows(queue, canViewPII(req, PAGE)),
+        message: 'Nothing sent. Repeat with confirm:true to send.'
+      });
+    }
+
+    const smtp = await mailer.status();
+    if (!smtp.ok) return res.status(503).json({ error: 'smtp_unavailable', smtp });
+
+    const actor = String(req.user.email || req.user.id);
+    let sent = 0;
+    const failed = [];
+
+    for (const a of sendable) {
+      const { subject, html } = allotmentEmail({
+        client_name: a.client_name, client_ucc: a.client_ucc,
+        symbol: a.symbol, company: a.company,
+        bid_qty: a.bid_qty, bid_price: a.bid_price,
+        allot_qty: a.allot_qty, allot_price: a.allot_price, allot_value: a.allot_value
+      });
+      const r = await mailer.send({
+        to: a.email, subject, html,
+        purpose: 'ofs_allotment', triggeredBy: actor, ip: req.ip
+      });
+      await query(
+        `UPDATE ${SCHEMA}.ofs_allotment SET mail_status = $2, mail_at = now() WHERE id = $1`,
+        [a.id, r.sent ? 'sent' : 'failed']);
+      if (r.sent) sent++; else failed.push({ ucc: a.client_ucc, error: r.error });
+    }
+
+    // A client with no email on file is not a failure to retry — mark it skipped
+    // so the queue settles and the desk can chase it separately.
+    for (const a of missing) {
+      await query(
+        `UPDATE ${SCHEMA}.ofs_allotment SET mail_status = 'skipped', mail_at = now() WHERE id = $1`, [a.id]);
+    }
+
+    await audit.log(req, 'mail_allotment', 'ofs_allotment', issueId, null,
+      { sent, failed: failed.length, skipped: missing.length });
+
+    res.json({ sent, failed: failed.length, skipped: missing.length, errors: failed.slice(0, 20) });
+  } catch (e) { next(e); }
+});
+
+/** Put failed rows back in the queue so a retry is possible after fixing SMTP. */
+router.post('/mail/reset', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    const issueId = req.body.issue_id;
+    if (!issueId) return res.status(400).json({ error: 'missing_input' });
+    const r = await query(
+      `UPDATE ${SCHEMA}.ofs_allotment SET mail_status = 'pending'
+        WHERE issue_id = $1 AND mail_status = 'failed'`, [issueId]);
+    await audit.log(req, 'mail_reset', 'ofs_allotment', issueId, null, { requeued: r.rowCount });
+    res.json({ requeued: r.rowCount });
   } catch (e) { next(e); }
 });
 

@@ -61,7 +61,8 @@ server-side). Exchange files: preview, then download the NSE or BSE file and upl
 | GET | `/api/clients`, `/api/clients/:ucc` | ofs-desk (PII masked) |
 | GET/PUT/POST | `/api/margin`, `/api/margin/bulk` | ofs-masters |
 | GET | `/api/export/:exchange/preview`, `/download`, `/api/export/log` | ofs-desk |
-| GET/POST | `/api/allotment`, `/import`, `/mail` | ofs-desk |
+| GET/POST | `/api/allotment`, `/import`, `/mail`, `/mail/reset` | ofs-desk |
+| GET | `/api/allotment/mail/status` | ofs-desk |
 
 ## Repository
 
@@ -116,7 +117,16 @@ server {
 }
 ```
 
+## Allotment emails
+
+`POST /api/allotment/mail {issue_id}` returns the queue and sends **nothing**. Repeat with
+`{issue_id, confirm:true}` to actually send — these go to real clients about real money, so
+the send is a deliberate second action. SMTP config is the platform's own
+(`"admin-staging-api".smtp_settings`, password AES-GCM sealed with `API_KEY_SECRET`), so
+`API_KEY_SECRET` must match the platform byte for byte. Every send is written to the shared
+`email_logs` table and shows up in Admin → Email & OTP Logs. Clients with no email on file are
+marked `skipped`, not `failed`; `POST /api/allotment/mail/reset` requeues the failures.
+
 ## Not done yet (Phase 1 tail)
-- Allotment emails: vendor the platform mailer + `lib/emailLog.js` so sends land in Admin → Email & OTP Logs (`routes/allotment.js` returns 501 today).
 - Exchange file columns are the representative set — pin them byte-for-byte before go-live.
 - `ofs_issue.bse_scrip_code` needs the BSE scrip-code master.
