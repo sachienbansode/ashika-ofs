@@ -66,12 +66,15 @@ else {
   else {
     const insecure = origins.filter((o) => o.startsWith('http://') && !/localhost|127\.0\.0\.1/.test(o));
     if (insecure.length) flag('CORS_ORIGINS', 'plain http origin(s): ' + insecure.join(', '));
-    ok('CORS_ORIGINS', origins.join(', '));
+    const placeholder = origins.filter((o) => /example\.com/i.test(o));
+    if (placeholder.length) flag('CORS_ORIGINS', 'still the template placeholder: ' + placeholder.join(', '));
+    else ok('CORS_ORIGINS', origins.join(', '));
   }
 }
 
 for (const k of ['APP_URL', 'PUBLIC_BASE_URL']) {
   if (E[k] && !/^https?:\/\//.test(E[k])) flag(k, 'should be a full URL');
+  else if (E[k] && /example\.com/i.test(E[k])) flag(k, 'still the template placeholder');
 }
 if (!E.APP_URL && !E.PUBLIC_BASE_URL) flag('APP_URL', 'unset — email links will fall back to the UAT portal URL');
 

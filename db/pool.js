@@ -6,49 +6,10 @@
  *   - uat_ananta_staging  : LD/DWH + "admin-staging-api" (PROD)   -> anantaAdapter
  * Postgres cannot join across databases, so nothing here pretends they are one.
  *
- * Config precedence per connection: <PREFIX>_DATABASE_URL, else discrete
- * <PREFIX>_PG_* vars. A password given separately as <PREFIX>_PG_PASSWORD always
- * wins over one embedded in the URL, so the URL can be kept password-free.
+ * Config building lives in db/pgConfig.js so it is testable without a driver.
  */
 const { Pool } = require('pg');
-
-function build(prefix, appName) {
-  const url = process.env[prefix + '_DATABASE_URL'];
-  const pw = process.env[prefix + '_PG_PASSWORD'];
-  const ssl = String(process.env[prefix + '_PG_SSL'] || 'false') === 'true'
-    ? { rejectUnauthorized: false } : false;
-  const max = Number(process.env[prefix + '_PG_POOL_MAX'] || 10);
-
-  const cfg = url
-    ? { connectionString: url, ssl, max }
-    : {
-        host: process.env[prefix + '_PG_HOST'],
-        port: Number(process.env[prefix + '_PG_PORT'] || 5432),
-        database: process.env[prefix + '_PG_DATABASE'],
-        user: process.env[prefix + '_PG_USER'],
-        ssl, max
-      };
-
-  if (pw) cfg.password = pw;
-  cfg.idleTimeoutMillis = 30000;
-  cfg.connectionTimeoutMillis = 10000;
-  cfg.application_name = appName;
-  return cfg;
-}
-
-/** Describes a connection for logs and /readyz WITHOUT leaking credentials. */
-function describe(prefix) {
-  const url = process.env[prefix + '_DATABASE_URL'];
-  if (url) {
-    try {
-      const u = new URL(url);
-      return u.hostname + ':' + (u.port || 5432) + u.pathname;
-    } catch (e) { return '<malformed ' + prefix + '_DATABASE_URL>'; }
-  }
-  return (process.env[prefix + '_PG_HOST'] || '?') + ':' +
-         (process.env[prefix + '_PG_PORT'] || 5432) + '/' +
-         (process.env[prefix + '_PG_DATABASE'] || '?');
-}
+const { build, describe, fromUrl } = require('./pgConfig');
 
 function make(prefix, appName) {
   let pool = null;
@@ -82,4 +43,4 @@ function make(prefix, appName) {
   };
 }
 
-module.exports = { make, describe };
+module.exports = { make, describe, build, fromUrl };
