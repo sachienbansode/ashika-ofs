@@ -20,6 +20,7 @@ const cs = require('../middleware/clientAuth');
 const mailer = require('../lib/mailer');
 const { brandedEmail } = require('../lib/emailBranding');
 const ld = require('../db/ldAdapter');
+const sms = require('../lib/sms');
 
 const router = express.Router();
 
@@ -42,69 +43,84 @@ function otpEmail(name, code, mins) {
       Ashika will never ask you for this code by phone or message.</p>`);
 }
 
-/** POST /client/auth/start { mobile, email } */
+/** POST /client/auth/start { identifier } — a registered mobile OR email. */
 router.post('/start', startLimiter, async (req, res) => {
-  const mobile = ca.normMobile(req.body && req.body.mobile);
-  const email = ca.normEmail(req.body && req.body.email);
+  const body = req.body || {};
+  // `mobile`/`email` are still accepted so an older client build keeps working.
+  const identifier = String(body.identifier || body.mobile || body.email || '').trim();
+  const kind = ca.identifierKind(identifier);
   const ip = ipOf(req);
   const ua = req.headers['user-agent'] || '';
 
-  if (mobile.length !== 10 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+  if (!kind) {
     return res.status(400).json({ error: 'invalid_input',
-      message: 'Enter a 10-digit mobile number and the email address registered with your account.' });
+      message: 'Enter your registered 10-digit mobile number or your registered email address.' });
   }
 
-  // The generic answer. Every path below returns exactly this on the happy side,
-  // so a caller learns nothing about whether the pair exists.
+  // The generic answer. Every success path returns exactly this, so a caller cannot
+  // learn whether an identifier belongs to a client.
   const generic = {
     ok: true,
     ttl_minutes: ca.OTP_TTL_MIN,
     resend_after_s: ca.RESEND_COOLDOWN_S,
-    message: 'If those details match an active account, a code has been sent to the registered email address.'
+    message: 'If that matches an active account, a code has been sent to the registered email and mobile.'
   };
 
   try {
-    if (await ca.throttled(mobile, ip)) {
-      await ca.logAttempt({ event: 'blocked', mobile, email, ip, userAgent: ua, reason: 'throttled' });
+    if (await ca.throttled(identifier, ip)) {
+      await ca.logAttempt({ event: 'blocked', ip, userAgent: ua, reason: 'throttled' });
       return res.status(429).json({ error: 'too_many_requests',
         message: 'Too many sign-in attempts. Please try again later.' });
     }
 
-    const wait = await ca.resendWait(mobile);
+    const wait = await ca.resendWait(identifier);
     if (wait > 0) return res.status(429).json({ error: 'resend_cooldown', retry_after_s: wait,
       message: `Please wait ${wait}s before requesting another code.` });
 
-    const clients = await ca.findClients(mobile, email);
-    await ca.logAttempt({ event: 'otp_requested', mobile, email, ip, userAgent: ua,
+    const clients = await ca.findClients(identifier);
+    await ca.logAttempt({
+      event: 'otp_requested', ip, userAgent: ua,
+      mobile: kind === 'mobile' ? identifier : null,
+      email: kind === 'email' ? identifier : null,
       ok: clients.length > 0, reason: clients.length ? null : 'no_match' });
 
     if (!clients.length) return res.json(generic);          // deliberately indistinguishable
 
+    // Contacts ON FILE — never what was typed. Typing one identifier must not let
+    // anyone redirect the code somewhere else.
+    const target = clients[0];
     const ch = await ca.createChallenge({
-      mobile, email, uccs: clients.map((c) => c.ucc), ip, userAgent: ua });
+      identifier, mobile: target.mobile, email: target.email,
+      uccs: clients.map((c) => c.ucc), ip, userAgent: ua });
 
-    const out = Object.assign({ ref: ch.ref, sent_to: ca.maskEmail(clients[0].email || email) }, generic);
+    const out = Object.assign({ ref: ch.ref, sent_to: ch.sentTo }, generic);
 
     if (ca.testMode()) {
-      // Non-production only (lib/clientAuth.testMode checks NODE_ENV), so the desk
-      // can be exercised without a mailbox. Returned so the UI can show it.
-      console.warn('[client-auth] TEST MODE — fixed OTP in use, no email sent');
+      console.warn('[client-auth] TEST MODE — fixed code, nothing sent');
       out.test_mode = true;
       out.test_code = ch.code;
-      await ca.logAttempt({ event: 'otp_sent', mobile, email, ip, userAgent: ua, ok: true, reason: 'test_mode' });
+      await ca.logAttempt({ event: 'otp_sent', ip, userAgent: ua, ok: true, reason: 'test_mode' });
       return res.json(out);
     }
 
-    const r = await mailer.send({
-      to: clients[0].email || email,
-      subject: 'Your Ashika OFS sign-in code',
-      html: otpEmail(clients[0].name, ch.code, ch.expiresInMin),
-      purpose: 'ofs_client_otp', triggeredBy: 'client-signin', ip });
+    // Both channels are attempted; one succeeding is enough to sign in.
+    const results = await Promise.all([
+      target.email
+        ? mailer.send({ to: target.email, subject: 'Your Ashika OFS sign-in code',
+            html: otpEmail(target.name, ch.code, ch.expiresInMin),
+            purpose: 'ofs_client_otp', triggeredBy: 'client-signin', ip })
+        : Promise.resolve({ sent: false, error: 'no_email_on_file' }),
+      target.mobile
+        ? sms.send({ to: target.mobile,
+            text: `${ch.code} is your Ashika OFS sign-in code. Valid ${ch.expiresInMin} minutes. Never share it.` })
+        : Promise.resolve({ sent: false, skipped: true, reason: 'no_mobile_on_file' })
+    ]);
 
-    await ca.logAttempt({ event: 'otp_sent', mobile, email, ip, userAgent: ua,
-      ok: r.sent, reason: r.sent ? null : r.error });
+    const delivered = results.some((r) => r.sent);
+    await ca.logAttempt({ event: 'otp_sent', ip, userAgent: ua, ok: delivered,
+      reason: delivered ? null : (results[0].error || results[1].reason) });
 
-    if (!r.sent) return res.status(503).json({ error: 'otp_send_failed',
+    if (!delivered) return res.status(503).json({ error: 'otp_send_failed',
       message: 'We could not send the code just now. Please try again shortly.' });
 
     return res.json(out);

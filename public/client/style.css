@@ -52,3 +52,49 @@
 .facts .k{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:600}
 .facts .v{font-family:var(--mono);font-size:13px;font-weight:600;margin-top:2px}
 .cdn{font-family:var(--mono);font-size:11.5px;color:var(--amber);margin-top:11px}
+
+/* ---------- improvements the prototype does not have ---------- */
+
+/* Inline validity: a tick appears the moment a field is well-formed, so nobody
+   presses Send only to be told the mobile is nine digits. */
+.field{position:relative}
+.field .tick{position:absolute;right:12px;top:50%;transform:translateY(-50%) scale(.6);
+  color:var(--green);font-size:17px;font-weight:700;opacity:0;transition:.16s;pointer-events:none}
+.field.valid .tick{opacity:1;transform:translateY(-50%) scale(1)}
+.field.valid .inp{border-color:rgba(11,177,131,.55)}
+.inp[aria-invalid="true"]{border-color:var(--red);box-shadow:0 0 0 3px rgba(214,69,80,.12)}
+
+/* Buttons say what they are doing rather than going dead. */
+.btn.busy{pointer-events:none;opacity:.75}
+.btn.busy .lbl{opacity:.6}
+.btn.busy::after{content:'';width:14px;height:14px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.45);border-top-color:#fff;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(1turn)}}
+
+/* Keyboard users get a visible ring; mouse users do not. */
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:6px}
+
+/* The prototype is desktop-first. Clients will mostly arrive on a phone. */
+@media (max-width:480px){
+  .login-stage{padding:18px 12px;justify-content:flex-start}
+  .login-brand{margin-bottom:16px}
+  .login-brand .mark{width:52px;height:52px}
+  .login-brand .t{font-size:20px}
+  .login-card{border-radius:14px}
+  .login-card .pad{padding:20px 17px}
+  /* Only the current step is named on a narrow screen; the rest stay as numbers. */
+  .step span{display:none}
+  .step.on span{display:inline}
+  .otpbox{gap:6px}
+  .otpbox input{font-size:19px;border-radius:9px}
+  .inp,.btn{font-size:16px}          /* >=16px stops iOS zooming the page on focus */
+  .btn{padding:13px 17px}            /* comfortable tap target */
+  .wrap{padding:14px 12px 40px}
+  .topbar{padding:11px 13px;gap:10px}
+  .facts{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;
+    transition-duration:.01ms !important}
+}

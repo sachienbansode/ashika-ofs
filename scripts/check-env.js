@@ -50,6 +50,19 @@ if (!E.API_KEY_SECRET) flag('API_KEY_SECRET', 'unset — the SMTP password will 
 else ok('API_KEY_SECRET', 'set');
 
 console.log('\nApp');
+const prod = E.NODE_ENV === 'production';
+if (!E.NODE_ENV) flag('NODE_ENV', 'unset — set it to production before go-live');
+else ok('NODE_ENV', E.NODE_ENV);
+
+// The fixed-OTP switch. Harmless in UAT, a wide-open door on a live desk, so it is
+// reported loudly whenever it is on and fatal if it is on in production.
+if (String(E.OFS_OTP_TEST_MODE) === 'true') {
+  if (prod) fail('OFS_OTP_TEST_MODE', 'true in production — refused at runtime; remove it');
+  else flag('OFS_OTP_TEST_MODE', 'ON — every client signs in with ' + (E.OFS_OTP_TEST_CODE || '123456'));
+} else {
+  ok('OFS_OTP_TEST_MODE', 'off — real codes by email');
+}
+if (!E.OFS_SSO_SECRET) flag('OFS_SSO_SECRET', 'unset — staff cannot sign in to /desk from the portal');
 const port = Number(E.PORT || 4011);
 if (!Number.isInteger(port) || port < 1 || port > 65535) fail('PORT', 'not a valid port');
 else ok('PORT', String(port));

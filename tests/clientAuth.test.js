@@ -59,6 +59,26 @@ test('test mode is refused in production, whatever the flag says', () => {
   }
 });
 
+test('one field accepts a mobile or an email, and rejects the rest', () => {
+  assert.equal(ca.identifierKind('9820011234'), 'mobile');
+  assert.equal(ca.identifierKind('+91 98200 11234'), 'mobile');
+  assert.equal(ca.identifierKind('09820011234'), 'mobile');
+  assert.equal(ca.identifierKind(' rajesh@gmail.com '), 'email');
+
+  // Refused before any query runs
+  assert.equal(ca.identifierKind('98200'), null, 'too short');
+  assert.equal(ca.identifierKind('rajesh@'), null, 'not an address');
+  assert.equal(ca.identifierKind('rajesh@gmail'), null, 'no TLD');
+  assert.equal(ca.identifierKind(''), null);
+  assert.equal(ca.identifierKind(null), null);
+  assert.equal(ca.identifierKind('   '), null);
+});
+
+test('an @ always means email, never a mobile guess', () => {
+  // otherwise "9820011234@typo" could be stripped to digits and matched
+  assert.equal(ca.identifierKind('9820011234@'), null);
+});
+
 test('masking keeps enough to recognise, not enough to reuse', () => {
   const m = ca.maskEmail('rajesh.agarwal@gmail.com');
   assert.ok(m.endsWith('@gmail.com'));

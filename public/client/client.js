@@ -72,31 +72,67 @@ function showPane(which) {
 }
 
 /* ---------------- step 1: details ---------------- */
+var EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** One field takes either a 10-digit mobile or an email address. */
+function identifierKind() {
+  var v = $('#idInput').value.trim();
+  if (v.indexOf('@') >= 0) return EMAIL_RE.test(v) ? 'email' : null;
+  return v.replace(/\D/g, '').length === 10 ? 'mobile' : null;
+}
+
+/**
+ * Validity is shown as it is typed rather than on submit: a tick when a field is
+ * well-formed, and Send stays disabled until both are. Nobody should press a button
+ * only to be told their mobile is nine digits.
+ */
+function refreshDetails() {
+  var el = $('#idInput');
+  var kind = identifierKind();
+  var typed = el.value.trim().length > 0;
+
+  el.closest('.field').classList.toggle('valid', !!kind);
+  // Only complain once the field has been left, never mid-typing.
+  el.setAttribute('aria-invalid', String(!kind && typed && document.activeElement !== el));
+
+  // Say which one was recognised, so a typo in an email is obvious immediately.
+  var hint = $('#detailsHint');
+  if (!hint.classList.contains('bad')) {
+    hint.textContent = kind === 'mobile' ? 'Recognised as a mobile number.'
+      : kind === 'email' ? 'Recognised as an email address.'
+      : 'Whichever you use, it must be the one registered with your Ashika account.';
+  }
+  $('#sendBtn').disabled = !kind;
+}
+
+function busy(sel, on, label) {
+  var b = $(sel);
+  b.classList.toggle('busy', on);
+  b.setAttribute('aria-busy', String(on));
+  b.disabled = on;
+  if (label) b.querySelector('.lbl').textContent = label;
+}
+
 async function sendCode() {
-  var mobile = $('#mobInput').value.replace(/\D/g, '');
-  var email = $('#emailInput').value.trim();
+  var identifier = $('#idInput').value.trim();
   var hint = $('#detailsHint');
 
-  if (mobile.length !== 10) {
-    hint.className = 'hint bad'; hint.textContent = 'Enter the 10-digit mobile number registered with your account.';
-    $('#mobInput').classList.add('err'); $('#mobInput').focus(); return;
+  if (!identifierKind()) {
+    hint.className = 'hint bad';
+    hint.textContent = 'Enter your registered 10-digit mobile number, or your registered email address.';
+    $('#idInput').setAttribute('aria-invalid', 'true'); $('#idInput').focus(); return;
   }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    hint.className = 'hint bad'; hint.textContent = 'Enter the email address registered with your account.';
-    $('#emailInput').classList.add('err'); $('#emailInput').focus(); return;
-  }
-  $('#mobInput').classList.remove('err'); $('#emailInput').classList.remove('err');
-  hint.className = 'hint'; hint.textContent = 'Both must match the details registered with your Ashika account.';
+  hint.className = 'hint';
 
-  var btn = $('#sendBtn');
-  btn.disabled = true; btn.textContent = 'Sending…';
+  busy('#sendBtn', true, 'Sending…');
   try {
-    var r = await api('/client/auth/start', { method: 'POST', body: { mobile: mobile, email: email } });
+    var r = await api('/client/auth/start', { method: 'POST', body: { identifier: identifier } });
     S.ref = r.ref || null;
 
     // The server answers the same way whether or not the details matched, so the
     // page must not imply an account exists either.
-    $('#otpSentTo').textContent = r.sent_to ? ('Sent to ' + r.sent_to) : 'Check your registered email';
+    $('#otpSentTo').textContent = r.sent_to ? ('Sent to ' + r.sent_to)
+      : 'Check your registered email and mobile';
     $('#otpHint').className = 'hint';
     $('#otpHint').textContent = r.message || '';
 
@@ -113,7 +149,8 @@ async function sendCode() {
     hint.textContent = e.message || 'Could not send a code just now.';
     if (e.body && e.body.retry_after_s) S.resendAt = Date.now() + e.body.retry_after_s * 1000;
   } finally {
-    btn.disabled = false; btn.textContent = 'Send code';
+    busy('#sendBtn', false, 'Send code');
+    refreshDetails();
   }
 }
 
@@ -160,8 +197,7 @@ function otpError(msg) {
 async function verifyCode() {
   var code = otpValue();
   if (code.length !== 6) { otpError('Enter all six digits.'); return; }
-  var btn = $('#verifyBtn');
-  btn.disabled = true; btn.textContent = 'Verifying…';
+  busy('#verifyBtn', true, 'Verifying…');
   try {
     var r = await api('/client/auth/verify', { method: 'POST', body: { ref: S.ref, otp: code } });
     if (r.choose) { S.choose = r.choose; renderAccounts(r.accounts); return; }
@@ -171,7 +207,7 @@ async function verifyCode() {
     var left = e.body && e.body.attempts_left;
     otpError(e.message + (left != null ? ' ' + left + ' attempt(s) left.' : ''));
   } finally {
-    btn.disabled = false; btn.textContent = 'Verify & continue';
+    busy('#verifyBtn', false, 'Verify & continue');
   }
 }
 
@@ -362,11 +398,17 @@ function tickClocks() {
 
 /* ---------------- boot ---------------- */
 async function boot() {
-  $('#sendBtn').addEventListener('click', sendCode);
-  $('#emailInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') sendCode(); });
-  $('#mobInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#emailInput').focus(); });
+  // A real <form>, so Enter and a phone's "Send" key submit like anywhere else.
+  $('#paneDetails').addEventListener('submit', function (e) { e.preventDefault(); sendCode(); });
+  $('#idInput').addEventListener('input', refreshDetails);
+  $('#idInput').addEventListener('blur', refreshDetails);
+  refreshDetails();
   $('#verifyBtn').addEventListener('click', verifyCode);
-  $('#otpBackBtn').addEventListener('click', function () { setStep(1); showPane('details'); });
+  $('#otpBackBtn').addEventListener('click', function () {
+    setStep(1); showPane('details');
+    refreshDetails();                       // what was typed is preserved, not cleared
+    $('#idInput').focus();
+  });
   $('#resendBtn').addEventListener('click', sendCode);
   $('#acctList').addEventListener('click', function (e) {
     var b = e.target.closest('[data-ucc]');
