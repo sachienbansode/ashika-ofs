@@ -63,13 +63,30 @@ server-side). Exchange files: preview, then download the NSE or BSE file and upl
 | GET | `/api/export/:exchange/preview`, `/download`, `/api/export/log` | ofs-desk |
 | GET/POST | `/api/allotment`, `/import`, `/mail` | ofs-desk |
 
+## Repository
+
+`git@github.com:sachienbansode/ashika-ofs.git` (private) — branch `main`.
+
 ## Deploy — two blocks, always
 
 Local (Windows PowerShell):
 ```powershell
+cd "D:\sachin b\projects\OFS"
 git add -A
 git commit -m "ofs: <change>"
 git push origin main
+```
+
+First time on EC2 — its own path, own PM2 process (do NOT co-host under `staging-api-app`):
+```bash
+sudo mkdir -p /var/apps/ashika-ofs-app && sudo chown $USER /var/apps/ashika-ofs-app
+git clone git@github.com:sachienbansode/ashika-ofs.git /var/apps/ashika-ofs-app
+cd /var/apps/ashika-ofs-app
+cp .env.example .env && $EDITOR .env      # both DB connections, JWT_SECRET, CORS_ORIGINS
+npm ci --omit=dev
+npm run smoke                             # both databases must pass BEFORE migrating
+npm run migrate
+pm2 start ecosystem.config.js && pm2 save
 ```
 
 EC2 (`git fetch` BEFORE reset — stale cached-ref bug):
