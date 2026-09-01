@@ -159,7 +159,17 @@ app.use('/', express.static(path.join(__dirname, 'public', 'client'), STATIC));
 app.use((req, res) => res.status(404).json({ error: 'not_found' }));
 app.use((err, req, res, next) => {           // eslint-disable-line no-unused-vars
   console.error('[error]', err.stack || err.message);
-  res.status(err.status || 500).json({ error: 'server_error' });
+  // A 4xx raised deliberately carries a reason the desk can act on; only a 5xx is
+  // reduced to 'server_error', because that one really is ours and not theirs.
+  const status = err.status || 500;
+  if (status < 500) {
+    return res.status(status).json({
+      error: err.code || 'request_rejected',
+      message: err.message,
+      symbols: err.symbols
+    });
+  }
+  res.status(status).json({ error: 'server_error' });
 });
 
 const PORT = Number(process.env.PORT || 4011);

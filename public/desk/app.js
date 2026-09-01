@@ -172,6 +172,10 @@ async function loadDash() {
 }
 
 function fillIssueSelects() {
+  var none = !STATE.issues || !STATE.issues.length;
+  var pb0 = $('#pbNoIssues');
+  if (pb0) pb0.classList.toggle('hide', !none);
+
   var opts = STATE.issues.map(function (i) {
     return '<option value="' + i.id + '">' + esc(i.symbol) + ' — ' + esc(i.company) + '</option>';
   }).join('');
@@ -190,9 +194,15 @@ function fillIssueSelects() {
 }
 
 /* ---------------- clock + countdowns ---------------- */
+// The desk trades on IST and the browser may not be on it — ask for the zone by
+// name rather than labelling whatever the machine's clock says as IST.
+var IST_CLOCK = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+});
+
 function tickClock() {
   var n = new Date();
-  $('#clock').textContent = n.toLocaleTimeString('en-IN', { hour12: false }) + ' IST';
+  $('#clock').textContent = IST_CLOCK.format(n) + ' IST';
   $$('.cdn').forEach(function (el) {
     var ms = new Date(el.dataset.close) - n;
     el.textContent = ms > 0 ? 'closes in ' + hms(ms) : 'window closed';
@@ -270,20 +280,63 @@ function bidPayload() {
   };
 }
 
+/**
+ * Say what is actually wrong. "Pick an issue" is unhelpful when the reason no issue
+ * can be picked is that the master is empty — that needs a different instruction.
+ */
+function missingInputs(p) {
+  var out = [];
+  if (!p.issue_id) {
+    out.push(STATE.issues && STATE.issues.length
+      ? 'Choose an issue from the list.'
+      : 'There is no open OFS in the master yet. Load one under Masters → Exchange pull, or Masters → Import issues CSV.');
+  }
+  if (!p.client_ucc) out.push('Enter the client UCC.');
+  if (!p.qty) out.push('Enter a quantity.');
+  if (!p.is_cutoff && !p.price) out.push('Enter a bid price, or switch the price type to cut-off.');
+  return out;
+}
+
+function showBidErrors(list, heading) {
+  $('#pbPlace').disabled = true;
+  $('#pbResult').innerHTML = '<div class="note bad"><b>' + esc(heading || 'Cannot place this bid') + '</b><br>' +
+    list.map(function (x) { return '• ' + esc(x); }).join('<br>') + '</div>';
+}
+
 async function validateBid() {
   var p = bidPayload();
-  if (!p.issue_id || !p.client_ucc) { toast('Missing input', 'Pick an issue and enter a client UCC.', 'bad'); return; }
   if (STATE.editing) p.editingId = STATE.editing.id;
+
+  var missing = missingInputs(p);
+  if (missing.length) {
+    showBidErrors(missing, 'Fill these in first');
+    toast('Missing input', missing[0], 'bad');
+    return;
+  }
+
+  var btn = $('#pbCheck');
+  btn.disabled = true;
   try {
     var r = await api('/bids/validate', { method: 'POST', body: p });
     $('#pbPlace').disabled = !r.ok;
     $('#pbResult').innerHTML = r.ok
-      ? '<div class="note" style="border-left-color:var(--ok)">Valid — bid value ' + rupee(r.value, 0) +
-        ', free margin ' + rupee(r.free_margin, 0) + '. Minimum price ' + rupee(r.min_price) + '.</div>'
-      : '<div class="note" style="border-left-color:var(--bad)">' +
-        r.errors.map(function (x) { return '• ' + esc(x); }).join('<br>') + '</div>';
+      ? '<div class="note good"><b>Valid</b><br>Bid value ' + rupee(r.value, 0) +
+        ' · free margin ' + rupee(r.free_margin, 0) + ' · minimum price ' + rupee(r.min_price) + '.</div>'
+      : '<div class="note bad"><b>Cannot place this bid</b><br>' +
+        (r.errors || ['Rejected.']).map(function (x) { return '• ' + esc(x); }).join('<br>') + '</div>';
+    if (!r.ok) toast('Bid rejected', (r.errors && r.errors[0]) || 'See the reasons on the form.', 'bad');
     loadClientPanel(p.client_ucc);
-  } catch (e) { toast('Validation failed', (e.body && e.body.error) || e.message, 'bad'); }
+  } catch (e) {
+    // A 4xx from the server carries the reasons too — show them on the form rather
+    // than dropping a bare status into a toast.
+    var body = e.body || {};
+    var list = body.errors || (body.message ? [body.message] : null) ||
+               [e.message || 'The server could not validate this bid.'];
+    showBidErrors(list, e.status === 401 ? 'Session expired' : 'Validation failed');
+    toast('Validation failed', list[0], 'bad');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function loadClientPanel(ucc) {

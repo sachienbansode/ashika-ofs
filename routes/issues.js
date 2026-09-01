@@ -10,6 +10,7 @@ const audit = require('../lib/audit');
 const { sourceFor } = require('../lib/issueSource');
 const runner = require('../lib/syncRunner');
 const scheduler = require('../lib/syncScheduler');
+const archiver = require('../lib/archiver');
 const { upsertIssues } = require('../lib/issueSync');
 
 const router = express.Router();
@@ -313,17 +314,14 @@ router.post('/:id(\\d+)/unarchive', requirePage(PAGE), requireEdit(PAGE), async 
 /** Archive everything past the cut-off age in one go. */
 router.post('/archive/run', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
-    const days = Number(req.body.after_days || (await settings.all()).archive_after_days || 7);
-    const r = await rows(
-      `UPDATE ${SCHEMA}.ofs_issue
-          SET archived_at = now(), archived_by = $1, archive_reason = 'auto: closed over ' || $2 || ' days'
-        WHERE archived_at IS NULL
-          AND greatest(hni_close, ret_close) < now() - ($2 || ' days')::interval
-        RETURNING id, symbol`,
-      [String(req.user.email || req.user.id), String(days)]);
+    const out = await archiver.sweep({
+      actor: String(req.user.email || req.user.id),
+      days: req.body.after_days
+    });
     await audit.log(req, 'archive_run', 'ofs_issue', null, null,
-      { after_days: days, archived: r.length, symbols: r.map((x) => x.symbol) });
-    res.json({ archived: r.length, issues: r, after_days: days });
+      { after_days: out.after_days, archived: out.archived.length,
+        symbols: out.archived.map((x) => x.symbol) });
+    res.json({ archived: out.archived.length, issues: out.archived, after_days: out.after_days });
   } catch (e) { next(e); }
 });
 

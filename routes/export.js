@@ -30,10 +30,37 @@ async function collect(q) {
   return r;
 }
 
+/**
+ * A file that reaches an exchange carries the ISIN as the instrument's identity. An
+ * issue seeded from public reporting may not have a confirmed one yet (it is stored
+ * as a placeholder rather than as a plausible-looking guess), so refuse to build the
+ * file rather than send an exchange something that is not an ISIN.
+ */
+const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
+
+function assertExportable(bids) {
+  const bad = [];
+  for (const b of bids) {
+    const i = b.issue || {};
+    if (!ISIN_RE.test(String(i.isin || '').toUpperCase())) {
+      if (bad.indexOf(i.symbol) < 0) bad.push(i.symbol);
+    }
+  }
+  if (bad.length) {
+    const e = new Error('These issues have no confirmed ISIN yet: ' + bad.join(', ') +
+      '. Enter the ISIN from the exchange notice under Masters -> Issues before generating a bid file.');
+    e.status = 422;
+    e.code = 'isin_missing';
+    e.symbols = bad;
+    throw e;
+  }
+}
+
 async function buildFile(exchange, q) {
   const s = await settings.all();
   const adapter = adapterFor(exchange);
   const bids = await collect(q);
+  assertExportable(bids);
   let symbol = null;
   if (q.issue_id && q.issue_id !== 'all') {
     const i = await one(`SELECT symbol FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [q.issue_id]);

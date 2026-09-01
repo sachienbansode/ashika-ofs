@@ -45,3 +45,14 @@
 .lg-alt a{font-weight:600;text-decoration:none}
 .lg-alt a:hover{text-decoration:underline}
 .lg-foot{margin:16px 2px 0;font-size:11.5px;color:var(--muted);text-align:center}
+
+@media (max-width: 480px) {
+  .lg-body{padding:20px 14px;place-items:start center}
+  .lg-wrap{max-width:100%}
+  .lg-card .pad{padding:20px 18px 18px}
+  .lg-brand img{width:46px;height:46px}
+  .lg-brand .t{font-size:17px}
+  .inp{padding:12px 13px;font-size:16px}   /* 16px stops iOS zooming the form */
+  .otp{font-size:20px;letter-spacing:.38em}
+  .btn{min-height:46px}
+}

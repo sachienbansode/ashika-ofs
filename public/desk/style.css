@@ -36,18 +36,25 @@ h2.sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.16em;color:var(
   font-weight:600;margin:24px 0 11px}
 
 /* ---------- issue cards ---------- */
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(350px,1fr));gap:13px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:13px}
+.cards>*{min-width:0}
 .card{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:15px;
-  box-shadow:var(--shadow-s);transition:.16s}
+  box-shadow:var(--shadow-s);transition:.16s;min-width:0}
+.card select,.card input{max-width:100%}
 .card:hover{border-color:rgba(23,180,185,.45)}
 .card .hd{display:flex;align-items:flex-start;gap:10px}
 .card .sym{font-weight:600;font-size:16px;color:var(--navy)}
 .card .co{font-size:12px;color:var(--muted)}
 .card .isin{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px}
 
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:1px;margin-top:12px;
+/* min-width:0 everywhere below is load-bearing, not tidying. A grid item defaults
+   to min-width:auto, so a <select> holding "SYMBOL - Some Long Company Ltd" makes
+   its column as wide as that option; the grid then outgrows the card and the first
+   column is clipped away by the overflow:hidden here. */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1px;margin-top:12px;
   background:var(--line-s);border:1px solid var(--line-s);border-radius:10px;overflow:hidden}
-.f{background:#fff;padding:9px 12px}
+.f{background:#fff;padding:9px 12px;min-width:0}
+.f input,.f select,.f textarea{width:100%;max-width:100%;min-width:0}
 .f .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--muted);font-weight:600}
 .f .v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:13px;margin-top:2px}
 .f input,.f select{margin-top:4px}
@@ -161,3 +168,90 @@ tbody tr:hover{background:#fafcfd}
 .sync-sched label span{color:var(--muted);font-weight:500}
 .sync-sched .btn{margin:0}
 td.sm{font-size:11.5px;color:var(--muted);max-width:280px}
+
+/* ==========================================================================
+   Responsive.
+   The desk is used on a trading screen, a laptop and — during a bidding window —
+   a phone. Three things break first at small widths and are handled explicitly:
+   the sticky header, the tab strip, and tables that must stay scannable rather
+   than reflow into unreadable stacks. Bid data keeps its columns and scrolls.
+   ========================================================================== */
+
+/* Any table can outgrow the viewport; give every one its own scroller so the page
+   itself never scrolls sideways. */
+.wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.wrap table{min-width:max-content}
+
+@media (max-width: 1100px) {
+  main{padding:0 14px 40px}
+  nav.tabs{padding:12px 14px 0}
+  section.pane{padding:15px;border-radius:var(--r)}
+}
+
+@media (max-width: 820px) {
+  header.top{gap:10px;padding:10px 14px;position:static}   /* sticky wastes height here */
+  header.top .clock{order:3}
+  header.top .who{order:9;text-align:left;flex:1 1 100%;border-top:1px solid var(--line-s);padding-top:8px}
+  header.top .who b{display:inline;font-size:12px}
+  header.top .who span{margin-left:6px}
+
+  /* The tab strip scrolls rather than wrapping into two rows that push content down. */
+  nav.tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  nav.tabs::-webkit-scrollbar{display:none}
+  nav.tabs button{flex:0 0 auto;padding:9px 14px}
+
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px}
+  .kpi .v{font-size:19px}
+  .cards{grid-template-columns:1fr}
+
+  /* Controls stack and go full width — a 9px-tall select is not a touch target. */
+  .bar{gap:8px}
+  .bar input,.bar select{flex:1 1 190px;min-width:0}
+  .bar .btn,.bar .mini{flex:0 0 auto}
+  input[type=text],input[type=number],input[type=datetime-local],input[type=email],select{padding:11px 12px}
+
+  .sync-sched .row{flex-direction:column;align-items:stretch}
+  .sync-sched label{width:100%}
+  .sync-sched select{width:100%}
+}
+
+@media (max-width: 560px) {
+  main{padding:0 10px 32px}
+  nav.tabs{padding:10px 10px 0}
+  section.pane{padding:12px}
+  header.top{padding:9px 12px}
+  header.top img{height:28px}
+  .brand{font-size:11.5px;letter-spacing:.1em}
+  .clock{font-size:11.5px}
+
+  /* One field per row: two 50% columns at 360px are unusable. */
+  .grid2{grid-template-columns:1fr}
+  .kpis{grid-template-columns:1fr 1fr}
+  .kpi{padding:11px 12px}
+  .kpi .v{font-size:18px}
+
+  .bar input,.bar select{flex:1 1 100%}
+  .bar .btn{flex:1 1 100%}
+  .btn,.mini{min-height:40px}
+
+  table.tbl{font-size:12px}
+  table.tbl th,table.tbl td{padding:8px 10px}
+  .sync-prog .log{max-height:180px}
+  .sync-cards{flex-direction:column}
+}
+
+/* A pointer that is not a mouse gets bigger hit areas throughout. */
+@media (hover: none) and (pointer: coarse) {
+  .btn,.mini,nav.tabs button,[data-mtab]{min-height:40px}
+  table.tbl td .mini{min-height:34px}
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after{animation-duration:.001ms !important;transition-duration:.001ms !important}
+}
+
+@media print {
+  header.top,nav.tabs,.bar,.toast,#gate{display:none !important}
+  section.pane{border:0;box-shadow:none;padding:0}
+  .wrap{overflow:visible}
+}

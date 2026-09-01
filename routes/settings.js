@@ -81,6 +81,16 @@ const EDITABLE = {
       String(v).split(/[,\s;]+/).filter(Boolean).every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))
       || 'Use YYYY-MM-DD dates separated by commas'
   },
+  archive_auto: {
+    label: 'Archive expired issues automatically', kind: 'bool',
+    hint: '1 archives an issue once its last window closed more than the number of days below. Nothing is deleted.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
+  archive_after_days: {
+    label: 'Archive after (days closed)', kind: 'number',
+    hint: '0 archives as soon as the window closes. 7 keeps a week of closed issues on the desk.',
+    check: (v) => (Number(v) >= 0 && Number(v) <= 365) || 'Between 0 and 365'
+  },
   sync_enabled: {
     label: 'Auto-pull from the exchanges', kind: 'bool',
     hint: '1 runs a pull on the schedule below. Needs EXCHANGE_WEB_FETCH=true to fetch anything.',

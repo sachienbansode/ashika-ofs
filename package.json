@@ -15,7 +15,8 @@
     "test": "node --test",
     "smoke": "node db/smoke.js",
     "check-env": "node scripts/check-env.js",
-    "fetch-issues": "node scripts/fetch-issues.js"
+    "fetch-issues": "node scripts/fetch-issues.js",
+    "seed-issues": "node scripts/seed-issues.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

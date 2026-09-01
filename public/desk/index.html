@@ -79,6 +79,11 @@
       <div class="card">
         <h2 class="sec" style="margin-top:0" id="pbTitle">Bid on behalf of a client</h2>
         <div id="pbEditBar" class="note hide"></div>
+        <div id="pbNoIssues" class="note warn hide">
+          No OFS is loaded yet, so there is nothing to bid on. Load the issue master
+          under <b>Masters → Exchange pull</b>, or <b>Masters → Import issues CSV</b>
+          from the exchange's T-2/T-1 member notice.
+        </div>
         <div class="grid2">
           <label class="f"><span class="k">Issue</span><select id="pbIssue" style="width:100%"></select></label>
           <label class="f"><span class="k">Client UCC</span><input type="text" id="pbUcc" placeholder="ASH1001" style="width:100%"></label>

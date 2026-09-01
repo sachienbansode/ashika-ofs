@@ -104,3 +104,20 @@
   background:rgba(217,138,31,.14);border-bottom:1px solid rgba(217,138,31,.4);
   color:#8a5a10;font-size:11.5px;font-weight:600;padding:7px 14px;letter-spacing:.02em}
 .test-banner+.login-brand,.test-banner~*{position:relative}
+
+/* ---- responsive: fill the gaps left by the single 480px query above ---- */
+@media (max-width: 900px) {
+  .wrap{padding:16px 14px 48px}
+  .topbar{padding:11px 14px;gap:12px}
+  .cards,.grid2{grid-template-columns:1fr}
+}
+@media (max-width: 560px) {
+  .wrap{padding:12px 11px 36px}
+  .topbar{gap:9px}
+  .brand img{height:30px}
+  input,select,textarea{font-size:16px}     /* stops iOS zooming on focus */
+  .btn{min-height:46px}
+}
+@media (hover: none) and (pointer: coarse) {
+  .btn,.mini{min-height:44px}
+}

@@ -280,6 +280,38 @@ npm run fetch-issues -- --apply       # write what was found
 Run it on the server, where the exchange sites are reachable. If nothing parses,
 `--raw` prints what actually came back — that is what the parser gets matched to.
 
+## Seeding the 2026 calendar
+
+```bash
+npm run seed-issues              # 27 OFS from Jan-Aug 2026, then archive the closed ones
+npm run seed-issues -- --dry     # parse and report, write nothing
+```
+
+`docs/seed/ofs_2026.csv` holds every OFS that ran on NSE/BSE between 1 January and
+1 September 2026, compiled from public reporting and corroborated across sources —
+see [`docs/seed/README.md`](docs/seed/README.md) for what is and is not confirmed.
+
+**21 of the 27 carry `ISIN-UNKNOWN`.** The ISIN could only be confirmed from a
+primary filing for four issuers, and a plausible-looking wrong ISIN in an exchange
+bid file is worse than an obviously absent one. `routes/export.js` refuses to build a
+file for any issue whose ISIN is not a valid ISIN, so those rows are readable history
+that cannot silently reach an exchange; fill the real ISIN under Masters → Issues
+before bidding on one.
+
+Re-running is safe: the seed uses the same upsert as an exchange pull, matching on
+symbol + ISIN + T-day.
+
+## Archiving expired issues
+
+The scheduler sweeps on the same one-minute tick as the pull, on its own switch
+(`archive_auto`, `archive_after_days` — both under Masters → Settings). An issue is
+archived once its last window closed more than that many days ago. `archive_after_days = 0`
+archives as soon as the window closes.
+
+Archiving is a flag, never a move or a delete: bids, generated files, allotments and
+audit rows keep pointing at the same issue, and Masters → Archive opens any of them
+in full or restores it.
+
 ## When a bid may be placed
 
 Three gates, narrowest wins (`lib/marketHours.js`, `lib/domain.js`):
