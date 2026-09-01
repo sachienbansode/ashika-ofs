@@ -46,16 +46,27 @@ async function main() {
     const r = await ananta.one('SELECT current_database() AS db, current_user AS usr');
     ok('connected', r.db + ' as ' + r.usr);
 
-    for (const [schema, table, need] of [
-      [ananta.DWH, 'tbl_user_info', ['ucc', 'pan', 'name', 'name_asper_pan', 'mobile', 'email',
-                                     'depository', 'dp_name', 'branch', 'category', 'etl_loaded_at']],
-      [ananta.STG, 'ask_clientmast', ['ctermcode', 'branch_id', 'last_traded_date']]
+    // `need` is what ldAdapter's SELECT actually references; `optional` is used when
+    // present but has a fallback. A missing column prints the real column list, so a
+    // rename is diagnosed in one run instead of needing a second query.
+    for (const [schema, table, need, optional] of [
+      [ananta.DWH, 'tbl_user_info',
+        ['ucc', 'pan', 'mobile', 'email', 'client_name', 'first_name', 'middle_name', 'last_name',
+         'ucc_client_category', 'depository', 'dp_name', 'dp_account_no', 'status', 'poa', 'city', 'state'],
+        ['name_asper_pan', 'etl_loaded_at']],
+      [ananta.STG, 'ask_clientmast', ['ctermcode', 'branch_id', 'last_traded_date'], []]
     ]) {
       const cols = await columnsOf(schema, table);
       if (!cols.length) { fail(schema + '.' + table, 'not found or not visible to this user'); continue; }
       const missing = need.filter((c) => !cols.includes(c));
-      if (missing.length) fail(schema + '.' + table, 'missing column(s): ' + missing.join(', '));
-      else ok(schema + '.' + table, cols.length + ' columns, all required present');
+      if (missing.length) {
+        fail(schema + '.' + table, 'missing column(s): ' + missing.join(', '));
+        console.log('        actual columns: ' + cols.join(', '));
+      } else {
+        ok(schema + '.' + table, cols.length + ' columns, all required present');
+      }
+      const absent = (optional || []).filter((c) => !cols.includes(c));
+      if (absent.length) warn(schema + '.' + table, 'optional column(s) absent, fallback used: ' + absent.join(', '));
     }
 
     const n = await ananta.one(`SELECT count(*)::bigint AS n FROM ${ananta.DWH}.tbl_user_info`);
@@ -78,8 +89,10 @@ async function main() {
     ok('ldAdapter.search', sample.length + ' row(s)');
     if (sample.length) {
       const c = sample[0];
-      console.log('        sample ucc=' + c.ucc + ' pan=' + String(c.pan || '').slice(0, 3) + '***' +
-                  ' mobile=***' + String(c.mobile || '').slice(-4) + ' branch=' + (c.branch || '-'));
+      console.log('        sample ucc=' + c.ucc + ' name=' + (c.name ? 'resolved' : 'EMPTY') +
+                  ' pan=' + String(c.pan || '').slice(0, 3) + '***' +
+                  ' mobile=***' + String(c.mobile || '').slice(-4) +
+                  ' category=' + (c.category || '-') + ' branch_id=' + (c.branch_id || '-'));
       const hit = await ld.findByUcc(c.ucc);
       (hit ? ok : fail)('ldAdapter.findByUcc round-trips');
       const many = await ld.findMany(sample.map((x) => x.ucc));

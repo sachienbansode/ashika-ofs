@@ -35,7 +35,7 @@
 ### 1.2 Schemas the OFS app READS (all in `uat_ananta_staging`, via `anantaAdapter` / `ldAdapter`)
 | Schema | Use |
 |---|---|
-| `dwh.tbl_user_info` | Client master / KYC identity: **ucc, pan, name, middle_name, name_asper_pan, mobile, email, depository, dp_name, branch, category, is_new_user, etl_loaded_at**. Keyed by **UCC** (upper/trim). |
+| `dwh.tbl_user_info` | Client master / KYC identity, keyed by **UCC** (upper/trim). Verified columns (2026-09-01): **ucc, pan, mobile, email, first_name, middle_name, last_name, client_name, name_asper_pan, ucc_client_category, depository, dp_name, dp_account_no, dpid, status, poa, dob, gender, occupation, address, city, state, country, pincode, is_new_user, mtf_status, etl_loaded_at**. ⚠️ There is **no `name`, `branch` or `category`** column - earlier drafts of this file said otherwise. Display name = `name_asper_pan` → `client_name` → `first/middle/last`; client type = `ucc_client_category`; branch comes from `stg.ask_clientmast.branch_id`. |
 | `stg.ask_clientmast` | `branch_id`, **`last_traded_date`** (authoritative — never derive traded-date elsewhere), `ctermcode`(UCC). |
 | `dwh.mis_branch_dim` | Branch names/regions if OFS needs branch labels. |
 

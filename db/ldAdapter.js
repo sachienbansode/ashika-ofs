@@ -14,13 +14,28 @@ const ananta = require('./anantaAdapter');
 const DWH = ananta.DWH;
 const STG = ananta.STG;
 
+/**
+ * Column names verified against the live table on 2026-09-01 - REUSE.md documented
+ * three of them wrongly. There is no `name`, `branch` or `category` on
+ * dwh.tbl_user_info:
+ *   name     -> name_asper_pan, else client_name, else first/middle/last
+ *   category -> ucc_client_category (Individual | HUF | PF ...)
+ *   branch   -> not on this table at all; branch_id comes from stg.ask_clientmast
+ */
 const SELECT = `
   SELECT upper(btrim(u.ucc))                                             AS ucc,
-         COALESCE(NULLIF(btrim(u.name_asper_pan), ''), btrim(u.name))    AS name,
+         COALESCE(
+           NULLIF(btrim(u.name_asper_pan), ''),
+           NULLIF(btrim(u.client_name), ''),
+           btrim(concat_ws(' ', u.first_name, u.middle_name, u.last_name))
+         )                                                               AS name,
+         btrim(u.client_name)                                            AS client_name,
          upper(btrim(u.pan))                                             AS pan,
          right(regexp_replace(COALESCE(u.mobile,''), '[^0-9]', '', 'g'), 10) AS mobile,
          lower(btrim(u.email))                                           AS email,
-         u.depository, u.dp_name, u.branch, u.category,
+         u.depository, u.dp_name, u.dp_account_no,
+         u.ucc_client_category                                           AS category,
+         u.status, u.poa, u.city, u.state,
          c.branch_id, c.last_traded_date, u.etl_loaded_at
     FROM ${DWH}.tbl_user_info u
     LEFT JOIN ${STG}.ask_clientmast c
@@ -51,7 +66,7 @@ async function search(q, limit) {
   const like = '%' + norm(q) + '%';
   return ananta.rows(
     SELECT + ` WHERE upper(btrim(u.ucc)) LIKE $1
-                  OR upper(u.name) LIKE $1
+                  OR upper(COALESCE(u.client_name,'')) LIKE $1
                   OR upper(COALESCE(u.name_asper_pan,'')) LIKE $1
                   OR upper(btrim(u.pan)) LIKE $1
                   OR right(regexp_replace(COALESCE(u.mobile,''),'[^0-9]','','g'),10) LIKE $1
