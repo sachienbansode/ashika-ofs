@@ -12,7 +12,8 @@
     "dev": "node --watch server.js",
     "check": "node -e \"require('fs').readdirSync('.',{recursive:true}).filter(f=>f.endsWith('.js')&&!f.includes('node_modules')).forEach(f=>{require('child_process').execSync('node --check '+JSON.stringify(f));console.log('ok '+f)})\"",
     "migrate": "node db/migrate.js",
-    "test": "node --test"
+    "test": "node --test",
+    "smoke": "node db/smoke.js"
   },
   "dependencies": {
     "compression": "^1.7.4",

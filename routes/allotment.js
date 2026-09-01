@@ -6,6 +6,7 @@
  */
 const express = require('express');
 const { SCHEMA, rows, one, query, tx } = require('../db/ofsAdapter');
+const ld = require('../db/ldAdapter');
 const { requirePage, requireEdit } = require('../middleware/pageAccess');
 const audit = require('../lib/audit');
 
@@ -82,12 +83,12 @@ router.post('/mail', requirePage(PAGE), requireEdit(PAGE), async (req, res, next
   try {
     const issueId = req.body.issue_id;
     if (!issueId) return res.status(400).json({ error: 'missing_input' });
-    const queue = await rows(
-      `SELECT a.client_ucc, a.allot_qty, a.allot_price, a.allot_value, c.email, c.name, i.symbol
+    const pending = await rows(
+      `SELECT a.client_ucc, a.allot_qty, a.allot_price, a.allot_value, i.symbol, i.company
          FROM ${SCHEMA}.ofs_allotment a
-         LEFT JOIN ${SCHEMA}.ofs_client c ON c.ucc = a.client_ucc
-         LEFT JOIN ${SCHEMA}.ofs_issue i  ON i.id = a.issue_id
+         LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = a.issue_id
         WHERE a.issue_id = $1 AND a.mail_status = 'pending' AND a.allot_qty > 0`, [issueId]);
+    const queue = await ld.enrich(pending, 'client_ucc');   // email/name come from LD
     res.status(501).json({
       error: 'mailer_not_wired',
       message: 'Shared platform mailer + lib/emailLog not yet vendored into the OFS repo.',

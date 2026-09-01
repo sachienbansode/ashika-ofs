@@ -12,6 +12,7 @@ const { authMiddleware } = require('./middleware/auth');
 const { requirePage } = require('./middleware/pageAccess');
 const { registerPages } = require('./lib/pageRegistry');
 const ofsDb = require('./db/ofsAdapter');
+const ananta = require('./db/anantaAdapter');
 const settings = require('./lib/settings');
 
 const app = express();
@@ -62,9 +63,14 @@ const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 600, standardHeaders: t
 const writeLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
 
 app.get('/healthz', (req, res) => res.json({ ok: true, app: process.env.APP_NAME || 'ashika-ofs-app' }));
+/** Both databases must answer - the desk is useless with either one down. */
 app.get('/readyz', async (req, res) => {
-  try { await ofsDb.query('SELECT 1'); res.json({ ok: true }); }
-  catch (e) { res.status(503).json({ ok: false, error: e.message }); }
+  const out = { ok: true, ofs: null, ananta: null };
+  for (const [key, db] of [['ofs', ofsDb], ['ananta', ananta]]) {
+    try { await db.query('SELECT 1'); out[key] = { ok: true, target: db.label() }; }
+    catch (e) { out.ok = false; out[key] = { ok: false, target: db.label(), error: e.message }; }
+  }
+  res.status(out.ok ? 200 : 503).json(out);
 });
 
 /* ---- API: authenticated, and every mount gated with requirePage ---- */
@@ -104,6 +110,8 @@ const PORT = Number(process.env.PORT || 4011);
 const HOST = process.env.HOST || '127.0.0.1';   // bound to localhost; nginx in front
 
 async function start() {
+  console.log('[boot] ofs db    :', ofsDb.label());
+  console.log('[boot] ananta db :', ananta.label());
   try { console.log('[boot] pages registered:', (await registerPages()).join(', ')); }
   catch (e) { console.warn('[boot] page registration skipped:', e.message); }
   app.listen(PORT, HOST, () => console.log(`[boot] ashika-ofs-app listening on ${HOST}:${PORT}`));

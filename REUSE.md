@@ -10,7 +10,8 @@
 
 1. **The OFS app READS LD/DWH data and CALLS shared services (auth/email/RMS).** It does **not** copy client master, margin, or notification logic.
 2. **Separate deployment.** OFS is client/AP-facing and time-critical during the bidding window — keep it isolated from the internal ETL/admin console for availability, security and audit. Do not bolt it in as a tab.
-3. **New Postgres schema `ofs`** on the **same Ananta instance** as `stg`/`dwh` — so LD/DWH data is reachable by query while OFS state stays isolated.
+3. **Own database `ofs_bids`** on the prod Postgres box (13.233.106.37), with OFS tables under an `ofs` schema inside it. **Superseded the original plan** of an `ofs` schema inside the Ananta database (decided 2026-09-01, when the prod DB was created).
+   > **Consequence — read this before writing SQL.** Postgres cannot join across databases. OFS state and LD/DWH now live in *different databases on the same server*, so `ofs.ofs_client` could not remain a view. Client identity is read at request time through `db/ldAdapter.js` and merged in the application. Two pools, two adapters, no cross-database SQL — and still no copy of the client master.
 4. **Never duplicate PII handling.** Any client-data view/export must mask via the shared PII rules unless the viewer is explicitly allowed to unmask.
 5. **Confirm the open items with Ashika** (see spec §3) before building exchange/margin integrations.
 
@@ -18,20 +19,27 @@
 
 ## 1. Databases
 
-### 1.1 Ananta Postgres (primary — LD, DWH, and new OFS schema)
-- **Instance:** `uat_ananta_staging` (Staging/UAT). Same instance hosts `stg`, `dwh`, `"codifi-uploaderdb"`, `"admin-staging-api"`.
-- **Env:** `PG_HOST`, `PG_PORT` (5432), `PG_DATABASE` (`uat_ananta_staging`), `PG_USER`, `PG_PASSWORD`. Prod via `PROD_ANANTA_DATABASE_URL`.
-- **DB box:** separate server `13.233.106.37` / `ip-172-31-24-77`, data dir `/var/lib/postgresql/18/main`.
-- **Pattern to copy:** `db/codifiAdapter.js` is a minimal `pg.Pool` + `query(sql, params)` + a fixed `SCHEMA` constant. The OFS app should create its own `ofsAdapter.js` the same way with `SCHEMA = 'ofs'`.
+### 1.1 Two databases, one server (`13.233.106.37` / `ip-172-31-24-77`)
 
-### 1.2 Schemas the OFS app READS
+| Database | Holds | Adapter | Env prefix | Access |
+|---|---|---|---|---|
+| `ofs_bids` | OFS state, under schema `ofs` | `db/ofsAdapter.js` | `OFS_` | read/write (owned) |
+| `uat_ananta_staging` | `dwh`, `stg`, `"admin-staging-api"`, `"codifi-uploaderdb"` | `db/anantaAdapter.js` | `ANANTA_` | LD read-only; page_registry write |
+
+- **`uat_ananta_staging` is PRODUCTION** despite the name. Treat every write to it as a prod write.
+- **Env:** each connection takes `<PREFIX>_DATABASE_URL` *or* discrete `<PREFIX>_PG_*` vars. `<PREFIX>_PG_PASSWORD` is applied after the URL is parsed and overrides anything embedded in it — keep the password out of the URL.
+- **Pool factory:** `db/pool.js`. Both adapters are thin wrappers over it, so a third connection is three lines.
+- Data dir on the box: `/var/lib/postgresql/18/main`.
+- Run `npm run smoke` after any env change: it proves both connections, checks `CREATE` privilege on `ofs_bids`, and verifies the LD tables carry the columns listed below.
+
+### 1.2 Schemas the OFS app READS (all in `uat_ananta_staging`, via `anantaAdapter` / `ldAdapter`)
 | Schema | Use |
 |---|---|
 | `dwh.tbl_user_info` | Client master / KYC identity: **ucc, pan, name, middle_name, name_asper_pan, mobile, email, depository, dp_name, branch, category, is_new_user, etl_loaded_at**. Keyed by **UCC** (upper/trim). |
 | `stg.ask_clientmast` | `branch_id`, **`last_traded_date`** (authoritative — never derive traded-date elsewhere), `ctermcode`(UCC). |
 | `dwh.mis_branch_dim` | Branch names/regions if OFS needs branch labels. |
 
-> Identity join convention used across the app: normalise UCC as `upper(btrim(ucc))`; normalise phone to last-10-digits `right(regexp_replace(col,'[^0-9]','','g'),10)`.
+> Identity join convention used across the app: normalise UCC as `upper(btrim(ucc))`; normalise phone to last-10-digits `right(regexp_replace(col,'[^0-9]','','g'),10)`. `db/ldAdapter.js` is the single place this SQL lives — `findByUcc`, `findMany`, `search`, `exists`, `enrich(rows)`. Never write a query that names `dwh.` or `stg.` from the OFS pool; it will not resolve.
 
 ### 1.3 MySQL destinations (only if a downstream sync is ever needed — NOT for Phase 1)
 - `db/connectors/factory.js` → `getPool('OMNENEST', ...)` / `getPool('CODIFI', ...)`; shim `db/mysqlAdapter.js` (`getOmnePool`, `getCodifiPool`, `mysqlQuery`). Remote MySQL, client access only — **no OS/df/superuser**. Env: `OMNENEST_DB_TYPE`, `CODIFI_DB_TYPE` (default `mysql`).
@@ -122,8 +130,8 @@ DB changes run via `psql` on the DB box (`13.233.106.37`, db `uat_ananta_staging
 
 ## 9. What to build fresh in the OFS repo (not reuse)
 
-- `ofs` schema + `ofsAdapter.js` (mirror `codifiAdapter.js`).
-- OFS domain tables (see spec §6): `ofs_issue`, `ofs_bid`, `ofs_margin`, `ofs_allotment`, `ofs_export_log`, `ofs_audit`; `ofs_client` as a **view** over `dwh.tbl_user_info`.
+- `ofs_bids` database + `ofs` schema + `ofsAdapter.js`.
+- OFS domain tables (see spec §6): `ofs_issue`, `ofs_bid`, `ofs_margin` (+ `ofs_margin_log`), `ofs_allotment`, `ofs_export_log`, `ofs_audit`, `ofs_setting`. **No `ofs_client`** — the spec's read-through view is now `db/ldAdapter.js`, because the two databases cannot be joined.
 - **Per-exchange file adapters** (one NSE, one BSE) — map `ofs_bid` → each exchange's bulk-bid format; pin exact columns from the member circulars.
 - Real-time OFS dashboard (issues, live bid book, category split, subscription, countdown).
 - Client/AP identity path (Phase 2) — separate from staff `users`.

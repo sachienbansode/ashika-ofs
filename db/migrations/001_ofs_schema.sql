@@ -167,25 +167,12 @@ CREATE TABLE IF NOT EXISTS ofs.ofs_audit (
 );
 CREATE INDEX IF NOT EXISTS ofs_audit_ix ON ofs.ofs_audit (entity, entity_id, at DESC);
 
--- ---------------------------------------------------------------- client view (read-through to LD)
--- NOT a copy. Reads dwh.tbl_user_info + stg.ask_clientmast per REUSE.md 1.2.
-CREATE OR REPLACE VIEW ofs.ofs_client AS
-SELECT
-  upper(btrim(u.ucc))                                        AS ucc,
-  COALESCE(NULLIF(btrim(u.name_asper_pan), ''), btrim(u.name)) AS name,
-  upper(btrim(u.pan))                                        AS pan,
-  right(regexp_replace(COALESCE(u.mobile,''), '[^0-9]', '', 'g'), 10) AS mobile,
-  lower(btrim(u.email))                                      AS email,
-  u.depository,
-  u.dp_name,
-  u.branch,
-  u.category,
-  c.branch_id,
-  c.last_traded_date,
-  u.etl_loaded_at
-FROM dwh.tbl_user_info u
-LEFT JOIN stg.ask_clientmast c
-  ON upper(btrim(c.ctermcode)) = upper(btrim(u.ucc));
+-- ---------------------------------------------------------------- client data (NOT here)
+-- There is deliberately no ofs_client table or view.
+-- OFS state lives in the `ofs_bids` database; LD/DWH lives in `uat_ananta_staging`.
+-- Postgres cannot join across databases, so client identity is read at request time
+-- through db/ldAdapter.js and merged in the application. Client master is never
+-- copied into this database - only the UCC is stored, as a reference.
 
 -- ---------------------------------------------------------------- updated_at triggers
 CREATE OR REPLACE FUNCTION ofs.touch_updated_at() RETURNS trigger AS $$

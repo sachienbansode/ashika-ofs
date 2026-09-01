@@ -11,7 +11,8 @@ A **separate** application that lets Ashika offer **Offer for Sale (OFS)** to cl
 
 ## Golden rules
 1. **Reuse, don't reinvent.** LD client data, DB, auth/roles, email/OTP, PII masking all come from the existing platform per `REUSE.md`. Read LD/DWH; call shared services.
-2. **Isolation.** Own repo, own PM2 process, own nginx block, own `ofs` Postgres schema on the shared Ananta instance.
+2. **Isolation.** Own repo, own PM2 process, own nginx block, own **database** `ofs_bids` (schema `ofs` inside it) on the prod Postgres box — *not* a schema inside the Ananta database.
+2a. **No cross-database SQL.** LD/DWH lives in `uat_ananta_staging`, OFS state in `ofs_bids`. Postgres will not join them. Read clients through `db/ldAdapter.js` and merge in the app; a query naming `dwh.`/`stg.` from the OFS pool is a bug.
 3. **Client identity ≠ staff users.** Client/AP sessions are a new path (SSO→LD verify→OTP), not the staff `users` table.
 4. **PII is masked by default**; unmask is an explicit gated toggle (fail-closed).
 5. **RMS available-margin does not exist yet** as a read API — confirm with Ashika before wiring live margin; until then use the `ofs_margin` snapshot table.
@@ -26,7 +27,7 @@ git reset --hard origin/main
 pm2 restart <ofs-app>
 pm2 logs <ofs-app> --lines 20
 ```
-DB changes: `psql` on the DB box `13.233.106.37` (db `uat_ananta_staging`). Verify every JS change with `node --check` before deploy.
+DB changes: `psql` on the box `13.233.106.37` — OFS migrations against `ofs_bids`, never against `uat_ananta_staging` (which is PRODUCTION despite its name). Password via `PGPASSWORD` only. Verify every JS change with `node --check`, then `npm test`, before deploy; `npm run smoke` proves both connections.
 
 ## Security invariants (non-negotiable)
 `'*'`-only full access · `requirePage` on every mount · unconditional PII masking · rate-limits on auth/OTP · no CORS origin reflection · CSP on · OTP stored hash-only · UI help text says "Admin" not "Ashika".

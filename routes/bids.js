@@ -1,7 +1,8 @@
 'use strict';
 /** Bid book: list, place, modify, cancel. Server enforces every prototype rule. */
 const express = require('express');
-const { SCHEMA, rows, one, query, tx } = require('../db/ofsAdapter');
+const { SCHEMA, rows, one } = require('../db/ofsAdapter');
+const ld = require('../db/ldAdapter');
 const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAccess');
 const { maskRows } = require('../lib/pii');
 const settings = require('../lib/settings');
@@ -35,15 +36,16 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
     p.push(limit); p.push(offset);
 
     const r = await rows(
-      `SELECT ${BID_COLS}, ${ISSUE_SEL}, c.name AS client_name, c.pan, c.mobile, c.email
+      `SELECT ${BID_COLS}, ${ISSUE_SEL}
          FROM ${SCHEMA}.ofs_bid b
          ${ISSUE_JOIN}
-         LEFT JOIN ${SCHEMA}.ofs_client c ON c.ucc = b.client_ucc
         ${w.length ? 'WHERE ' + w.join(' AND ') : ''}
         ORDER BY b.created_at DESC
         LIMIT $${p.length - 1} OFFSET $${p.length}`, p);
 
-    res.json({ bids: maskRows(r, canViewPII(req, PAGE)), pii_unmasked: canViewPII(req, PAGE) });
+    // client identity lives in the other database - one extra round trip, not a join
+    const merged = await ld.enrich(r, 'client_ucc');
+    res.json({ bids: maskRows(merged, canViewPII(req, PAGE)), pii_unmasked: canViewPII(req, PAGE) });
   } catch (e) { next(e); }
 });
 
@@ -92,8 +94,9 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
     const b = normalise(req.body || {});
     if (!b.issue_id || !b.client_ucc) return res.status(400).json({ error: 'missing_field' });
 
-    const client = await one(`SELECT ucc FROM ${SCHEMA}.ofs_client WHERE ucc = $1`, [b.client_ucc]);
-    if (!client) return res.status(404).json({ error: 'unknown_client', ucc: b.client_ucc });
+    if (!(await ld.exists(b.client_ucc))) {
+      return res.status(404).json({ error: 'unknown_client', ucc: b.client_ucc });
+    }
 
     const ctx = await loadContext(b.issue_id, b.client_ucc, null);
     if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });

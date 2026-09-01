@@ -5,10 +5,24 @@ NSE / BSE bid-file download. Reuses the `omnenest-uploader-api` platform for LD 
 DB, auth/roles, email and PII — see `REUSE.md`. Full spec: `Ashika_OFS_Module_Specification.docx`.
 
 ## Layout
+### Two databases
+
+Both live on `13.233.106.37`. Postgres cannot join across databases, so client
+identity is fetched from Ananta and merged in the app — never copied into `ofs_bids`.
+
+| Database | Holds | Adapter | Env prefix |
+|---|---|---|---|
+| `ofs_bids` | OFS state (schema `ofs`) | `db/ofsAdapter.js` | `OFS_` |
+| `uat_ananta_staging` — **production** | `dwh`, `stg`, `"admin-staging-api"` | `db/anantaAdapter.js` | `ANANTA_` |
+
 ```
-db/ofsAdapter.js        pg.Pool + query/one/rows/tx, SCHEMA='ofs'   (mirrors codifiAdapter.js)
-db/adminAdapter.js      reads "admin-staging-api" (users, roles, page_registry)
-db/migrations/001_*.sql ofs schema: issue, bid, margin(+log), allotment, export_log, audit, client VIEW
+db/pool.js              pool factory: <PREFIX>_DATABASE_URL or <PREFIX>_PG_* vars
+db/ofsAdapter.js        ofs_bids pool, SCHEMA='ofs'
+db/anantaAdapter.js     uat_ananta_staging pool (LD read + page_registry write)
+db/ldAdapter.js         client lookups: findByUcc / findMany / search / exists / enrich
+db/adminAdapter.js      "admin-staging-api" (users, roles, page_registry) on the Ananta pool
+db/smoke.js             npm run smoke - proves both connections and the LD columns
+db/migrations/001_*.sql ofs schema: setting, issue, bid, margin(+log), allotment, export_log, audit
 lib/domain.js           SEBI/exchange bid rules ported from the prototype (server-side truth)
 lib/exchange/nse.js     NSE e-OFS bulk-upload mapping      <- pin columns from the member circular
 lib/exchange/bse.js     BSE iBBS bulk-bid mapping          <- pin columns from BSE Notice 20120727-26
@@ -23,9 +37,10 @@ tests/                  node --test: domain rules, NSE/BSE adapters, CSV parser
 
 ## Run
 ```bash
-cp .env.example .env         # fill PG_*, PGPASSWORD, JWT_SECRET, CORS_ORIGINS
+cp .env.example .env         # fill both DB connections, JWT_SECRET, CORS_ORIGINS
 npm install
-npm run migrate              # applies db/migrations/*.sql, tracked in ofs._migration
+npm run smoke                # verify both databases and the LD tables BEFORE migrating
+npm run migrate              # applies db/migrations/*.sql to ofs_bids, tracked in ofs._migration
 npm start                    # binds 127.0.0.1:4011, nginx in front
 npm test                     # node --test: domain rules, exchange adapters, CSV parser (no DB needed)
 ```
@@ -66,7 +81,8 @@ npm ci --omit=dev
 pm2 restart ashika-ofs-app
 pm2 logs ashika-ofs-app --lines 20
 ```
-DB changes via `psql` on `13.233.106.37`, db `uat_ananta_staging` (password via `PGPASSWORD` only).
+OFS migrations run against **`ofs_bids`** on `13.233.106.37` — never against `uat_ananta_staging`,
+which is production. Password via `PGPASSWORD` only.
 
 ## nginx (own server block — do not co-host under staging-api-app)
 ```nginx
