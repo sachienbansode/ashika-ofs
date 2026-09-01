@@ -123,8 +123,22 @@ app.get('/config.js', (req, res) => {
    Separate directories so a client-facing page can never accidentally include a
    desk script, and so the desk can later be restricted by IP without touching
    the client side. */
-const STATIC = { maxAge: '5m', index: 'index.html' };
-app.use('/shared', express.static(path.join(__dirname, 'public', 'shared'), { maxAge: '1h' }));
+/*
+ * Caching: HTML is revalidated on every load, assets are cached but must revalidate.
+ * Without this a deploy leaves a browser holding yesterday's index.html while the
+ * server serves today's assets - the page renders unstyled and scriptless, with
+ * every asset returning 200 to curl. Cost is one conditional request per load.
+ */
+const STATIC = {
+  index: 'index.html',
+  etag: true,
+  setHeaders(res, filePath) {
+    res.setHeader('Cache-Control', filePath.endsWith('.html')
+      ? 'no-cache'                      // always revalidate the shell
+      : 'public, max-age=300, must-revalidate');
+  }
+};
+app.use('/shared', express.static(path.join(__dirname, 'public', 'shared'), STATIC));
 app.use('/desk', express.static(path.join(__dirname, 'public', 'desk'), STATIC));
 app.use('/', express.static(path.join(__dirname, 'public', 'client'), STATIC));
 

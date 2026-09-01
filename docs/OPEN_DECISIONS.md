@@ -1,30 +1,56 @@
-# Open decisions — confirm with Ashika before these paths are wired
+# Open decisions
 
-| # | Decision | Status | Blocks |
+Status as of 2026-09-01. "Settled" means we have an answer and the code reflects it.
+"Blocked" means the answer exists outside this project — a member circular, an RMS
+capability, or a compliance ruling — and no amount of building resolves it.
+
+## Settled
+
+| # | Decision | Answer | Where it lives in the code |
 |---|---|---|---|
-| 1 | Exchanges for Phase 1 | **Both NSE + BSE** (confirmed 01-Sep-2026, internal) | — |
-| 2 | Mode A (file) vs early STP | Mode A assumed | Phase 3 |
-| 3 | Exact NSE bulk-upload columns | **Open** — pull from NSE member portal | `lib/exchange/nse.js` go-live |
-| 4 | Exact BSE iBBS layout (Notice 20120727-26, 3.3.4) + member/trading code | **Open** | `lib/exchange/bse.js` go-live |
-| 5 | RMS available-margin read API + earmark | **Open** — none exists today; using `ofs.ofs_margin` snapshot | live margin |
-| 6 | AP → client mapping source; APs bid or view only | **Open** | Phase 2 |
-| 7 | Website → module SSO + client OTP policy | **Open** | Phase 2 |
-| 8 | Issue-master ingestion (manual/CSV vs circular feed) | Manual + CSV for now | automation |
-| 9 | Exchange allotment/obligation file layout | **Open** | `routes/allotment.js` parser |
-| 10 | Source IP whitelisting / trading-network zone | **Open** | any exchange connectivity |
-| 11 | Client authorisation model (consent/POA, mandatory OTP, audit) | **Open** | desk bidding on behalf |
+| 1 | Exchanges for Phase 1 | **Both NSE and BSE** from day one | `lib/exchange/nse.js`, `lib/exchange/bse.js` |
+| 2 | File upload vs straight-through | **Mode A (file)**; STP is Phase 3 | `routes/export.js` |
+| 3 | Website → module SSO | **No SSO.** The website simply links to the OFS app; the client signs in here | `routes/clientAuth.js` |
+| 4 | Client sign-in method | **Mobile + registered email, then a one-time code** to the address on file | `lib/clientAuth.js`, `public/client/` |
+| 5 | Staff sign-in | **Portal SSO handoff**, single-use ticket, MFA inherited from the portal | `lib/sso.js`, `docs/platform-patch/` |
+| 6 | Issue-master ingestion | **Manual entry + CSV import**; no exchange feed in Phase 1 | Masters → Import issues CSV |
+| 7 | Margin source | **Snapshot table**, set by the desk or imported by CSV — no RMS read API exists | `ofs.ofs_margin` |
+| 8 | Client eligibility | Only clients **Active** in the client master may bid (36,663 of 136,129) | `db/ldAdapter.js`, `lib/domain.js` |
+| 9 | Database topology | Own database `ofs_bids`; LD read from `uat_ananta_staging` | `db/pgConfig.js` |
+| 10 | Deployment | Azure VM, app only; both databases stay on AWS | `docs/DEPLOY_AZURE.md` |
 
-## Schema notes
+## Blocked — these need something from outside
 
-**`ofs_issue.issue_date`** — the T-day (Non-Retail day) as a plain `date`, filled by the
-`ofs_issue_fill_date` trigger from `hni_open` in `Asia/Kolkata` when the caller omits it.
-It exists because `hni_open::date` is STABLE, not IMMUTABLE — casting a `timestamptz` to
-`date` depends on the session TimeZone, so Postgres refuses it in an index expression
-(`ERROR: functions in index expression must be marked IMMUTABLE`, SQLSTATE 42P17).
-Deriving it in IST also fixes a real bug: an issue opening 20:00 UTC belongs to the *next*
-IST trading day, so a naive UTC cast would file it under the wrong day.
+| # | Decision | Why it is still open | What it blocks | Who can answer |
+|---|---|---|---|---|
+| A | **Exact NSE bulk-upload columns** | The layout changes by circular. Ours is the representative field set from the spec and the prototype, not a pinned one. | Go-live. A wrong column order means every row rejected. | Ashika's desk, from the NSE member portal |
+| B | **Exact BSE iBBS layout** | Defined in BSE Notice 20120727-26 (3.3.4); we have the shape, not the file. Also needs the member/trading code. | Go-live on BSE | Ashika's desk, from the BSE member portal |
+| C | **Allotment file format** | We import parsed rows; nobody has seen the exchange's actual return file. | Automated allotment import | Ashika, after any OFS |
+| D | **RMS available-margin API** | `routes/rms.js` on the platform only *writes* RMS config. A read endpoint may not exist at all. | Live margin instead of a snapshot | Ashika IT / RMS vendor |
+| E | **AP → client mapping** | User indicated `stg.branchho`; the logic itself is still to be shared. | The whole AP journey | Ashika (logic promised) |
+| F | **Client authorisation model** | Consent/POA for bidding on a client's behalf, whether OTP is required per bid as well as at sign-in, and whether the client must see the live indicative price before confirming. | Desk bidding on behalf; per-bid OTP | Ashika compliance |
+| G | **BSE scrip code master** | `ofs_issue.bse_scrip_code` has no feed; it is typed in per issue today. | BSE file completeness | Ashika's desk |
+| H | **Exchange IP whitelisting** | Only matters when we talk to an exchange directly, i.e. Phase 3. | STP | Ashika IT |
 
-Verified on a scratch PostgreSQL 16 instance (prod runs 18): the migration applies clean and
-is re-runnable; the unique index rejects the same scrip on the same trading day regardless of
-case or padding and allows it on the next day; `ofs_bid_one_live_uq` rejects a second live bid
-and permits a fresh one after a cancel; `ofs_bid_price_ck` rejects a non-cut-off bid with no price.
+## Why the blocked ones cannot be closed from here
+
+A, B, C and G are **documents held behind member logins** — NSE e-OFS and BSE iBBS
+portals. They cannot be inferred, and guessing produces a file the exchange rejects
+after the bidding window has closed, which is the worst possible time to discover it.
+The adapters are deliberately written as isolated mapping modules with tests, so
+pinning them is a small edit rather than a rewrite: change the header array and the
+row function in `lib/exchange/nse.js` or `bse.js`, and the tests tell you at once
+what else moved.
+
+D is a **capability question**, not a decision: either the RMS exposes a callable
+read or it does not. Until someone confirms, a snapshot table is the honest design —
+it makes the staleness visible rather than pretending to be live.
+
+E and F are **Ashika's to define**: an AP mapping is a business relationship, and
+bidding on a client's behalf is a compliance position, not an engineering choice.
+
+## What is worth chasing first
+
+B and G together unblock BSE, and A unblocks NSE — those three are the only things
+between the desk and a real OFS window. F matters before any bid is placed for a
+client by the desk rather than by the client themselves.
