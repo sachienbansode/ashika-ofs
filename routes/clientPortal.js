@@ -22,7 +22,8 @@ router.get('/issues', async (req, res, next) => {
               discount_pct, cutoff_flag, hni_open, hni_close, ret_open, ret_close,
               indicative_ri, indicative_ni, status
          FROM ${SCHEMA}.ofs_issue
-        WHERE status <> 'Closed' AND greatest(hni_close, ret_close) > now()
+        WHERE archived_at IS NULL
+          AND status <> 'Closed' AND greatest(hni_close, ret_close) > now()
         ORDER BY greatest(hni_close, ret_close)`);
 
     const mine = await rows(

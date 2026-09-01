@@ -446,10 +446,12 @@ function showMTab(t) {
   closeImport();
   $('#mIssues').classList.toggle('hide', t !== 'issues');
   $('#mMargins').classList.toggle('hide', t !== 'margins');
+  $('#mArchive').classList.toggle('hide', t !== 'archive');
   $('#mSettings').classList.toggle('hide', t !== 'settings');
   if (t === 'margins') loadMargins();
   if (t === 'settings') loadSettings();
   if (t === 'issues') loadIssues();
+  if (t === 'archive') loadArchive();
 }
 function loadMasters() { showMTab(STATE.mtab); }
 
@@ -786,6 +788,146 @@ function importMargins() {
   });
 }
 
+/* ---------------- archive ---------------- */
+function archiveRow(i) {
+  return '<tr data-arch="' + i.id + '">' +
+    '<td><b>' + esc(i.symbol) + '</b><br><span style="font-size:11px;color:var(--muted)">' +
+      esc(i.company || '') + '</span></td>' +
+    '<td class="m">' + esc(i.isin || '') + '</td>' +
+    '<td>' + esc(i.exchange) + '</td>' +
+    '<td class="m">' + (i.issue_date ? String(i.issue_date).slice(0, 10) : '—') + '</td>' +
+    '<td class="n">' + inr(i.floor_price) + '</td>' +
+    '<td class="n">' + inr(i.bid_count, 0) + '</td>' +
+    '<td class="n">' + inr(i.client_count, 0) + '</td>' +
+    '<td class="n">' + inr(i.total_qty, 0) + '</td>' +
+    '<td class="n">' + crore(i.total_value) + '</td>' +
+    '<td class="n">' + inr(i.allot_qty, 0) + '</td>' +
+    '<td class="n">' + inr(i.files_generated, 0) + '</td>' +
+    '<td class="m">' + (i.archived_at ? dt(i.archived_at) : '—') + '</td>' +
+    '<td><button class="mini" data-detail="' + i.id + '">Open</button> ' +
+        '<button class="mini" data-unarch="' + i.id + '">Restore</button></td></tr>';
+}
+
+async function loadArchive() {
+  try {
+    var cands = await api('/issues/archive/candidates');
+    $('#arCandidates').textContent = cands.candidates.length
+      ? cands.candidates.length + ' closed over ' + cands.after_days + ' days ago'
+      : 'nothing due for archiving';
+    $('#arRun').disabled = !cands.candidates.length;
+
+    var q = $('#arQ').value.trim();
+    var d = await api('/issues/archive' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    var a = d.archived || [];
+    $('#archiveTbl').innerHTML = a.length ? (
+      '<thead><tr><th>Scrip</th><th>ISIN</th><th>Exch</th><th>Trading day</th>' +
+      '<th class="n">Floor</th><th class="n">Bids</th><th class="n">Clients</th>' +
+      '<th class="n">Qty</th><th class="n">Value</th><th class="n">Allotted</th>' +
+      '<th class="n">Files</th><th>Archived</th><th></th></tr></thead><tbody>' +
+      a.map(archiveRow).join('') + '</tbody>'
+    ) : '<tbody><tr><td class="empty">Nothing archived yet.</td></tr></tbody>';
+  } catch (e) { toast('Archive failed', e.message, 'bad'); }
+}
+
+/** The permanent record for one issue: every bid, file, allotment and action. */
+async function openArchived(id) {
+  try {
+    var d = await api('/issues/' + id + '/summary');
+    var i = d.issue;
+    var money = function (k, v) {
+      return '<div class="f"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
+    };
+    $('#arDetail').innerHTML =
+      '<div class="card" style="margin-top:14px">' +
+        '<div class="bar"><b style="font-size:15px">' + esc(i.symbol) + '</b>' +
+          '<span style="color:var(--muted)">' + esc(i.company || '') + '</span>' +
+          '<span class="tag">' + esc(i.exchange) + '</span>' +
+          (i.archived_at ? '<span class="chip closed">Archived ' + dt(i.archived_at) +
+            (i.archived_by ? ' by ' + esc(i.archived_by) : '') + '</span>' : '') +
+          '<div class="sp"></div><button class="mini" id="arClose">Close</button></div>' +
+        (i.archive_reason ? '<div class="note">' + esc(i.archive_reason) + '</div>' : '') +
+        '<div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
+          money('Floor', rupee(i.floor_price)) +
+          money('Bids', inr(i.bid_count, 0) + ' (' + inr(i.cancelled_bids, 0) + ' cancelled)') +
+          money('Clients', inr(i.client_count, 0)) +
+          money('Quantity', inr(i.total_qty, 0)) +
+          money('Value', crore(i.total_value)) +
+          money('Retail / HNI', crore(i.retail_value_bid) + ' / ' + crore(i.hni_value_bid)) +
+          money('Book VWAP', i.vwap == null ? '—' : rupee(i.vwap)) +
+          money('Allotted', inr(i.allot_qty, 0) + ' to ' + inr(i.allottees, 0)) +
+          money('Allotment value', crore(i.allot_value)) +
+          money('Emails sent', inr(i.allot_mails_sent, 0)) +
+        '</div>' +
+
+        '<h2 class="sec">Files generated (' + d.exports.length + ')</h2>' +
+        '<div class="wrap"><table>' + (d.exports.length
+          ? '<thead><tr><th>When</th><th>Exchange</th><th>File</th><th class="n">Rows</th>' +
+            '<th>Checksum</th><th>By</th></tr></thead><tbody>' +
+            d.exports.map(function (x) {
+              return '<tr><td class="m">' + dt(x.generated_at) + '</td><td>' + esc(x.exchange) + '</td>' +
+                '<td class="m">' + esc(x.file_name) + '</td><td class="n">' + inr(x.row_count, 0) + '</td>' +
+                '<td class="m">' + esc(String(x.checksum).slice(0, 16)) + '…</td>' +
+                '<td>' + esc(x.generated_by || '') + '</td></tr>';
+            }).join('') + '</tbody>'
+          : '<tbody><tr><td class="empty">No exchange file was generated.</td></tr></tbody>') + '</table></div>' +
+
+        '<h2 class="sec">Bids (' + d.bids.length + ')</h2>' +
+        '<div class="wrap"><table>' + (d.bids.length
+          ? '<thead><tr><th>Ref</th><th>UCC</th><th>Cat</th><th class="n">Qty</th>' +
+            '<th class="n">Price</th><th class="n">Value</th><th>Status</th><th>Placed</th></tr></thead><tbody>' +
+            d.bids.map(function (b) {
+              return '<tr><td class="m">' + esc(b.ref) + '</td><td class="m">' + esc(b.client_ucc) + '</td>' +
+                '<td><span class="tag ' + (b.category === 'Retail' ? 'ret' : 'hni') + '">' +
+                  esc(b.category) + '</span></td>' +
+                '<td class="n">' + inr(b.qty, 0) + '</td>' +
+                '<td class="n">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
+                '<td class="n">' + inr(b.value, 0) + '</td>' +
+                '<td><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
+                '<td class="m">' + dt(b.created_at) + '</td></tr>';
+            }).join('') + '</tbody>'
+          : '<tbody><tr><td class="empty">No bids were placed.</td></tr></tbody>') + '</table></div>' +
+
+        (d.allotments.length
+          ? '<h2 class="sec">Allotments (' + d.allotments.length + ')</h2><div class="wrap"><table>' +
+            '<thead><tr><th>UCC</th><th class="n">Qty</th><th class="n">Price</th>' +
+            '<th class="n">Value</th><th>Email</th></tr></thead><tbody>' +
+            d.allotments.map(function (x) {
+              return '<tr><td class="m">' + esc(x.client_ucc) + '</td>' +
+                '<td class="n">' + inr(x.allot_qty, 0) + '</td>' +
+                '<td class="n">' + (x.allot_price == null ? '—' : inr(x.allot_price, 2)) + '</td>' +
+                '<td class="n">' + inr(x.allot_value, 0) + '</td>' +
+                '<td>' + esc(x.mail_status) + '</td></tr>';
+            }).join('') + '</tbody></table></div>'
+          : '') +
+        (d.pii_unmasked ? '' : '<div class="note">Client PII is masked, as everywhere else.</div>') +
+      '</div>';
+    $('#arClose').addEventListener('click', function () { $('#arDetail').innerHTML = ''; });
+    $('#arDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { toast('Could not open', e.message, 'bad'); }
+}
+
+async function runArchive() {
+  try {
+    var c = await api('/issues/archive/candidates');
+    if (!c.candidates.length) { toast('Nothing to archive', 'No issue has been closed long enough.'); return; }
+    var names = c.candidates.slice(0, 12).map(function (x) { return x.symbol; }).join(', ');
+    if (!window.confirm('Archive ' + c.candidates.length + ' issue(s) closed more than ' +
+        c.after_days + ' days ago?\n\n' + names +
+        '\n\nNothing is deleted — bids, files and allotments stay attached, and any of these can be restored.')) return;
+    var r = await api('/issues/archive/run', { method: 'POST', body: {} });
+    toast('Archived', r.archived + ' issue(s) moved to the archive.', 'ok');
+    loadArchive(); loadIssues(); loadDash();
+  } catch (e) { toast('Archive failed', (e.body && e.body.message) || e.message, 'bad'); }
+}
+
+async function unarchive(id) {
+  try {
+    await api('/issues/' + id + '/unarchive', { method: 'POST', body: {} });
+    toast('Restored', 'The issue is back on the desk.', 'ok');
+    loadArchive(); loadIssues(); loadDash();
+  } catch (e) { toast('Restore failed', e.message, 'bad'); }
+}
+
 /* ---------------- boot ---------------- */
 function setAutoRefresh() {
   if (STATE.timer) clearInterval(STATE.timer);
@@ -884,6 +1026,15 @@ async function boot() {
   });
   $('#miNew').addEventListener('click', issueForm);
   $('#miSync').addEventListener('click', syncIssues);
+  $('#arGo').addEventListener('click', loadArchive);
+  $('#arQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadArchive(); });
+  $('#arRun').addEventListener('click', runArchive);
+  $('#archiveTbl').addEventListener('click', function (e) {
+    var d = e.target.closest('[data-detail]');
+    if (d) { openArchived(d.dataset.detail); return; }
+    var u = e.target.closest('[data-unarch]');
+    if (u) unarchive(u.dataset.unarch);
+  });
   $('#miImport').addEventListener('click', importIssues);
   $('#miTemplate').addEventListener('click', function () { downloadText('ofs_issue_template.csv', ISSUE_TEMPLATE); });
   $('#mgSet').addEventListener('click', setMargin);

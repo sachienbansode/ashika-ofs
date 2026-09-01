@@ -74,11 +74,19 @@ function showPane(which) {
 /* ---------------- step 1: details ---------------- */
 var EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/** One field takes either a 10-digit mobile or an email address. */
+/**
+ * One field takes a client code, a 10-digit mobile, or an email. Ten digits is
+ * reported as a mobile, and the server also tries it as a UCC — some client codes
+ * are numeric.
+ */
+var UCC_RE = /^[A-Za-z0-9][A-Za-z0-9._\-\/]{1,19}$/;
 function identifierKind() {
   var v = $('#idInput').value.trim();
+  if (!v) return null;
   if (v.indexOf('@') >= 0) return EMAIL_RE.test(v) ? 'email' : null;
-  return v.replace(/\D/g, '').length === 10 ? 'mobile' : null;
+  var phoneish = v.replace(/[\s()+\-]/g, '');
+  if (/^\d+$/.test(phoneish) && phoneish.replace(/\D/g, '').slice(-10).length === 10) return 'mobile';
+  return UCC_RE.test(v) ? 'ucc' : null;
 }
 
 /**
@@ -100,7 +108,8 @@ function refreshDetails() {
   if (!hint.classList.contains('bad')) {
     hint.textContent = kind === 'mobile' ? 'Recognised as a mobile number.'
       : kind === 'email' ? 'Recognised as an email address.'
-      : 'Whichever you use, it must be the one registered with your Ashika account.';
+      : kind === 'ucc' ? 'Recognised as a client code.'
+      : 'Use whichever you have — it must match your Ashika account.';
   }
   $('#sendBtn').disabled = !kind;
 }
@@ -119,7 +128,7 @@ async function sendCode() {
 
   if (!identifierKind()) {
     hint.className = 'hint bad';
-    hint.textContent = 'Enter your registered 10-digit mobile number, or your registered email address.';
+    hint.textContent = 'Enter your client code, your registered mobile number, or your registered email address.';
     $('#idInput').setAttribute('aria-invalid', 'true'); $('#idInput').focus(); return;
   }
   hint.className = 'hint';

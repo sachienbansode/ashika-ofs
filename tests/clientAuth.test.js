@@ -59,24 +59,44 @@ test('test mode is refused in production, whatever the flag says', () => {
   }
 });
 
-test('one field accepts a mobile or an email, and rejects the rest', () => {
+test('one field accepts a client code, a mobile or an email', () => {
   assert.equal(ca.identifierKind('9820011234'), 'mobile');
-  assert.equal(ca.identifierKind('+91 98200 11234'), 'mobile');
-  assert.equal(ca.identifierKind('09820011234'), 'mobile');
   assert.equal(ca.identifierKind(' rajesh@gmail.com '), 'email');
 
-  // Refused before any query runs
-  assert.equal(ca.identifierKind('98200'), null, 'too short');
+  // real client codes seen in LD
+  assert.equal(ca.identifierKind('ASH1001'), 'ucc');
+  assert.equal(ca.identifierKind('S247683'), 'ucc');
+  assert.equal(ca.identifierKind('A136422'), 'ucc');
+  assert.equal(ca.identifierKind('SUBEC11'), 'ucc');
+  assert.equal(ca.identifierKind('10025'), 'ucc', 'short numeric codes exist');
+
   assert.equal(ca.identifierKind('rajesh@'), null, 'not an address');
   assert.equal(ca.identifierKind('rajesh@gmail'), null, 'no TLD');
   assert.equal(ca.identifierKind(''), null);
   assert.equal(ca.identifierKind(null), null);
   assert.equal(ca.identifierKind('   '), null);
+  assert.equal(ca.identifierKind('a'), null, 'one character is not a code');
+  assert.equal(ca.identifierKind('has space'), null);
 });
 
-test('an @ always means email, never a mobile guess', () => {
-  // otherwise "9820011234@typo" could be stripped to digits and matched
+test('a ten-digit value is treated as a mobile, and also matched as a UCC', () => {
+  // A client code CAN be ten digits. The kind is reported as mobile, and
+  // findClients ORs in a UCC match — otherwise such a client could never sign in.
+  assert.equal(ca.identifierKind('9820011234'), 'mobile');
+  assert.equal(ca.identifierKind('+91 98200 11234'), 'mobile', 'punctuation tolerated');
+  assert.equal(ca.identifierKind('09820011234'), 'mobile', 'a leading zero is still a mobile');
+  assert.equal(ca.identifierKind('98200-11234'), 'mobile');
+  assert.equal(ca.identifierKind('12345'), 'ucc', 'too short for a mobile, so a code');
+});
+
+test('an @ always means email, never a mobile or code guess', () => {
   assert.equal(ca.identifierKind('9820011234@'), null);
+  assert.equal(ca.identifierKind('ASH1001@'), null);
+});
+
+test('client codes are normalised to upper case for matching', () => {
+  assert.equal(ca.normUcc(' ash1001 '), 'ASH1001');
+  assert.equal(ca.normUcc(null), '');
 });
 
 test('masking keeps enough to recognise, not enough to reuse', () => {

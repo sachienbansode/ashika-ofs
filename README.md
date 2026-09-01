@@ -156,6 +156,22 @@ session too.
 are in [`docs/platform-patch/`](docs/platform-patch/). Until that is deployed and
 `OFS_SSO_SECRET` is set in both apps, the desk shows a sign-in prompt and nothing else.
 
+## Archive
+
+A closed OFS is archived, never deleted — this is a regulated bidding record.
+Archiving sets a flag, so bids, generated files, allotments and the audit trail stay
+attached to the same issue and an archived OFS opens in full years later, with the
+same figures it had on the day. `ofs.ofs_issue_summary` is a view, so those figures
+are computed from the underlying rows rather than frozen into a snapshot that could
+drift.
+
+Masters → Archive lists what is due (default: closed more than `archive_after_days`,
+7), archives in one action, and opens any archived issue to show every bid, every
+exchange file with its checksum, every allotment and the full audit trail. Restore
+puts an issue back on the desk. Archiving an issue whose window is still open is
+refused unless forced. Archived issues disappear from the desk dashboard, the issue
+master and the client app; PII stays masked in the archive exactly as elsewhere.
+
 ## Masters are fetched, not typed
 
 Both masters come from upstream:
@@ -176,8 +192,22 @@ browser-like headers, NSE needs cookies from a prior page view — so `lib/issue
 sends a real User-Agent, a matching Referer and a cookie jar. The data is public;
 this is not a paywall, and request volume is kept low.
 
-**The endpoint paths are not documented and do move.** Each source therefore tries
-several candidates and reports what every one answered:
+**⚠ Web fetching is off by default and should stay off.** Both exchanges prohibit it:
+NSE's terms bar "systematic or automated data collection activities (including
+scraping, data mining, data extraction and data harvesting)" without prior written
+permission; BSE's clause 13 bars the same "without our express written consent", and
+clause 23 restricts the site to non-commercial use. Ashika is a SEBI-registered
+member with an entitlement to the same data through e-OFS, iBBS, the member extranet
+and the T-2/T-1 notices — so the sanctioned path is **Masters → Import issues CSV**,
+fed from the member notice. `EXCHANGE_WEB_FETCH=true` exists for a permitted
+endpoint or once written consent is held.
+
+A dry run on 2026-09-01 also showed it would not work anyway: BSE now serves an
+Angular shell whose data loads by internal XHR, and NSE returns 404 for the public
+paths. Making it work would mean reverse-engineering their front ends, which is
+precisely what the terms prohibit.
+
+The discovery tool remains, for a permitted source:
 
 ```bash
 npm run fetch-issues                  # both exchanges, report only, writes nothing

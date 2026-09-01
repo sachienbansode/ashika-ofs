@@ -42,11 +42,13 @@ under Markets → Offer for Sale.
 | 3 | Website → module SSO | **No SSO.** The website simply links to the OFS app; the client signs in here | `routes/clientAuth.js` |
 | 4 | Client sign-in method | **Mobile + registered email, then a one-time code** to the address on file | `lib/clientAuth.js`, `public/client/` |
 | 5 | Staff sign-in | **Portal SSO handoff**, single-use ticket, MFA inherited from the portal | `lib/sso.js`, `docs/platform-patch/` |
-| 6 | Issue-master ingestion | **Auto-fetched from the exchange**, with manual entry and CSV as fallback | `lib/issueSource/`, Masters → Fetch from exchange |
+| 6 | Issue-master ingestion | **CSV from the member notice** (sanctioned). Web fetching is built but off by default — both exchanges prohibit automated collection without written consent, and a dry run showed their public endpoints no longer serve data anyway | Masters → Import issues CSV; `lib/issueSource/` |
 | 7 | Margin source | **Snapshot table**, set by the desk or imported by CSV — no RMS read API exists | `ofs.ofs_margin` |
 | 8 | Client eligibility | Only clients **Active** in the client master may bid (36,663 of 136,129) | `db/ldAdapter.js`, `lib/domain.js` |
 | 9 | Database topology | Own database `ofs_bids`; LD read from `uat_ananta_staging` | `db/pgConfig.js` |
 | 10 | Deployment | Azure VM, app only; both databases stay on AWS | `docs/DEPLOY_AZURE.md` |
+| 11 | Client sign-in identifier | **Client code (UCC), mobile OR email** — any one, then a code to the contacts on file | `lib/otp.js` `identifierKind` |
+| 12 | Closed-issue retention | **Archived, never deleted.** A flag keeps bids, files, allotments and audit attached | migration 005, Masters → Archive |
 
 ## Blocked — these need something from outside
 

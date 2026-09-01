@@ -2,7 +2,9 @@
 /** OFS issue master (the scrip master). Phase 1: manual / CSV ingestion. */
 const express = require('express');
 const { SCHEMA, rows, one, query } = require('../db/ofsAdapter');
-const { requirePage, requireEdit } = require('../middleware/pageAccess');
+const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAccess');
+const { maskRows } = require('../lib/pii');
+const settings = require('../lib/settings');
 const { issueStatus, catStatus } = require('../lib/domain');
 const audit = require('../lib/audit');
 const { sourceFor } = require('../lib/issueSource');
@@ -29,7 +31,9 @@ router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
     const open = String(req.query.open || '') === '1';
     const r = await rows(
       `SELECT ${COLS} FROM ${SCHEMA}.ofs_issue
-        ${open ? "WHERE status <> 'Closed' AND greatest(hni_close, ret_close) > now() - interval '1 day'" : ''}
+        ${open
+          ? "WHERE archived_at IS NULL AND status <> 'Closed' AND greatest(hni_close, ret_close) > now() - interval '1 day'"
+          : 'WHERE archived_at IS NULL'}
         ORDER BY greatest(hni_close, ret_close) DESC, symbol`
     );
     res.json({ issues: r.map(decorate) });
@@ -147,6 +151,133 @@ router.post('/sync', requirePage(PAGE), requireEdit(PAGE), async (req, res, next
       found: out.issues.length, inserted: r.inserted, updated: r.updated,
       unchanged: r.skipped, rejected: out.rejected.length, detail: r.detail
     });
+  } catch (e) { next(e); }
+});
+
+/* ------------------------------------------------------------------ archive --
+ * Archiving is a flag, never a move or a delete: bids, exported files, allotments
+ * and audit rows keep pointing at the same issue, so a closed OFS can be opened in
+ * full years later. This is a regulated bidding record.
+ */
+
+/** Issues whose windows closed long enough ago to be worth archiving. */
+router.get('/archive/candidates', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try {
+    const days = Number((await settings.all()).archive_after_days || 7);
+    const r = await rows(
+      `SELECT * FROM ${SCHEMA}.ofs_issue_summary
+        WHERE archived_at IS NULL
+          AND greatest(hni_close, ret_close) < now() - ($1 || ' days')::interval
+        ORDER BY greatest(hni_close, ret_close) DESC`, [String(days)]);
+    res.json({ after_days: days, candidates: r });
+  } catch (e) { next(e); }
+});
+
+/** The archive itself, newest first, with every figure the issue ever had. */
+router.get('/archive', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try {
+    const p = [];
+    let where = 'WHERE archived_at IS NOT NULL';
+    if (req.query.q) {
+      p.push('%' + String(req.query.q).trim().toUpperCase() + '%');
+      where += ` AND (upper(symbol) LIKE $${p.length} OR upper(company) LIKE $${p.length}
+                      OR upper(isin) LIKE $${p.length})`;
+    }
+    p.push(Math.min(Number(req.query.limit) || 100, 500));
+    const r = await rows(
+      `SELECT * FROM ${SCHEMA}.ofs_issue_summary ${where}
+        ORDER BY archived_at DESC LIMIT $${p.length}`, p);
+    res.json({ archived: r });
+  } catch (e) { next(e); }
+});
+
+/** Everything about one issue — live or archived. The permanent record. */
+router.get('/:id/summary', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try {
+    const issue = await one(
+      `SELECT * FROM ${SCHEMA}.ofs_issue_summary WHERE id = $1`, [req.params.id]);
+    if (!issue) return res.status(404).json({ error: 'not_found' });
+
+    const [bids, exports_, allotments, trail] = await Promise.all([
+      rows(`SELECT ref, client_ucc, category, qty, price, is_cutoff, value, status,
+                   placed_by, created_at, updated_at
+              FROM ${SCHEMA}.ofs_bid WHERE issue_id = $1 ORDER BY created_at`, [req.params.id]),
+      rows(`SELECT exchange, file_name, row_count, total_qty, total_value, checksum,
+                   generated_by, generated_at
+              FROM ${SCHEMA}.ofs_export_log WHERE issue_id = $1 ORDER BY generated_at`, [req.params.id]),
+      rows(`SELECT client_ucc, allot_qty, allot_price, allot_value, mail_status, allotted_at
+              FROM ${SCHEMA}.ofs_allotment WHERE issue_id = $1 ORDER BY client_ucc`, [req.params.id]),
+      rows(`SELECT actor, action, before, after, at FROM ${SCHEMA}.ofs_audit
+             WHERE entity = 'ofs_issue' AND entity_id = $1 ORDER BY at`, [String(req.params.id)])
+    ]);
+
+    // PII is masked here as everywhere: an archive is not a way around it.
+    res.json({
+      issue,
+      bids: maskRows(bids, canViewPII(req, 'ofs-desk')),
+      exports: exports_,
+      allotments,
+      audit: trail,
+      pii_unmasked: canViewPII(req, 'ofs-desk')
+    });
+  } catch (e) { next(e); }
+});
+
+router.post('/:id/archive', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    const before = await one(`SELECT id, symbol, archived_at FROM ${SCHEMA}.ofs_issue WHERE id = $1`,
+      [req.params.id]);
+    if (!before) return res.status(404).json({ error: 'not_found' });
+    if (before.archived_at) return res.json({ ok: true, already: true });
+
+    // Refuse while bidding could still happen — archiving a live issue hides it
+    // from the desk mid-window.
+    const live = await one(
+      `SELECT 1 AS x FROM ${SCHEMA}.ofs_issue
+        WHERE id = $1 AND greatest(hni_close, ret_close) > now()`, [req.params.id]);
+    if (live && !req.body.force) {
+      return res.status(409).json({ error: 'still_open',
+        message: 'This issue has not closed yet. Pass force to archive it anyway.' });
+    }
+
+    const r = await one(
+      `UPDATE ${SCHEMA}.ofs_issue
+          SET archived_at = now(), archived_by = $2, archive_reason = $3
+        WHERE id = $1 RETURNING id, symbol, archived_at`,
+      [req.params.id, String(req.user.email || req.user.id),
+       (req.body && req.body.reason) ? String(req.body.reason).slice(0, 300) : 'window closed']);
+
+    await audit.log(req, 'archive', 'ofs_issue', r.id, before, r);
+    res.json({ ok: true, issue: r });
+  } catch (e) { next(e); }
+});
+
+router.post('/:id/unarchive', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    const r = await one(
+      `UPDATE ${SCHEMA}.ofs_issue
+          SET archived_at = NULL, archived_by = NULL, archive_reason = NULL
+        WHERE id = $1 RETURNING id, symbol`, [req.params.id]);
+    if (!r) return res.status(404).json({ error: 'not_found' });
+    await audit.log(req, 'unarchive', 'ofs_issue', r.id, null, r);
+    res.json({ ok: true, issue: r });
+  } catch (e) { next(e); }
+});
+
+/** Archive everything past the cut-off age in one go. */
+router.post('/archive/run', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    const days = Number(req.body.after_days || (await settings.all()).archive_after_days || 7);
+    const r = await rows(
+      `UPDATE ${SCHEMA}.ofs_issue
+          SET archived_at = now(), archived_by = $1, archive_reason = 'auto: closed over ' || $2 || ' days'
+        WHERE archived_at IS NULL
+          AND greatest(hni_close, ret_close) < now() - ($2 || ' days')::interval
+        RETURNING id, symbol`,
+      [String(req.user.email || req.user.id), String(days)]);
+    await audit.log(req, 'archive_run', 'ofs_issue', null, null,
+      { after_days: days, archived: r.length, symbols: r.map((x) => x.symbol) });
+    res.json({ archived: r.length, issues: r, after_days: days });
   } catch (e) { next(e); }
 });
 

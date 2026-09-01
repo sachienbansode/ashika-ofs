@@ -54,7 +54,7 @@ router.post('/start', startLimiter, async (req, res) => {
 
   if (!kind) {
     return res.status(400).json({ error: 'invalid_input',
-      message: 'Enter your registered 10-digit mobile number or your registered email address.' });
+      message: 'Enter your client code, your registered mobile number, or your registered email address.' });
   }
 
   // The generic answer. Every success path returns exactly this, so a caller cannot
@@ -82,6 +82,7 @@ router.post('/start', startLimiter, async (req, res) => {
       event: 'otp_requested', ip, userAgent: ua,
       mobile: kind === 'mobile' ? identifier : null,
       email: kind === 'email' ? identifier : null,
+      ucc: kind === 'ucc' ? identifier : null,
       ok: clients.length > 0, reason: clients.length ? null : 'no_match' });
 
     if (!clients.length) return res.json(generic);          // deliberately indistinguishable

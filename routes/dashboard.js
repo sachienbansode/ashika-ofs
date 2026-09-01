@@ -42,7 +42,8 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
             WHERE status = 'Live'
             GROUP BY issue_id
          ) b ON b.issue_id = i.id
-        WHERE i.status <> 'Closed'
+        WHERE i.archived_at IS NULL
+          AND i.status <> 'Closed'
           AND greatest(i.hni_close, i.ret_close) > now() - interval '2 days'
         ORDER BY greatest(i.hni_close, i.ret_close) ASC`);
 
