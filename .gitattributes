@@ -1,0 +1,22 @@
+# Normalise to LF in the repository; Git restores the platform's endings on checkout.
+# Matters here because the desk is developed on Windows and deployed on Linux.
+* text=auto eol=lf
+
+# Generated exchange files must be CRLF at runtime — that is done in code
+# (lib/exchange/common.js), never by Git, so nothing about them belongs here.
+
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+
+# Binaries — never touch these
+*.docx  binary
+*.xlsx  binary
+*.pptx  binary
+*.pdf   binary
+*.png   binary
+*.jpg   binary
