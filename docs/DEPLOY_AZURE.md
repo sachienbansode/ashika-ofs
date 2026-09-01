@@ -28,6 +28,12 @@ nginx terminating TLS on `ofs.ashikagroup.com`, certificates auto-renewing.
 
 ## 1. Base packages
 
+Check what the VM already has before installing — it may host other apps:
+
+```bash
+node -v; npm -v; which pm2 nginx
+```
+
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y curl git nginx ufw
@@ -191,3 +197,4 @@ pm2 logs ashika-ofs-app --lines 20
 | `/api/allotment/mail/status` → `password_undecryptable` | `API_KEY_SECRET` does not match the platform's. |
 | certbot fails validation | DNS is not pointing at the VM yet, or NSG/ufw is blocking port 80. |
 | Works, then dies after reboot | `pm2 startup systemd` was never run, or `pm2 save` was not re-run after it. |
+| `npm ci` → `EUSAGE ... existing package-lock.json` | The lockfile is missing from the checkout. `git pull` (it is committed), or fall back to `npm install --omit=dev`. |
