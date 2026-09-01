@@ -33,7 +33,9 @@ lib/pageRegistry.js     self-registers pages: ofs-desk, ofs-masters
 middleware/auth.js      JWT identity + live role/perm load each request
 middleware/pageAccess.js requirePage / requireEdit / canViewPII ('*' = full access only)
 routes/                 dashboard, issues, bids, clients, margin, export, allotment
-public/                 CSP-safe desk SPA (no inline script, no CDN, no chart lib); csv.js is shared with tests/
+public/shared/          theme.css - one design system for both front ends
+public/client/          the client journey: sign-in, open issues, my bids, allotments
+public/desk/            the OFS team's desk (CSP-safe: no inline script, no CDN, no chart lib)
 tests/                  node --test: domain rules, NSE/BSE adapters, CSV parser
 ```
 
@@ -128,6 +130,18 @@ server {
 }
 ```
 
+## Two front ends
+
+| URL | Who | How they get in |
+|---|---|---|
+| `/` | Clients | Mobile + registered email, then a one-time code emailed to the address **on file** |
+| `/desk` | OFS team | Portal SSO handoff (`docs/platform-patch/`), plus the `ofs-desk` grant |
+
+Separate directories under `public/`, separate cookies, separate tables. A client is
+not a platform user, holds no page grants, and can never satisfy `requirePage`; the
+desk's staff token can never satisfy `requireClient`. Both share `/shared/theme.css`
+so they look like one product.
+
 ## Sign-in
 
 There is **no login form**. Staff authenticate at the existing portal (password,
@@ -145,6 +159,27 @@ session too.
 **The platform needs a small addition for this** — a drop-in route and instructions
 are in [`docs/platform-patch/`](docs/platform-patch/). Until that is deployed and
 `OFS_SSO_SECRET` is set in both apps, the desk shows a sign-in prompt and nothing else.
+
+## Client sign-in
+
+The Ashika website links straight to `/` — there is no SSO token to trust, so the app
+establishes identity itself: mobile **and** email must match one active LD record,
+then a 6-digit code goes to the registered address.
+
+Deliberate behaviours, because this endpoint faces the public internet:
+
+- `/client/auth/start` answers **identically** whether or not the pair matched, so it
+  cannot be used to discover which mobile/email combinations are clients.
+- The code is sent to the address **on file**, never to one typed into the form.
+- Codes are stored as a sha256 hash only, compared in constant time, capped at 5
+  attempts, and the attempt is counted *before* comparison so a dropped connection
+  cannot buy a free guess.
+- Throttled per mobile and per IP, with a resend cooldown.
+- A client with several UCCs (families share an email) picks one **after** the code is
+  verified — the account list is never shown to an unverified visitor.
+- Only `Active` clients can sign in, using the same eligibility rule as the desk.
+- `OFS_OTP_TEST_MODE=true` uses a fixed code for testing and is **ignored whenever
+  `NODE_ENV=production`**, whatever the flag says.
 
 ## Allotment emails
 

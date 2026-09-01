@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { csvParse, csvObjects } = require('../public/csv');
+const { csvParse, csvObjects } = require('../public/desk/csv');
 
 test('parses quoted fields, embedded commas and doubled quotes', () => {
   const rows = csvParse('a,b,c\r\n1,"x,y","he said ""hi"""\r\n');

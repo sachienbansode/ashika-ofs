@@ -74,7 +74,12 @@ app.get('/readyz', async (req, res) => {
 });
 
 /* ---- session endpoints: deliberately BEFORE authMiddleware ---- */
-app.use('/auth', require('./routes/auth'));
+app.use('/auth', require('./routes/auth'));                 // staff, via portal SSO
+app.use('/client/auth', apiLimiter, require('./routes/clientAuth'));   // clients, mobile + email + OTP
+
+/* ---- the client's own view: gated by requireClient inside the router, NOT by
+   requirePage. A client is not a platform user and holds no page grants. ---- */
+app.use('/client/api', apiLimiter, require('./routes/clientPortal'));
 
 /* ---- API: authenticated, and every mount gated with requirePage ---- */
 const api = express.Router();
@@ -112,8 +117,16 @@ app.get('/config.js', (req, res) => {
   res.send(Object.keys(cfg).map((k) => 'window.' + k + ' = ' + JSON.stringify(cfg[k]) + ';').join('\n'));
 });
 
-/* ---- static desk UI ---- */
-app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html', maxAge: '5m' }));
+/* ---- two front ends, deliberately separate ----
+   /      the client journey (public: anyone with a UCC can reach it)
+   /desk  the OFS team's desk (portal SSO, ofs-desk grant)
+   Separate directories so a client-facing page can never accidentally include a
+   desk script, and so the desk can later be restricted by IP without touching
+   the client side. */
+const STATIC = { maxAge: '5m', index: 'index.html' };
+app.use('/shared', express.static(path.join(__dirname, 'public', 'shared'), { maxAge: '1h' }));
+app.use('/desk', express.static(path.join(__dirname, 'public', 'desk'), STATIC));
+app.use('/', express.static(path.join(__dirname, 'public', 'client'), STATIC));
 
 app.use((req, res) => res.status(404).json({ error: 'not_found' }));
 app.use((err, req, res, next) => {           // eslint-disable-line no-unused-vars

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ashika OFS — Offer for Sale Bidding</title>
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="loginStage" class="login-stage">
+  <div class="login-brand">
+    <div class="mark">A</div>
+    <div class="t">Offer for Sale &mdash; Bidding</div>
+    <div class="s">Sign in with your registered mobile number and email</div>
+  </div>
+
+  <div class="login-card">
+    <div class="strip"></div>
+    <div class="pad">
+      <div class="steps">
+        <div class="step on" id="stp1"><i>1</i>Your details</div>
+        <div class="step" id="stp2"><i>2</i>Verify</div>
+        <div class="step" id="stp3"><i>3</i>Bid</div>
+      </div>
+
+      <!-- step 1 -->
+      <div id="paneDetails">
+        <div class="fg">
+          <label class="fl" for="mobInput">Registered mobile number</label>
+          <input id="mobInput" class="inp big" placeholder="9820011234" inputmode="numeric"
+                 autocomplete="tel" maxlength="10">
+        </div>
+        <div class="fg">
+          <label class="fl" for="emailInput">Registered email address</label>
+          <input id="emailInput" class="inp" placeholder="you@example.com" type="email"
+                 autocomplete="email" spellcheck="false">
+          <div class="hint" id="detailsHint">Both must match the details registered with your Ashika account.</div>
+        </div>
+        <button class="btn btn-p btn-block" id="sendBtn">Send code</button>
+        <div class="note" style="margin-top:14px">
+          We send a one-time code to your registered email address. Ashika will never ask
+          you for this code by phone or message.
+        </div>
+      </div>
+
+      <!-- step 2 -->
+      <div id="paneOtp" class="hide">
+        <div class="fg">
+          <label class="fl">Enter the 6-digit code</label>
+          <div class="otpbox" id="otpBox"></div>
+          <div class="otp-meta">
+            <span id="otpSentTo"></span>
+            <button class="btn-lnk" id="resendBtn" disabled>Resend</button>
+          </div>
+          <div id="demoOtp"></div>
+          <div class="hint" id="otpHint"></div>
+        </div>
+        <button class="btn btn-g btn-block" id="verifyBtn">Verify &amp; continue</button>
+        <button class="btn btn-o btn-block" id="otpBackBtn" style="margin-top:9px">Use different details</button>
+      </div>
+
+      <!-- step 2b: several accounts on the same mobile + email -->
+      <div id="paneChoose" class="hide">
+        <div class="fg">
+          <label class="fl">Choose an account</label>
+          <div class="hint" style="margin:0 0 12px">
+            These accounts share the details you entered. Pick the one you want to bid from.
+          </div>
+          <div id="acctList"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:18px;padding-top:15px;border-top:1px solid var(--line-s);
+                  display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:11px;color:var(--muted)">Not a client? Call your relationship manager.</span>
+        <a class="btn-lnk" href="/desk" style="text-decoration:none">Staff</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Ashika Stock Broking Ltd. &middot; SEBI Registered Member, NSE &amp; BSE<br>
+    Bids are subject to exchange OFS session timings and allocation rules.
+    Investments in securities are subject to market risk.
+  </div>
+</div>
+
+<!-- ================= SIGNED IN ================= -->
+<div id="app" class="wrap hide">
+  <div class="topbar">
+    <div class="brand">
+      <div class="tag">OFS Bidding<small>Offer for Sale</small></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="cutpill" id="cutPill"><span class="dot live"></span>Cut-off <b id="cutTime">15:15</b></div>
+    <div class="who">
+      <div class="av" id="clientAv">—</div>
+      <div>
+        <div class="nm" id="clientName">—</div>
+        <div class="cd" id="clientUcc"></div>
+      </div>
+    </div>
+    <button class="btn btn-o btn-sm" id="signOutBtn">Sign out</button>
+  </div>
+
+  <div class="tabs" style="margin-bottom:18px;display:inline-flex" id="cTabs">
+    <button data-ctab="issues" class="on">Open issues</button>
+    <button data-ctab="bids">My bids</button>
+    <button data-ctab="allot">Allotments</button>
+  </div>
+
+  <div id="cpane-issues">
+    <div class="card"><div class="card-b"><div class="issues" id="clientIssues"></div></div></div>
+  </div>
+
+  <div id="cpane-bids" class="hide">
+    <div class="card">
+      <div class="card-h"><h3>My bids</h3><span class="sub" id="marginSummary"></span></div>
+      <div class="tw"><table class="tbl" id="myBidsTbl"></table></div>
+    </div>
+  </div>
+
+  <div id="cpane-allot" class="hide">
+    <div class="card">
+      <div class="card-h"><h3>Allotments</h3>
+        <span class="sub">Published after the exchange returns the allotment file</span></div>
+      <div class="tw"><table class="tbl" id="myAllotTbl"></table></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/config.js"></script>
+<script src="/client.js"></script>
+</body>
+</html>

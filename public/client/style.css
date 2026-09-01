@@ -1,0 +1,56 @@
+/* Client journey — layered on /shared/theme.css, following the prototype's login. */
+
+.login-stage{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 18px}
+.login-brand{text-align:center;margin-bottom:22px}
+.login-brand .mark{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;display:grid;place-items:center;
+  background:linear-gradient(140deg,var(--teal),var(--navy));color:#fff;font-weight:600;font-size:20px;letter-spacing:.04em;
+  box-shadow:0 8px 24px rgba(36,63,142,.22)}
+.login-brand .t{font-size:23px;font-weight:600;color:var(--navy);letter-spacing:-.02em}
+.login-brand .s{font-size:12.5px;color:var(--muted);margin-top:3px}
+.login-card{width:100%;max-width:430px;background:#fff;border:1px solid var(--line);border-radius:18px;
+  box-shadow:var(--shadow);overflow:hidden}
+.login-card .strip{height:4px;background:linear-gradient(90deg,var(--cyan),var(--teal),var(--green))}
+.login-card .pad{padding:26px}
+
+.steps{display:flex;align-items:center;gap:8px;margin-bottom:20px}
+.step{flex:1;display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.04em}
+.step i{width:20px;height:20px;border-radius:50%;background:#eef2f6;color:var(--muted);display:grid;place-items:center;
+  font-style:normal;font-size:10.5px;font-family:var(--mono);flex:none}
+.step.on{color:var(--navy)}
+.step.on i{background:linear-gradient(135deg,var(--teal),var(--navy));color:#fff}
+.step.done i{background:rgba(11,177,131,.15);color:#07845f}
+
+.otpbox{display:flex;gap:8px;justify-content:space-between;margin-bottom:12px}
+.otpbox input{width:100%;aspect-ratio:1/1.15;text-align:center;font-family:var(--mono);font-size:21px;font-weight:600;
+  border:1px solid var(--line);border-radius:10px;background:#fbfdfe;color:var(--navy);outline:none;transition:.15s;padding:0}
+.otpbox input:focus{border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px rgba(23,180,185,.14)}
+.otpbox input.filled{border-color:var(--teal);background:#fff}
+.otp-meta{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--muted);margin-bottom:16px}
+.demo-otp{display:flex;align-items:center;gap:9px;background:rgba(217,138,31,.09);border:1px dashed rgba(217,138,31,.4);
+  border-radius:9px;padding:9px 13px;font-size:11.5px;color:#8a5a10;margin-bottom:14px}
+.demo-otp b{font-family:var(--mono);font-size:15px;letter-spacing:.16em;color:#7a4f0c}
+
+.acct{width:100%;text-align:left;border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:#fff;
+  margin-bottom:9px;transition:.15s;display:flex;align-items:center;gap:12px}
+.acct:hover{border-color:var(--teal);box-shadow:0 0 0 3px rgba(23,180,185,.1)}
+.acct .av{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;
+  background:linear-gradient(140deg,var(--teal),var(--navy));color:#fff;font-weight:600;font-size:12px}
+.acct .nm{font-weight:600;font-size:13.5px}
+.acct .cd{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+
+.foot{margin-top:20px;text-align:center;font-size:10.5px;color:var(--muted);line-height:1.7;max-width:430px}
+
+/* ---------- signed-in app ---------- */
+.issues{display:flex;flex-direction:column;gap:11px}
+.issue{border:1px solid var(--line);border-radius:12px;padding:15px;background:#fff;transition:.16s}
+.issue:hover{border-color:rgba(23,180,185,.5);box-shadow:var(--shadow-s)}
+.issue .hd{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px}
+.issue .sym{font-size:16px;font-weight:600;color:var(--navy)}
+.issue .co{font-size:12px;color:var(--muted)}
+.issue .isin{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:1px;background:var(--line-s);
+  border:1px solid var(--line-s);border-radius:10px;overflow:hidden}
+.facts div{background:#fff;padding:9px 12px}
+.facts .k{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.facts .v{font-family:var(--mono);font-size:13px;font-weight:600;margin-top:2px}
+.cdn{font-family:var(--mono);font-size:11.5px;color:var(--amber);margin-top:11px}
