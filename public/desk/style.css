@@ -2,6 +2,7 @@
    one product. Class names match what app.js emits; the palette is the prototype's. */
 
 /* ---------- top bar ---------- */
+header.top img{height:34px;width:auto;display:block}
 header.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--white);
   border-bottom:1px solid var(--line);padding:12px 20px;position:sticky;top:0;z-index:20;
   box-shadow:var(--shadow-s)}

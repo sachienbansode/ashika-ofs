@@ -2,9 +2,7 @@
 
 .login-stage{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 18px}
 .login-brand{text-align:center;margin-bottom:22px}
-.login-brand .mark{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;display:grid;place-items:center;
-  background:linear-gradient(140deg,var(--teal),var(--navy));color:#fff;font-weight:600;font-size:20px;letter-spacing:.04em;
-  box-shadow:0 8px 24px rgba(36,63,142,.22)}
+.login-brand .mark{width:64px;height:64px;margin:0 auto 14px;display:block}
 .login-brand .t{font-size:23px;font-weight:600;color:var(--navy);letter-spacing:-.02em}
 .login-brand .s{font-size:12.5px;color:var(--muted);margin-top:3px}
 .login-card{width:100%;max-width:430px;background:#fff;border:1px solid var(--line);border-radius:18px;
