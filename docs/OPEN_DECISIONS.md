@@ -13,3 +13,18 @@
 | 9 | Exchange allotment/obligation file layout | **Open** | `routes/allotment.js` parser |
 | 10 | Source IP whitelisting / trading-network zone | **Open** | any exchange connectivity |
 | 11 | Client authorisation model (consent/POA, mandatory OTP, audit) | **Open** | desk bidding on behalf |
+
+## Schema notes
+
+**`ofs_issue.issue_date`** — the T-day (Non-Retail day) as a plain `date`, filled by the
+`ofs_issue_fill_date` trigger from `hni_open` in `Asia/Kolkata` when the caller omits it.
+It exists because `hni_open::date` is STABLE, not IMMUTABLE — casting a `timestamptz` to
+`date` depends on the session TimeZone, so Postgres refuses it in an index expression
+(`ERROR: functions in index expression must be marked IMMUTABLE`, SQLSTATE 42P17).
+Deriving it in IST also fixes a real bug: an issue opening 20:00 UTC belongs to the *next*
+IST trading day, so a naive UTC cast would file it under the wrong day.
+
+Verified on a scratch PostgreSQL 16 instance (prod runs 18): the migration applies clean and
+is re-runnable; the unique index rejects the same scrip on the same trading day regardless of
+case or padding and allows it on the next day; `ofs_bid_one_live_uq` rejects a second live bid
+and permits a fresh one after a cancel; `ofs_bid_price_ck` rejects a non-cut-off bid with no price.

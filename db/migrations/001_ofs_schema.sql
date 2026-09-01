@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS ofs.ofs_issue (
   hni_close     timestamptz NOT NULL,
   ret_open      timestamptz NOT NULL,
   ret_close     timestamptz NOT NULL,
+  -- The T-day (Non-Retail day) as a plain date. Held explicitly because
+  -- hni_open::date is STABLE, not IMMUTABLE (the cast depends on the session
+  -- TimeZone), so it cannot appear in an index expression. Filled by the
+  -- ofs_issue_fill_date trigger below when the caller omits it.
+  issue_date    date        NOT NULL,
   indicative_ri numeric(18,4),                        -- from terminal; manual in Phase 1
   indicative_ni numeric(18,4),
   status        text        NOT NULL DEFAULT 'Auto',  -- Auto | Suspended | Closed
@@ -60,7 +65,7 @@ CREATE TABLE IF NOT EXISTS ofs.ofs_issue (
   CONSTRAINT ofs_issue_win_ck      CHECK (hni_close > hni_open AND ret_close > ret_open),
   CONSTRAINT ofs_issue_price_ck    CHECK (floor_price > 0 AND tick > 0 AND lot >= 1)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ofs_issue_uq ON ofs.ofs_issue (upper(btrim(symbol)), upper(btrim(isin)), (hni_open::date));
+CREATE UNIQUE INDEX IF NOT EXISTS ofs_issue_uq ON ofs.ofs_issue (upper(btrim(symbol)), upper(btrim(isin)), issue_date);
 CREATE INDEX IF NOT EXISTS ofs_issue_open_ix ON ofs.ofs_issue (ret_close DESC);
 
 -- ---------------------------------------------------------------- bids
@@ -178,6 +183,21 @@ CREATE INDEX IF NOT EXISTS ofs_audit_ix ON ofs.ofs_audit (entity, entity_id, at 
 CREATE OR REPLACE FUNCTION ofs.touch_updated_at() RETURNS trigger AS $$
 BEGIN NEW.updated_at = now(); RETURN NEW; END;
 $$ LANGUAGE plpgsql;
+
+-- Derive the trading day from the Non-Retail window open, in IST, when the caller
+-- did not supply it. A BEFORE trigger may use STABLE expressions; an index may not.
+CREATE OR REPLACE FUNCTION ofs.fill_issue_date() RETURNS trigger AS $$
+BEGIN
+  IF NEW.issue_date IS NULL THEN
+    NEW.issue_date := (NEW.hni_open AT TIME ZONE 'Asia/Kolkata')::date;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS ofs_issue_fill_date ON ofs.ofs_issue;
+CREATE TRIGGER ofs_issue_fill_date BEFORE INSERT OR UPDATE ON ofs.ofs_issue
+  FOR EACH ROW EXECUTE FUNCTION ofs.fill_issue_date();
 
 DROP TRIGGER IF EXISTS ofs_issue_touch ON ofs.ofs_issue;
 CREATE TRIGGER ofs_issue_touch BEFORE UPDATE ON ofs.ofs_issue

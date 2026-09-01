@@ -11,7 +11,7 @@ const PAGE = 'ofs-masters';
 
 const COLS = `id, symbol, company, isin, series, exchange, bse_scrip_code,
   floor_price, cut_price_min, tick, lot, issue_qty, retail_qty, discount_pct, cutoff_flag,
-  hni_open, hni_close, ret_open, ret_close, indicative_ri, indicative_ni,
+  hni_open, hni_close, ret_open, ret_close, issue_date, indicative_ri, indicative_ni,
   status, source, created_by, created_at, updated_at`;
 
 function decorate(r) {
@@ -43,7 +43,7 @@ router.get('/:id', requirePage('ofs-desk', PAGE), async (req, res, next) => {
 });
 
 const FIELDS = ['symbol','company','isin','series','exchange','bse_scrip_code','floor_price','cut_price_min',
-  'tick','lot','issue_qty','retail_qty','discount_pct','cutoff_flag','hni_open','hni_close','ret_open','ret_close',
+  'tick','lot','issue_qty','retail_qty','discount_pct','cutoff_flag','hni_open','hni_close','ret_open','ret_close','issue_date',
   'indicative_ri','indicative_ni','status'];
 
 function pick(body) {
