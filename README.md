@@ -159,14 +159,18 @@ are in [`docs/platform-patch/`](docs/platform-patch/). Until that is deployed an
 ## Client sign-in
 
 The Ashika website links straight to `/` — there is no SSO token to trust, so the app
-establishes identity itself: mobile **and** email must match one active LD record,
-then a 6-digit code goes to the registered address.
+establishes identity itself. One field takes **either** a registered mobile or a
+registered email; a 6-digit code then goes to **both** contacts on file.
 
 Deliberate behaviours, because this endpoint faces the public internet:
 
 - `/client/auth/start` answers **identically** whether or not the pair matched, so it
   cannot be used to discover which mobile/email combinations are clients.
-- The code is sent to the address **on file**, never to one typed into the form.
+- The code is sent to the contacts **on file**, never to whatever was typed — so
+  supplying one identifier cannot redirect the code elsewhere.
+- Matching on a single identifier is a weaker claim than requiring both, so
+  everything after it carries the weight: on-file delivery only, rate limits per
+  identifier and per IP, capped attempts. An identifier alone authenticates nobody.
 - Codes are stored as a sha256 hash only, compared in constant time, capped at 5
   attempts, and the attempt is counted *before* comparison so a dropped connection
   cannot buy a free guess.
