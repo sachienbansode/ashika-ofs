@@ -148,6 +148,7 @@ table.tbl th.n{font-family:var(--sans)}
   padding:11px 15px;max-width:360px;box-shadow:var(--shadow);animation:drop .22s ease}
 .toast>div.ok{border-left-color:var(--green)}
 .toast>div.bad{border-left-color:var(--red)}
+.toast>div.warn{border-left-color:var(--amber)}
 .toast b{display:block;font-size:13px;margin-bottom:2px}
 .toast p{margin:0;font-size:11.5px;color:var(--muted)}
 @keyframes drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}

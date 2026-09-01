@@ -123,13 +123,14 @@
   <section class="pane hide" id="pane-masters">
     <div class="bar">
       <button class="mini" data-mtab="issues">Issues</button>
+      <button class="mini" data-mtab="sync">Exchange pull</button>
       <button class="mini" data-mtab="margins">Margins</button>
       <button class="mini" data-mtab="archive">Archive</button>
       <button class="mini" data-mtab="settings">Settings</button>
     </div>
     <div id="importPane" class="hide"></div>
     <div id="mIssues">
-      <div class="bar"><button class="btn" id="miSync">Fetch from exchange</button><select id="miSyncEx" style="margin-right:6px"><option value="BSE">BSE</option><option value="NSE">NSE</option></select><button class="btn ghost" id="miNew">Add manually</button><button class="btn ghost" id="miImport">Import issues CSV</button><button class="mini" id="miTemplate">Download template</button></div>
+      <div class="bar"><button class="btn" id="miSync">Pull from exchanges</button><button class="btn ghost" id="miNew">Add manually</button><button class="btn ghost" id="miImport">Import issues CSV</button><button class="mini" id="miTemplate">Download template</button></div>
       <div id="miForm" class="hide"></div>
       <div class="wrap"><table id="issueTbl"></table></div>
     </div>
@@ -158,6 +159,59 @@
       </div>
       <div class="wrap"><table id="archiveTbl"></table></div>
       <div id="arDetail"></div>
+    </div>
+
+    <div id="mSync" class="hide">
+      <div class="bar">
+        <label class="pick"><input type="checkbox" id="syNSE" checked> NSE</label>
+        <label class="pick"><input type="checkbox" id="syBSE" checked> BSE</label>
+        <button class="btn" id="syRun">Pull now</button>
+        <div class="sp"></div>
+        <span class="tag" id="syMarket"></span>
+        <button class="mini" id="sySchedOpen">Schedule</button>
+      </div>
+
+      <div id="syProgress" class="sync-prog hide">
+        <div class="head"><b id="syProgTitle">Pulling…</b><span id="syProgPct">0%</span></div>
+        <div class="track"><div class="fill" id="syProgFill"></div></div>
+        <div class="log" id="syLog"></div>
+      </div>
+
+      <div id="sySummary"></div>
+
+      <div id="sySched" class="sync-sched hide">
+        <h2 class="sec">Schedule</h2>
+        <div class="row">
+          <label><span>Auto-pull</span>
+            <select id="scEnabled"><option value="0">Off</option><option value="1">On</option></select>
+          </label>
+          <label><span>Every</span>
+            <select id="scEvery">
+              <option value="15">15 minutes</option>
+              <option value="30">30 minutes</option>
+              <option value="60">1 hour</option>
+              <option value="120">2 hours</option>
+              <option value="240">4 hours</option>
+              <option value="1440">Once a day</option>
+            </select>
+          </label>
+          <label><span>From</span>
+            <select id="scEx">
+              <option value="NSE,BSE">NSE and BSE</option>
+              <option value="NSE">NSE only</option>
+              <option value="BSE">BSE only</option>
+            </select>
+          </label>
+          <label><span>Market hours only</span>
+            <select id="scMarketOnly"><option value="1">Yes</option><option value="0">No</option></select>
+          </label>
+          <button class="btn" id="scSave">Save schedule</button>
+        </div>
+        <div class="note" id="scNext"></div>
+      </div>
+
+      <h2 class="sec">Recent pulls</h2>
+      <div class="wrap"><table id="syRunTbl"></table></div>
     </div>
 
     <div id="mSettings" class="hide"><div class="wrap"><table id="setTbl"></table></div></div>

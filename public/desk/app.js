@@ -447,11 +447,13 @@ function showMTab(t) {
   $('#mIssues').classList.toggle('hide', t !== 'issues');
   $('#mMargins').classList.toggle('hide', t !== 'margins');
   $('#mArchive').classList.toggle('hide', t !== 'archive');
+  $('#mSync').classList.toggle('hide', t !== 'sync');
   $('#mSettings').classList.toggle('hide', t !== 'settings');
   if (t === 'margins') loadMargins();
   if (t === 'settings') loadSettings();
   if (t === 'issues') loadIssues();
   if (t === 'archive') loadArchive();
+  if (t === 'sync') loadSync(); else stopSyncPoll();
 }
 function loadMasters() { showMTab(STATE.mtab); }
 
@@ -527,41 +529,189 @@ async function saveIssue() {
   } catch (e) { toast('Save failed', (e.body && e.body.field) || (e.body && e.body.error) || e.message, 'bad'); }
 }
 
-/**
- * Pull the issue master from the exchange. Preview first, always: the desk sees what
- * would land, and only then decides. The exchange owns the facts; a refresh never
- * reopens an issue the desk has suspended.
+/* ================================================================= exchange pull
+ * A pull is a row on the server, not a request the browser waits on: start it, then
+ * poll for progress. That is what makes "why did this find nothing?" answerable —
+ * every endpoint tried, and what it said, is shown as it happens.
  */
-async function syncIssues() {
-  var ex = $('#miSyncEx').value;
-  var btn = $('#miSync');
-  btn.disabled = true; btn.textContent = 'Fetching ' + ex + '…';
-  try {
-    var p = await api('/issues/sync/preview?exchange=' + encodeURIComponent(ex));
-    if (!p.found) {
-      toast('Nothing found on ' + ex,
-        p.reachable ? 'Reached the exchange but no issue rows were returned — there may be none open.'
-                    : 'Could not reach the exchange from the server.', 'bad');
-      console.warn('[sync] attempts:', p.attempts);
-      return;
-    }
-    var lines = p.issues.slice(0, 10).map(function (i) {
-      return i.symbol + ' — floor ' + inr(i.floor_price) + ', ' + dt(i.hni_open) + ' → ' + dt(i.ret_close);
-    }).join('\n');
-    if (!window.confirm('Import ' + p.found + ' issue(s) from ' + ex + '?\n\n' + lines +
-        (p.found > 10 ? '\n…and ' + (p.found - 10) + ' more' : '') +
-        (p.rejected.length ? '\n\n' + p.rejected.length + ' row(s) will be skipped as incomplete.' : ''))) return;
+var SYNC = { timer: null, runId: null };
 
-    var r = await api('/issues/sync', { method: 'POST', body: { exchange: ex } });
-    toast('Issue master updated',
-      r.inserted + ' new, ' + r.updated + ' updated, ' + r.unchanged + ' unchanged', 'ok');
-    loadIssues(); loadDash();
+function stopSyncPoll() { if (SYNC.timer) { clearInterval(SYNC.timer); SYNC.timer = null; } }
+
+function outClass(o) {
+  if (o === 'ok') return 'ok';
+  if (o === 'started' || o === 'info') return 'info';
+  if (o === 'disabled' || o === 'no_data') return 'warn';
+  return 'bad';
+}
+
+function renderSteps(steps) {
+  $('#syLog').innerHTML = (steps || []).slice(-40).map(function (st) {
+    return '<div><span class="ex">' + esc(st.exchange || '—') + '</span>' +
+      '<span class="ms">' + esc(st.message || st.phase || '') + '</span>' +
+      '<span class="out ' + outClass(st.outcome) + '">' + esc(st.outcome || '') + '</span></div>';
+  }).join('');
+  var log = $('#syLog'); log.scrollTop = log.scrollHeight;
+}
+
+var OUTCOME_WHY = {
+  disabled: 'Web fetching is switched off (EXCHANGE_WEB_FETCH=false). Both exchanges ' +
+            'prohibit automated collection without written consent, so the sanctioned ' +
+            'route is Masters → Import issues CSV, fed from the T-2/T-1 member notice.',
+  unreachable: 'Nothing answered. The server may have no route out, or the endpoint moved.',
+  no_data: 'The exchange answered, but with nothing that parses as an OFS issue — ' +
+           'usually because no OFS is open, or because the page is a JavaScript shell ' +
+           'rather than data.',
+  error: 'The pull failed before it could read anything.'
+};
+
+function renderSummary(run) {
+  var ex = (run.summary && run.summary.exchanges) || [];
+  if (!ex.length && run.status === 'running') { $('#sySummary').innerHTML = ''; return; }
+  $('#sySummary').innerHTML = '<div class="sync-cards">' + ex.map(function (e) {
+    var good = e.outcome === 'ok';
+    return '<div class="sync-card"><h3>' + esc(e.exchange) +
+      '<span class="chip ' + (good ? 'open' : e.outcome === 'disabled' ? 'grey' : 'closed') + '">' +
+      esc(e.outcome) + '</span></h3>' +
+      '<div class="figs">' +
+      '<div class="fig"><b>' + (e.found || 0) + '</b><span>found</span></div>' +
+      '<div class="fig"><b>' + (e.inserted || 0) + '</b><span>new</span></div>' +
+      '<div class="fig"><b>' + (e.updated || 0) + '</b><span>updated</span></div>' +
+      '<div class="fig"><b>' + (e.unchanged || 0) + '</b><span>unchanged</span></div>' +
+      (e.rejected ? '<div class="fig"><b>' + e.rejected + '</b><span>skipped</span></div>' : '') +
+      '</div>' +
+      (good ? '' : '<div class="why">' + esc(OUTCOME_WHY[e.outcome] || '') + '</div>') +
+      '</div>';
+  }).join('') + '</div>';
+}
+
+function paintRun(run) {
+  $('#syProgress').classList.remove('hide');
+  var pct = Math.max(0, Math.min(100, run.progress || 0));
+  $('#syProgFill').style.width = pct + '%';
+  $('#syProgPct').textContent = pct + '%';
+  $('#syProgTitle').textContent = run.status === 'running'
+    ? 'Pulling from ' + (run.exchanges || []).join(' and ') + '…'
+    : 'Pull #' + run.id + ' — ' + run.status +
+      (run.status === 'ok' || run.status === 'partial'
+        ? ' (' + run.inserted + ' new, ' + run.updated + ' updated)' : '');
+  renderSteps(run.steps);
+  renderSummary(run);
+}
+
+async function pollRun() {
+  if (!SYNC.runId) return stopSyncPoll();
+  try {
+    var d = await api('/issues/sync/runs/' + SYNC.runId);
+    paintRun(d.run);
+    if (d.run.status !== 'running') {
+      stopSyncPoll();
+      SYNC.runId = null;
+      $('#syRun').disabled = false;
+      $('#syRun').textContent = 'Pull now';
+      $('#miSync').disabled = false;
+      loadSyncRuns(); loadSyncStatus(); loadIssues(); loadDash();
+      toast(d.run.status === 'failed' ? 'Pull found nothing' : 'Pull finished',
+        d.run.status === 'failed'
+          ? (d.run.error || 'No exchange returned usable issue data.')
+          : d.run.inserted + ' new, ' + d.run.updated + ' updated, ' + d.run.unchanged + ' unchanged',
+        d.run.status === 'failed' ? 'bad' : 'ok');
+    }
+  } catch (e) { stopSyncPoll(); }
+}
+
+function watchRun(id) {
+  SYNC.runId = id;
+  stopSyncPoll();
+  SYNC.timer = setInterval(pollRun, 1200);
+  pollRun();
+}
+
+async function startSync(exchanges) {
+  var list = exchanges || [$('#syNSE').checked ? 'NSE' : null, $('#syBSE').checked ? 'BSE' : null]
+    .filter(Boolean);
+  if (!list.length) return toast('Pick an exchange', 'Select NSE, BSE or both.', 'bad');
+
+  $('#syRun').disabled = true; $('#syRun').textContent = 'Pulling…';
+  $('#miSync').disabled = true;
+  try {
+    var d = await api('/issues/sync/run', { method: 'POST', body: { exchanges: list } });
+    if (d.busy) toast('Already running', 'A pull started at ' + dt(d.run.started_at) + ' is still going.', 'warn');
+    watchRun(d.run_id);
   } catch (e) {
-    toast('Sync failed', (e.body && e.body.message) || e.message, 'bad');
-  } finally {
-    btn.disabled = false; btn.textContent = 'Fetch from exchange';
+    $('#syRun').disabled = false; $('#syRun').textContent = 'Pull now';
+    $('#miSync').disabled = false;
+    toast('Could not start the pull', (e.body && e.body.message) || e.message, 'bad');
   }
 }
+
+/** The Issues tab button: switch to this pane and start, so progress is visible. */
+function syncIssues() { showMTab('sync'); startSync(); }
+
+async function loadSyncStatus() {
+  try {
+    var st = await api('/issues/sync/status');
+    var m = st.market || {};
+    $('#syMarket').textContent = m.open
+      ? 'Market open · bidding until ' + m.effective_close + ' IST'
+      : 'Market closed (' + (m.reason || '').replace(/_/g, ' ') + ') · opens ' + m.opens + ' IST';
+
+    $('#scEnabled').value = st.enabled ? '1' : '0';
+    $('#scEvery').value = String(st.every_minutes);
+    if (!$('#scEvery').value) $('#scEvery').value = '60';
+    $('#scEx').value = (st.exchanges || []).join(',') || 'NSE,BSE';
+    $('#scMarketOnly').value = st.market_only ? '1' : '0';
+
+    $('#scNext').textContent = !st.enabled
+      ? 'Auto-pull is off. Pulls happen only when someone presses Pull now.'
+      : st.holding_for_market
+        ? 'Due now, held until the market opens at ' + m.opens + ' IST.'
+        : 'Next scheduled pull ' + (st.next_run_at ? dt(st.next_run_at) : 'shortly') +
+          ' · every ' + st.every_minutes + ' minutes from ' + (st.exchanges || []).join(' and ') + '.';
+
+    if (st.running && !SYNC.runId) watchRun(st.running.id);
+  } catch (e) { /* the panel is informational; a failure here is not worth a toast */ }
+}
+
+async function saveSchedule() {
+  var vals = [
+    ['sync_enabled', $('#scEnabled').value],
+    ['sync_every_minutes', $('#scEvery').value],
+    ['sync_exchanges', $('#scEx').value],
+    ['sync_market_only', $('#scMarketOnly').value]
+  ];
+  try {
+    for (var i = 0; i < vals.length; i++) {
+      await api('/settings', { method: 'PUT', body: { key: vals[i][0], value: vals[i][1] } });
+    }
+    toast('Schedule saved', $('#scEnabled').value === '1'
+      ? 'Pulling every ' + $('#scEvery').value + ' minutes.' : 'Auto-pull is off.', 'ok');
+    loadSyncStatus();
+  } catch (e) { toast('Could not save', (e.body && e.body.message) || e.message, 'bad'); }
+}
+
+async function loadSyncRuns() {
+  try {
+    var d = await api('/issues/sync/runs?limit=15');
+    var r = d.runs || [];
+    $('#syRunTbl').innerHTML = r.length ? (
+      '<thead><tr><th>#</th><th>Started</th><th>By</th><th>From</th><th>Status</th>' +
+      '<th class="n">Found</th><th class="n">New</th><th class="n">Updated</th><th>Note</th></tr></thead><tbody>' +
+      r.map(function (x) {
+        return '<tr><td class="m">' + x.id + '</td><td class="m">' + dt(x.started_at) + '</td>' +
+          '<td>' + esc(x.trigger === 'schedule' ? 'schedule' : (x.actor || 'desk')) + '</td>' +
+          '<td>' + esc((x.exchanges || []).join(', ')) + '</td>' +
+          '<td><span class="chip ' + (x.status === 'ok' ? 'open' : x.status === 'running' ? 'soon' : x.status === 'partial' ? 'soon' : 'closed') + '">' +
+          esc(x.status) + '</span></td>' +
+          '<td class="n">' + (x.found || 0) + '</td><td class="n">' + (x.inserted || 0) + '</td>' +
+          '<td class="n">' + (x.updated || 0) + '</td>' +
+          '<td class="sm">' + esc(x.error || '') + '</td></tr>';
+      }).join('') + '</tbody>'
+    ) : '<tbody><tr><td class="empty">No pull has run yet.</td></tr></tbody>';
+  } catch (e) { toast('Pull history failed', e.message, 'bad'); }
+}
+
+function loadSync() { loadSyncStatus(); loadSyncRuns(); }
 
 async function loadMargins() {
   try {
@@ -1026,6 +1176,9 @@ async function boot() {
   });
   $('#miNew').addEventListener('click', issueForm);
   $('#miSync').addEventListener('click', syncIssues);
+  $('#syRun').addEventListener('click', function () { startSync(); });
+  $('#scSave').addEventListener('click', saveSchedule);
+  $('#sySchedOpen').addEventListener('click', function () { $('#sySched').classList.toggle('hide'); });
   $('#arGo').addEventListener('click', loadArchive);
   $('#arQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadArchive(); });
   $('#arRun').addEventListener('click', runArchive);

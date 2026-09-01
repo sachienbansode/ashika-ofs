@@ -8,6 +8,8 @@ const settings = require('../lib/settings');
 const { issueStatus, catStatus } = require('../lib/domain');
 const audit = require('../lib/audit');
 const { sourceFor } = require('../lib/issueSource');
+const runner = require('../lib/syncRunner');
+const scheduler = require('../lib/syncScheduler');
 const { upsertIssues } = require('../lib/issueSync');
 
 const router = express.Router();
@@ -40,7 +42,7 @@ router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get('/:id', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+router.get('/:id(\\d+)', requirePage('ofs-desk', PAGE), async (req, res, next) => {
   try {
     const r = await one(`SELECT ${COLS} FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [req.params.id]);
     if (!r) return res.status(404).json({ error: 'not_found' });
@@ -77,7 +79,7 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
   } catch (e) { next(e); }
 });
 
-router.put('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+router.put('/:id(\\d+)', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const before = await one(`SELECT ${COLS} FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [req.params.id]);
     if (!before) return res.status(404).json({ error: 'not_found' });
@@ -94,7 +96,7 @@ router.put('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) 
   } catch (e) { next(e); }
 });
 
-router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+router.delete('/:id(\\d+)', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const before = await one(`SELECT ${COLS} FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [req.params.id]);
     if (!before) return res.status(404).json({ error: 'not_found' });
@@ -154,6 +156,50 @@ router.post('/sync', requirePage(PAGE), requireEdit(PAGE), async (req, res, next
   } catch (e) { next(e); }
 });
 
+/* ------------------------------------------------------------- exchange pull --
+ * A pull walks several endpoints per exchange and can take a minute, so it is a
+ * ROW the desk polls rather than a request the browser waits on. See lib/syncRunner.js.
+ */
+
+/** POST /api/issues/sync/run { exchanges:['NSE','BSE'] } — start one, return its id. */
+router.post('/sync/run', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    await runner.reapStale(15);
+    const { run, busy } = await runner.start({
+      exchanges: (req.body && req.body.exchanges) || (await settings.all()).sync_exchanges,
+      trigger: 'manual',
+      actor: String(req.user.email || req.user.id)
+    });
+    if (busy) return res.status(202).json({ ok: true, busy: true, run_id: run.id, run });
+
+    runner.run(run);                       // deliberately not awaited
+    await audit.log(req, 'sync_start', 'ofs_sync_run', String(run.id), null,
+      { exchanges: run.exchanges });
+    res.status(202).json({ ok: true, busy: false, run_id: run.id, run });
+  } catch (e) { next(e); }
+});
+
+/** GET /api/issues/sync/runs/:id — progress + summary while it runs and after. */
+router.get('/sync/runs/:id(\\d+)', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try {
+    const run = await runner.get(req.params.id);
+    if (!run) return res.status(404).json({ error: 'not_found' });
+    res.json({ run });
+  } catch (e) { next(e); }
+});
+
+/** GET /api/issues/sync/runs — the last few pulls. */
+router.get('/sync/runs', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try { res.json({ runs: await runner.recent(req.query.limit) }); }
+  catch (e) { next(e); }
+});
+
+/** GET /api/issues/sync/status — schedule, next run, market state, live run. */
+router.get('/sync/status', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try { res.json(await scheduler.status()); }
+  catch (e) { next(e); }
+});
+
 /* ------------------------------------------------------------------ archive --
  * Archiving is a flag, never a move or a delete: bids, exported files, allotments
  * and audit rows keep pointing at the same issue, so a closed OFS can be opened in
@@ -192,7 +238,7 @@ router.get('/archive', requirePage('ofs-desk', PAGE), async (req, res, next) => 
 });
 
 /** Everything about one issue — live or archived. The permanent record. */
-router.get('/:id/summary', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+router.get('/:id(\\d+)/summary', requirePage('ofs-desk', PAGE), async (req, res, next) => {
   try {
     const issue = await one(
       `SELECT * FROM ${SCHEMA}.ofs_issue_summary WHERE id = $1`, [req.params.id]);
@@ -223,7 +269,7 @@ router.get('/:id/summary', requirePage('ofs-desk', PAGE), async (req, res, next)
   } catch (e) { next(e); }
 });
 
-router.post('/:id/archive', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+router.post('/:id(\\d+)/archive', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const before = await one(`SELECT id, symbol, archived_at FROM ${SCHEMA}.ofs_issue WHERE id = $1`,
       [req.params.id]);
@@ -252,7 +298,7 @@ router.post('/:id/archive', requirePage(PAGE), requireEdit(PAGE), async (req, re
   } catch (e) { next(e); }
 });
 
-router.post('/:id/unarchive', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+router.post('/:id(\\d+)/unarchive', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const r = await one(
       `UPDATE ${SCHEMA}.ofs_issue

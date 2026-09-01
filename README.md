@@ -210,9 +210,10 @@ Both masters come from upstream:
 
 - **Clients** — read live from LD on every request (`db/ldAdapter.js`). Never copied
   into this database; only the UCC is stored as a reference.
-- **Issues** — pulled from the exchange (`lib/issueSource/`). Masters → *Fetch from
-  exchange* previews what would land, then writes it. Manual entry and CSV import
-  remain as a fallback for when a source is unreachable.
+- **Issues** — pulled from the exchange (`lib/issueSource/`). Masters → **Exchange
+  pull** runs it, on demand or on a schedule, and shows every endpoint tried and
+  what it answered. Manual entry and CSV import remain as a fallback for when a
+  source is unreachable.
 
 The exchange owns the facts — floor price, windows, quantities — and the desk owns
 its own decisions, so a refresh updates exchange fields but never touches `status`:
@@ -239,6 +240,35 @@ Angular shell whose data loads by internal XHR, and NSE returns 404 for the publ
 paths. Making it work would mean reverse-engineering their front ends, which is
 precisely what the terms prohibit.
 
+### Masters → Exchange pull
+
+A pull walks several endpoints per exchange and can take a minute, so it is a **row
+in `ofs.ofs_sync_run`** the desk polls, not a request the browser waits on. The panel
+shows a progress bar, a live log of each endpoint and its answer, and a per-exchange
+summary card. The outcome is one of four, and the difference matters:
+
+| Outcome | Means |
+|---|---|
+| `disabled` | `EXCHANGE_WEB_FETCH=false` — nothing was attempted, by design |
+| `unreachable` | nothing answered |
+| `no_data` | answered, but with nothing that parses as an OFS issue |
+| `ok` | issues found and written |
+
+"Could not reach the exchange" used to cover all four, which is why an empty issue
+list looked like a network fault when it was a deliberate setting.
+
+**Schedule.** Masters → Exchange pull → *Schedule*: on/off, every 15 minutes to once
+a day (hourly is the default), which exchanges, and whether to hold outside market
+hours. It is a one-minute timer in the app (`lib/syncScheduler.js`) that asks the
+settings table whether a pull is due, so a change takes effect on the next minute —
+no restart, and no cron entry on the VM to keep in step with the database. Due-ness
+is measured from the last run **in the database**, so a restart neither resets the
+clock nor causes a double pull, and a partial unique index means only one pull can
+ever be in flight.
+
+A pull still finds nothing while `EXCHANGE_WEB_FETCH=false`. That is the correct
+state today — the panel now says so instead of blaming the network.
+
 The discovery tool remains, for a permitted source:
 
 ```bash
@@ -249,6 +279,24 @@ npm run fetch-issues -- --apply       # write what was found
 
 Run it on the server, where the exchange sites are reachable. If nothing parses,
 `--raw` prints what actually came back — that is what the parser gets matched to.
+
+## When a bid may be placed
+
+Three gates, narrowest wins (`lib/marketHours.js`, `lib/domain.js`):
+
+1. the exchange's own OFS window for that category — T-day Non-Retail, T+1 Retail;
+2. the **trading session** — a trading day, not a declared holiday, between
+   `market_open` and `market_close`;
+3. the **desk cut-off**, which **overrides the session end**.
+
+The override is the point: a desk that stops at 15:15 stops at 15:15 even though the
+market runs to 15:30, and a cut-off set *later* than the close is what applies
+instead. All four values — open, close, trading days, holidays — are desk-editable
+under Masters → Settings, alongside the cut-off.
+
+Everything is compared in `Asia/Kolkata` explicitly. The app server runs UTC, so the
+host clock is never consulted for a trading decision; the tests are written as UTC
+instants for exactly that reason.
 
 ## Client sign-in
 

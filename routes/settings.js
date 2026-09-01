@@ -59,6 +59,48 @@ const EDITABLE = {
     hint: 'BSE valid values: RI, NII, MF, IC, OTHS.',
     check: (v) => /^[A-Z]{2,5}$/.test(v) || 'Two to five capital letters'
   },
+  market_open: {
+    label: 'Market opens (IST)', kind: 'time',
+    hint: 'No bid is accepted before this. Equity session normally starts 09:15.',
+    check: (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v) || 'Use HH:MM, 24-hour'
+  },
+  market_close: {
+    label: 'Market closes (IST)', kind: 'time',
+    hint: 'Session end, normally 15:30. The daily desk cut-off above OVERRIDES this.',
+    check: (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v) || 'Use HH:MM, 24-hour'
+  },
+  market_days: {
+    label: 'Trading days', kind: 'text',
+    hint: '0 = Sunday. "1-5" is Monday to Friday. Commas and ranges both work.',
+    check: (v) => /^[0-6](\s*[-,]\s*[0-6])*$/.test(String(v).trim()) || 'Digits 0-6, with , or -'
+  },
+  trading_holidays: {
+    label: 'Trading holidays', kind: 'text',
+    hint: 'Comma-separated YYYY-MM-DD. Bidding is closed all day on these dates.',
+    check: (v) => (!String(v).trim() ||
+      String(v).split(/[,\s;]+/).filter(Boolean).every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))
+      || 'Use YYYY-MM-DD dates separated by commas'
+  },
+  sync_enabled: {
+    label: 'Auto-pull from the exchanges', kind: 'bool',
+    hint: '1 runs a pull on the schedule below. Needs EXCHANGE_WEB_FETCH=true to fetch anything.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
+  sync_every_minutes: {
+    label: 'Pull every (minutes)', kind: 'number',
+    hint: 'Between 5 and 1440. 60 = hourly.',
+    check: (v) => (Number(v) >= 5 && Number(v) <= 1440) || 'Between 5 and 1440'
+  },
+  sync_exchanges: {
+    label: 'Pull from', kind: 'choice', choices: ['NSE,BSE', 'NSE', 'BSE'],
+    hint: 'Which exchanges a scheduled pull covers. A manual pull can still pick either.',
+    check: (v) => /^(NSE|BSE)(,(NSE|BSE))*$/.test(String(v).toUpperCase()) || 'NSE, BSE or NSE,BSE'
+  },
+  sync_market_only: {
+    label: 'Only pull while the market is open', kind: 'bool',
+    hint: '1 holds the schedule outside session hours — nothing changes on the exchange overnight.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
   cutoff_price_mode: {
     label: 'Price written for a cut-off bid', kind: 'choice', choices: ['zero', 'floor'],
     hint: 'What goes in the price column when the client bid at cut-off.',

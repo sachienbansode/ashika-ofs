@@ -188,6 +188,15 @@ async function start() {
     console.error('[boot] PAGE REGISTRATION FAILED:', e.message);
     console.error('[boot] the desk will show "ofs-desk grant required" until this is fixed');
   }
+  // A pull that was in flight when the app went down would otherwise block every
+  // later one, so clear it before the scheduler's first tick.
+  try {
+    const reaped = await require('./lib/syncRunner').reapStale(15);
+    if (reaped) console.warn('[boot] closed', reaped, 'interrupted exchange pull(s)');
+  } catch (e) { console.warn('[boot] could not check exchange pulls:', e.message); }
+
+  require('./lib/syncScheduler').start();
+
   app.listen(PORT, HOST, () => console.log(`[boot] ashika-ofs-app listening on ${HOST}:${PORT}`));
 }
 
