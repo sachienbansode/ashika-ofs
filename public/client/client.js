@@ -295,12 +295,25 @@ function enterApp() {
 
 function showCTab(t) {
   S.tab = t;
+  var rl = $('#rulesLink');
+  if (rl) rl.addEventListener('click', function (e) {
+    e.preventDefault();
+    var box = $('#loginRules');
+    var open = !box.classList.contains('hide');
+    if (open) { box.classList.add('hide'); rl.textContent = 'Read the bidding rules'; return; }
+    renderRules(box);
+    box.classList.remove('hide');
+    rl.textContent = 'Hide the bidding rules';
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
   $$('#cTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.ctab === t); });
-  ['issues', 'bids', 'allot'].forEach(function (k) {
+  ['issues', 'bids', 'allot', 'rules'].forEach(function (k) {
     $('#cpane-' + k).classList.toggle('hide', k !== t);
   });
   if (t === 'bids') loadBids();
   if (t === 'allot') loadAllotments();
+  if (t === 'rules') renderRules($('#rulesBox'));
 }
 
 function chipFor(st) {

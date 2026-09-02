@@ -8,6 +8,7 @@
 <link rel="apple-touch-icon" href="/shared/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/shared/icon-192.png">
 <link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/rules.css">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -50,6 +51,7 @@
           <span class="lbl">Send code</span>
         </button>
         <div class="note" style="margin-top:14px">
+          <a href="#" id="rulesLink" style="font-weight:600">Read the bidding rules</a> before you bid.<br>
           We send a one-time code to <b>both</b> your registered email and mobile.
           Ashika will never ask you for this code by phone or message.
         </div>
@@ -96,6 +98,8 @@
     </div>
   </div>
 
+  <div id="loginRules" class="hide" style="margin-top:16px"></div>
+
   <div class="foot">
     <b>Ashika Stock Services LTD</b> &middot; SEBI Registered Member, NSE &amp; BSE<br>
     Bids are subject to exchange OFS session timings and allocation rules.
@@ -128,6 +132,11 @@
     <button data-ctab="issues" class="on">Open issues</button>
     <button data-ctab="bids">My bids</button>
     <button data-ctab="allot">Allotments</button>
+    <button data-ctab="rules">Bidding rules</button>
+  </div>
+
+  <div id="cpane-rules" class="hide">
+    <div class="card"><div class="card-b"><div id="rulesBox"></div></div></div>
   </div>
 
   <div id="cpane-issues">
@@ -152,6 +161,8 @@
 
 <div class="toast" id="toast"></div>
 <script src="/config.js"></script>
+<script src="/shared/rules.js"></script>
+<script src="/shared/rulesView.js"></script>
 <script src="/client.js"></script>
 </body>
 </html>

@@ -144,3 +144,34 @@ test('a bid may be modified up to the cut-off and not after', () => {
   assert.equal(mh2.marketState(s, at('09:44')).open, true);
   assert.equal(mh2.marketState(s, at('09:45')).open, false);
 });
+
+/* -------------------------------------------------------------------------
+ * A provisional issue — one the circular watch created from a PDF, before a
+ * person has checked it — must be impossible to bid on. Its floor price and
+ * windows are inferred, so a bid against it would be a bid against a guess.
+ * ----------------------------------------------------------------------- */
+test('a Suspended issue refuses every bid, in both categories', () => {
+  const now = new Date('2026-09-01T05:00:00Z');            // 10:30 IST, a Tuesday
+  const at = (utc) => new Date('2026-09-01T' + utc + ':00Z');
+  const provisional = {
+    symbol: 'COALINDIA-P12', isin: 'ISIN-UNKNOWN', lot: 1, tick: 0.05,
+    floor_price: 0.01, cut_price_min: 0.01, cutoff_flag: true,
+    status: 'Suspended',                                    // what the watch writes
+    hni_open: at('03:45'), hni_close: at('10:00'),
+    ret_open: at('03:45'), ret_close: at('10:00')
+  };
+  const s = { market_open: '09:15', market_close: '15:30', daily_cutoff: '15:15',
+              market_days: '1-5', trading_holidays: '', enforce_margin: '0' };
+
+  for (const category of ['Retail', 'HNI']) {
+    assert.equal(d.catStatus(provisional, category, now), 'Suspended');
+    const errs = d.validateBid(provisional, { category: category, qty: 10, price: 1, is_cutoff: false },
+      { settings: s, now: now, availableMargin: 1e7 });
+    assert.ok(errs.some((m) => /suspended/i.test(m)),
+      category + ' bid should be refused: ' + errs.join(' | '));
+  }
+
+  // And the same issue, once a person has checked it and lifted the suspension.
+  const checked = Object.assign({}, provisional, { status: 'Auto', floor_price: 412, cut_price_min: 412 });
+  assert.equal(d.catStatus(checked, 'Retail', now), 'Open');
+});

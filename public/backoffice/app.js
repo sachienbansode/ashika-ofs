@@ -159,12 +159,13 @@ async function api(path, opts) {
 function showTab(t) {
   STATE.tab = t;
   $$('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
-  ['dash', 'book', 'place', 'export', 'masters'].forEach(function (k) {
+  ['dash', 'book', 'place', 'export', 'masters', 'rules'].forEach(function (k) {
     $('#pane-' + k).classList.toggle('hide', k !== t);
   });
   if (t === 'book') loadBook();
   if (t === 'export') { loadExportLog(); previewExport(); }
   if (t === 'masters') loadMasters();
+  if (t === 'rules') renderRules($('#rulesBox'));
 }
 
 /* ---------------- dashboard ---------------- */
@@ -644,7 +645,10 @@ async function loadIssues() {
           '<td class="n">' + inr(i.tick) + '</td><td class="n">' + inr(i.lot, 0) + '</td>' +
           '<td class="m">' + dt(i.hni_open) + ' → ' + dt(i.hni_close) + '</td>' +
           '<td class="m">' + dt(i.ret_open) + ' → ' + dt(i.ret_close) + '</td>' +
-          '<td><span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span></td></tr>';
+          '<td><span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span>' +
+            (i.needs_review
+              ? ' <span class="chip soon" title="' + esc(i.review_note || '') +
+                '">needs review</span>' : '') + '</td></tr>';
       }).join('') + '</tbody>';
     }, 'issues', loadIssues, 'No issue in the master yet.');
   } catch (e) { toast('Issues failed', e.message, 'bad'); }
@@ -1919,7 +1923,7 @@ async function boot() {
   $$('[data-mtab]').forEach(function (b) { b.addEventListener('click', function () { showMTab(b.dataset.mtab); }); });
   $('#btnRefresh').addEventListener('click', function () { loadDash(); if (STATE.tab === 'book') loadBook(); });
   $('#autoRefresh').addEventListener('change', setAutoRefresh);
-  $('#bkGo').addEventListener('click', loadBook);
+  $('#bkGo').addEventListener('click', function () { resetPage('bids'); loadBook(); });
   $('#bkQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadBook(); });
   ['#bkIssue', '#bkCat', '#bkStatus'].forEach(function (s) { $(s).addEventListener('change', loadBook); });
   $('#bookTbl').addEventListener('click', function (e) {
@@ -2003,8 +2007,8 @@ async function boot() {
     if (b) marginHistory(b.dataset.mglog);
   });
   $('#sySchedOpen').addEventListener('click', function () { $('#sySched').classList.toggle('hide'); });
-  $('#arGo').addEventListener('click', loadArchive);
-  $('#arQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadArchive(); });
+  $('#arGo').addEventListener('click', function () { resetPage('archive'); loadArchive(); });
+  $('#arQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') { resetPage('archive'); loadArchive(); } });
   $('#arRun').addEventListener('click', runArchive);
   $('#archiveTbl').addEventListener('click', function (e) {
     var d = e.target.closest('[data-detail]');

@@ -88,6 +88,7 @@ router.get('/:exchange/preview', requirePage(PAGE), async (req, res, next) => {
       part: out.part || 1,
       max_rows_per_file: out.maxRowsPerFile || null,
       has_header_row: out.hasHeaderRow !== false,
+      unverified: out.unverified || null,
       preview: lines.slice(0, 51)
     });
   } catch (e) { next(e); }

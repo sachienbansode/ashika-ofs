@@ -14,6 +14,15 @@ const router = express.Router();
 router.use(requireClient);
 
 /** Open issues, as a client sees them: no desk aggregates, no other clients' bids. */
+/**
+ * The client's list of open issues.
+ *
+ * status = 'Auto' rather than "not Closed": a Suspended issue must not appear here.
+ * That covers both a desk suspension and — the case that made this explicit — an
+ * issue the circular watch created automatically, whose floor price and windows were
+ * read out of a PDF and not yet checked by anyone. Showing a client a floor price of
+ * 0.01 with invented dates would be worse than showing them nothing.
+ */
 router.get('/issues', async (req, res, next) => {
   try {
     const s = await settings.all();
@@ -23,7 +32,9 @@ router.get('/issues', async (req, res, next) => {
               indicative_ri, indicative_ni, status
          FROM ${SCHEMA}.ofs_issue
         WHERE archived_at IS NULL
-          AND status <> 'Closed' AND greatest(hni_close, ret_close) > now()
+          AND status = 'Auto'                 -- never Suspended, never Closed
+          AND needs_review = false            -- never one the app created from a circular
+          AND greatest(hni_close, ret_close) > now()
         ORDER BY greatest(hni_close, ret_close)`);
 
     const mine = await rows(

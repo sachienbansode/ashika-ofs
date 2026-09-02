@@ -8,6 +8,7 @@
 <link rel="apple-touch-icon" href="/shared/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/shared/icon-192.png">
 <link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/rules.css">
 <link rel="stylesheet" href="/backoffice/style.css">
 </head>
 <body>
@@ -36,6 +37,7 @@
   <button data-tab="place">Place bid</button>
   <button data-tab="export">Exchange files</button>
   <button data-tab="masters">Masters</button>
+  <button data-tab="rules">Bidding rules</button>
 </nav>
 
 <main>
@@ -123,6 +125,9 @@
     <h2 class="sec">Export audit log</h2>
     <div class="wrap"><table id="exLogTbl"></table></div>
   </section>
+
+  <!-- ---------------- Bidding rules ---------------- -->
+  <section class="pane hide" id="pane-rules"><div id="rulesBox"></div></section>
 
   <!-- ---------------- Masters ---------------- -->
   <section class="pane hide" id="pane-masters">
@@ -309,6 +314,8 @@
 <input type="file" id="filePick" accept=".csv,text/csv" class="hide">
 <div class="toast" id="toast"></div>
 <script src="/config.js"></script>
+<script src="/shared/rules.js"></script>
+<script src="/shared/rulesView.js"></script>
 <script src="/backoffice/csv.js"></script>
 <script src="/backoffice/app.js"></script>
 </body>
