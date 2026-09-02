@@ -940,20 +940,76 @@ async function loadCirculars() {
   } catch (e) { toast('Circulars failed', e.message, 'bad'); }
 }
 
+/**
+ * Show the check happening, step by step.
+ *
+ * A button that says "Checking…" and then goes quiet is the worst outcome: it looks
+ * identical whether NSE answered with nothing, refused us, or the server has no
+ * route to the internet at all. Each step is rendered as it is reported, so the
+ * failure has an address.
+ */
+function renderCirSteps(steps, title, pct) {
+  var box = $('#cirProgress');
+  box.classList.remove('hide');
+  $('#cirProgTitle').textContent = title;
+  $('#cirProgPct').textContent = (pct == null ? '' : pct + '%');
+  $('#cirProgFill').style.width = (pct == null ? 100 : pct) + '%';
+  $('#cirLog').innerHTML = (steps || []).map(function (st) {
+    return '<div><span class="ex">' + esc(st.phase || '') + '</span>' +
+      '<span class="ms">' + esc(st.message || '') + '</span>' +
+      '<span class="out ' + outClass(st.outcome) + '">' + esc(st.outcome || '') + '</span></div>';
+  }).join('');
+  var log = $('#cirLog'); log.scrollTop = log.scrollHeight;
+}
+
 async function pollCirculars() {
   var b = $('#cirPoll');
   b.disabled = true; b.textContent = 'Checking…';
+
+  renderCirSteps([{ phase: 'start', outcome: 'started',
+    message: 'Asking the server to check the NSE circular feed…' }], 'Checking NSE…', 15);
+
+  // The server gives up on NSE after 20s; give the request 30 so a hung connection
+  // ends in a message rather than a button stuck on "Checking…" forever.
+  var ctl = new AbortController();
+  var killed = setTimeout(function () { ctl.abort(); }, 30000);
+
   try {
-    var r = await api('/circulars/poll', { method: 'POST' });
-    toast(r.inserted ? r.inserted + ' new OFS circular(s)' : 'Nothing new',
+    var res = await fetch('/api/circulars/poll', {
+      method: 'POST', credentials: 'same-origin',
+      headers: Object.assign({ 'Content-Type': 'application/json' },
+        TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}),
+      signal: ctl.signal
+    });
+    var r = {};
+    try { r = await res.json(); } catch (e0) {}
+
+    if (!res.ok) {
+      renderCirSteps((r.steps || []).concat([{ phase: 'server', outcome: 'failed',
+        message: r.message || r.error || ('The server answered HTTP ' + res.status) }]),
+        'Check failed', 100);
+      toast('Check failed', r.message || r.error || ('HTTP ' + res.status), 'bad');
+      return;
+    }
+
+    renderCirSteps(r.steps, r.error ? 'Check failed' : 'Check complete', 100);
+    toast(r.inserted ? r.inserted + ' new OFS circular(s)' : r.error ? 'Check failed' : 'Nothing new',
       r.notModified ? 'NSE reports the feed unchanged since the last check.'
         : r.error ? r.error
         : (r.items || 0) + ' circular(s) in the feed, ' + (r.matched || 0) + ' matched OFS.',
       r.error ? 'bad' : r.inserted ? 'ok' : 'warn');
     loadCirculars();
   } catch (e) {
-    toast('Check failed', (e.body && e.body.message) || e.message, 'bad');
+    var msg = e.name === 'AbortError'
+      ? 'The server did not answer within 30 seconds. It is most likely still waiting on NSE, '
+        + 'which means outbound HTTPS from this server is blocked.'
+      : /failed to fetch|networkerror|load failed/i.test(e.message || '')
+        ? 'The browser could not reach the OFS server. Reload the page — it may have restarted.'
+        : e.message;
+    renderCirSteps([{ phase: 'browser', outcome: 'failed', message: msg }], 'Check failed', 100);
+    toast('Check failed', msg, 'bad');
   } finally {
+    clearTimeout(killed);
     b.disabled = false; b.textContent = 'Check NSE now';
   }
 }
