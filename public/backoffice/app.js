@@ -824,6 +824,76 @@ function loadSync() { loadSyncStatus(); loadSyncRuns(); }
  * It answers ONE question: is there an OFS we have not set up? The numbers are in
  * the PDF and a human still enters them.
  */
+/**
+ * Whether the watch is actually working, said plainly.
+ *
+ * The failure that matters is NSE refusing this server — a 403 from a datacentre
+ * IP looks identical to "no OFS today" if all the desk sees is a timestamp. So the
+ * status code and the error are shown, with what to do about each.
+ */
+function renderFeedHealth(st, f) {
+  var el = $('#cirFeed');
+  var box = $('#cirHealth');
+  el.className = 'tag';
+
+  if (!st.enabled) {
+    el.textContent = 'Watch is off';
+    if (box) { box.innerHTML = '<div class="note warn">The circular watch is switched off. ' +
+      'Turn it on under <b>Masters → Settings → Watch NSE circulars</b>, or press ' +
+      '<b>Check NSE now</b> for a one-off look.</div>'; }
+    return;
+  }
+
+  var ok = f && f.last_ok_at;
+  var code = f && f.last_status;
+  var err = f && f.last_error;
+
+  el.textContent = !f ? 'Not checked yet'
+    : err ? 'NSE check failed'
+    : ('NSE checked ' + dt(f.last_ok_at) + (code === 304 ? ' · unchanged' : ''));
+  el.className = 'tag ' + (err ? 'hni' : ok ? 'ret' : '');
+
+  if (!box) return;
+
+  var bits = [];
+  if (err) {
+    // The two failures worth telling apart, because the fix is different.
+    var blocked = code === 403 || code === 401;
+    var down = code === 0;
+    bits.push('<div class="note bad"><b>NSE is not answering this server.</b><br>' +
+      esc(err) + (code ? ' (HTTP ' + code + ')' : '') + '<br><br>' +
+      (blocked
+        ? 'A 403 from a server IP usually means NSE is refusing datacentre clients. ' +
+          'The feed is public, so this is a blocking rule rather than a permission problem — ' +
+          'raise it with NSE Member Service Department, and meanwhile load issues from the ' +
+          'T-2/T-1 member notice under <b>Masters → Import issues CSV</b>.'
+        : down
+          ? 'Nothing answered at all — check that the server has outbound HTTPS to ' +
+            'nsearchives.nseindia.com.'
+          : 'Press <b>Check NSE now</b> to retry. If it keeps failing, the feed URL may have moved.') +
+      '</div>');
+  } else if (!f) {
+    bits.push('<div class="note">The feed has not been checked yet. Press <b>Check NSE now</b>, ' +
+      'or wait for the scheduled check.</div>');
+  } else if (!Number(st.counts && st.counts.ofs)) {
+    bits.push('<div class="note good"><b>The watch is working.</b> ' +
+      'NSE answered' + (f.items_seen ? ' with ' + f.items_seen + ' circular(s) seen so far' : '') +
+      ', and none of them is an Offer for Sale. That is the normal state between issues — ' +
+      'nothing is wrong.</div>');
+  }
+
+  bits.push('<div class="bar" style="margin:0">' +
+    '<span class="tag">Every ' + st.poll_minutes + ' min</span>' +
+    (st.alert_email
+      ? '<span class="tag ret">Alerts to ' + esc(st.alert_email) + '</span>'
+      : '<span class="tag hni">No email alert set</span>') +
+    '<span class="tag">' + (Number(st.counts && st.counts.ofs) || 0) + ' OFS circular(s) recorded</span>' +
+    '<span class="tag">' + (Number(st.counts && st.counts.imported) || 0) + ' set up</span>' +
+    '</div>');
+
+  box.innerHTML = bits.join('');
+}
+
 async function loadCirculars() {
   try {
     var st = $('#cirStatus').value;
@@ -831,11 +901,10 @@ async function loadCirculars() {
     var r = d.circulars || [];
     var f = (d.status && d.status.feed) || {};
 
-    $('#cirFeed').textContent = !d.status.enabled ? 'Watch is off'
-      : f.last_ok_at ? ('NSE checked ' + dt(f.last_ok_at) +
-          (f.last_status === 304 ? ' · unchanged' : '') +
-          (d.status.alert_email ? ' · alerts to ' + d.status.alert_email : ' · no email alert set'))
-      : 'Not checked yet';
+    // The feed's health, in words. A stale timestamp with no reason is the worst
+    // possible state to leave a desk in: it looks like "nothing is happening"
+    // when it may mean "NSE has been refusing us for two days".
+    renderFeedHealth(d.status, f);
 
     var unread = Number(d.status.counts && d.status.counts.unreviewed) || 0;
     var badge = $('#cirBadge');
