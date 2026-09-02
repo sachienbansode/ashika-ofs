@@ -13,7 +13,7 @@ Ashika's own checklist (spec §3) asks for. Phases 2 and 3 are, as specified, la
 
 | § | Requirement | State |
 |---|---|---|
-| 5.1.1 | OFS-team role, existing auth | **Done.** `OFS-Backoffice` role SQL in `docs/sql/`; `SuperAdmin` (`*`) already reaches it. Two doors: portal SSO (`/auth/sso`) and a direct sign-in at `/desk/login.html` |
+| 5.1.1 | OFS-team role, existing auth | **Done.** `OFS-Backoffice` role SQL in `docs/sql/`; `SuperAdmin` (`*`) already reaches it. Two doors: portal SSO (`/auth/sso`) and a direct sign-in at `/backoffice/login.html` |
 | 5.1.2 | All open issues: scrip, ISIN, exchange, floor, cut-off, both windows, discount, live status | **Done.** Dashboard cards, status computed per category (Upcoming / Open / Closed) with a live countdown |
 | 5.1.3 | Live bid book: bids, qty, value, Retail/HNI split, subscription ×, indicative price, auto-refresh | **Done except the indicative price.** Everything computes; `indicative_ri` / `indicative_ni` are columns the desk types in, because the exchange publishes that figure only on the member terminal (§3) |
 | 5.1.4 | Review/manage bids: filter, search, spot rejects, place/modify/cancel on behalf | **Done.** Bid book with filters and search; validation names the reason (below floor, over cap, margin short, wrong tick/lot, duplicate live bid) |

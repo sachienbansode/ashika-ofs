@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Direct back-office sign-in — the fallback door to /desk when portal SSO is not
+ * Direct back-office sign-in — the fallback door to /backoffice when portal SSO is not
  * (yet) deployed. See lib/staffAuth.js for why it exists and what it must not weaken.
  *
  *   POST /auth/staff/login   { email, password }  -> session cookie, or { mfa_required, ref }

@@ -133,7 +133,7 @@ app.get('/config.js', (req, res) => {
 
 /* ---- two front ends, deliberately separate ----
    /      the client journey (public: anyone with a UCC can reach it)
-   /desk  the OFS team's desk (portal SSO, ofs-desk grant)
+   /backoffice  the OFS team's desk (portal SSO or a direct sign-in, ofs-desk grant)
    Separate directories so a client-facing page can never accidentally include a
    desk script, and so the desk can later be restricted by IP without touching
    the client side. */
@@ -152,8 +152,15 @@ const STATIC = {
       : 'public, max-age=300, must-revalidate');
   }
 };
+/* /desk moved to /backoffice. Old bookmarks, the portal's OFS link and any deployed
+   copy of the SSO patch still point at it, so redirect rather than 404 someone
+   mid-bidding-window. Keep this: a 301 is cached hard, so removing it later would
+   strand anyone who has one. Logic in lib/legacyPath.js, where it is tested. */
+const { DESK_RE, backofficeRedirect } = require('./lib/legacyPath');
+app.get(DESK_RE, (req, res) => res.redirect(301, backofficeRedirect(req.originalUrl)));
+
 app.use('/shared', express.static(path.join(__dirname, 'public', 'shared'), STATIC));
-app.use('/desk', express.static(path.join(__dirname, 'public', 'desk'), STATIC));
+app.use('/backoffice', express.static(path.join(__dirname, 'public', 'backoffice'), STATIC));
 app.use('/', express.static(path.join(__dirname, 'public', 'client'), STATIC));
 
 app.use((req, res) => res.status(404).json({ error: 'not_found' }));

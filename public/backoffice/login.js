@@ -86,7 +86,7 @@
         $('#code').focus();
         return;
       }
-      location.replace('/desk/');
+      location.replace('/backoffice/');
     } catch (err) {
       fail($('#credErr'), err.message);
       $('#password').select();
@@ -108,13 +108,13 @@
     busy($('#verify'), true, 'Verifying…');
     try {
       await post('/auth/staff/verify', { ref: STATE.ref, code: code });
-      location.replace('/desk/');
+      location.replace('/backoffice/');
     } catch (err) {
       fail($('#otpErr'), err.message);
       // A dead challenge cannot be retried — send them back rather than letting
       // them type into a form that can no longer succeed.
       if (['unknown', 'used', 'expired', 'too_many_attempts'].indexOf(err.code) >= 0) {
-        setTimeout(function () { location.replace('/desk/login.html'); }, 2200);
+        setTimeout(function () { location.replace('/backoffice/login.html'); }, 2200);
       }
       $('#code').select();
     } finally {
@@ -122,5 +122,5 @@
     }
   });
 
-  $('#startOver').addEventListener('click', function () { location.replace('/desk/login.html'); });
+  $('#startOver').addEventListener('click', function () { location.replace('/backoffice/login.html'); });
 })();

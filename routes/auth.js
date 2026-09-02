@@ -100,7 +100,7 @@ router.get('/sso', ssoLimiter, async (req, res) => {
       'sso_login', 'session', String(user.id), null, { role: user.role });
     // Redirect so the ticket leaves the address bar and the history entry.
     // Staff land on the desk, not the client login page.
-    res.redirect('/desk');
+    res.redirect('/backoffice');
   } catch (e) {
     console.warn('[sso] rejected:', e.code || e.message);
     res.status(401).send(page(FAIL_TEXT[e.code] || 'Sign-in failed.'));

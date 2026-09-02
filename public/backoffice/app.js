@@ -1155,7 +1155,7 @@ function showGate(title, message, why) {
 
 /**
  * Two doors lead here: the portal mints a one-time ticket (/auth/sso), or the user
- * signs in directly at /desk/login.html against the same platform account. Either
+ * signs in directly at /backoffice/login.html against the same platform account. Either
  * way this page only ever sees the resulting session cookie.
  */
 async function checkSession() {
@@ -1183,7 +1183,7 @@ async function checkSession() {
       // No session: go straight to the sign-in page rather than showing a wall
       // that only tells the user where the door is.
       var stale = e.body && e.body.error === 'session_superseded';
-      location.replace('/desk/login.html' + (stale ? '?reason=superseded' : ''));
+      location.replace('/backoffice/login.html' + (stale ? '?reason=superseded' : ''));
       return false;
     }
     showGate('Cannot reach the server', e.message, 'Check that the app is running and try again.');

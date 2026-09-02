@@ -35,7 +35,7 @@ middleware/pageAccess.js requirePage / requireEdit / canViewPII ('*' = full acce
 routes/                 dashboard, issues, bids, clients, margin, export, allotment
 public/shared/          theme.css - one design system for both front ends
 public/client/          the client journey: sign-in, open issues, my bids, allotments
-public/desk/            the OFS team's desk (CSP-safe: no inline script, no CDN, no chart lib)
+public/backoffice/            the OFS team's desk (CSP-safe: no inline script, no CDN, no chart lib)
 tests/                  node --test: domain rules, NSE/BSE adapters, CSV parser
 ```
 
@@ -154,21 +154,21 @@ renewal needs it.
 | URL | Who | How they get in |
 |---|---|---|
 | `/` | Clients | Mobile + registered email, then a one-time code emailed to the address **on file** |
-| `/desk` | OFS team | Portal SSO handoff (`docs/platform-patch/`), plus the `ofs-desk` grant |
+| `/backoffice` | OFS team | Portal SSO handoff (`docs/platform-patch/`), plus the `ofs-desk` grant |
 
 Separate directories under `public/`, separate cookies, separate tables. A client is
 not a platform user, holds no page grants, and can never satisfy `requirePage`; the
 desk's staff token can never satisfy `requireClient`. Both share `/shared/theme.css`
 so they look like one product.
 
-## Staff sign-in — two doors to `/desk`
+## Staff sign-in — two doors to `/backoffice`
 
 Both doors lead to the **same** platform accounts in `"admin-staging-api".users` /
 `roles`. OFS never stores a staff password and never creates a staff account; it
 re-reads role and permissions on every request, so a revoked grant or a disabled
 account takes effect within seconds without a restart.
 
-### 1. Direct sign-in — `/desk/login.html`
+### 1. Direct sign-in — `/backoffice/login.html`
 
 Email + portal password. If the role (`requires_mfa`) or the account
 (`mfa_enabled`) demands it, a 6-digit code follows, emailed to the address on file.
