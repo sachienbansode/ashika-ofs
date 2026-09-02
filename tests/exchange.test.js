@@ -31,18 +31,28 @@ test('NSE file: header, category codes, UCC case, totals', () => {
   assert.ok(lines[3].includes('RIC'), 'retail cut-off gets its own code');
 });
 
-test('NSE file: action codes N / M / C', () => {
+test('action codes are N / M / D — D, not C', () => {
+  // BSE Notice 20150122-30, Annexure 1: "'N' for new record, 'M' for to be modified
+  // record and 'D' for to deletion records." The prototype used C, which would have
+  // had every cancellation rejected at the exchange.
   const lines = nse.build(BIDS, SETTINGS, {}).text.split('\r\n').filter(Boolean);
   assert.ok(lines[1].endsWith(',N'));
-  assert.ok(lines[3].endsWith(',C'), 'cancelled row is a C action');
+  assert.ok(lines[3].endsWith(',D'), 'a cancelled row is a D action, never C');
   assert.ok(lines[4].endsWith(',M'), 'modified row is an M action');
   assert.ok(lines[4].includes('99001'), 'modify carries the exchange order number');
 });
 
-test('cut-off price is written as 0 by default and as the floor when configured', () => {
-  assert.ok(/RIC,,ASH1002,,100,0,/.test(nse.build(BIDS, SETTINGS, {}).text));
-  const asFloor = Object.assign({}, SETTINGS, { cutoff_price_mode: 'floor' });
-  assert.ok(/RIC,,ASH1002,,100,385,/.test(nse.build(BIDS, asFloor, {}).text));
+test('a cut-off bid carries the FLOOR PRICE, not zero', () => {
+  // Notice 20150122-30 says it twice: Annexure 1, "Please mention floor price when
+  // category is RIC"; and 4.3.5, "Margin for bids placed at cut-off price shall be
+  // at the floor price". A zero fails the exchange's own at-or-above-floor check,
+  // so every retail cut-off row in the file would have come back rejected.
+  assert.ok(/RIC,,ASH1002,,100,385,/.test(nse.build(BIDS, SETTINGS, {}).text),
+    'default must be the floor price');
+
+  // The escape hatch remains, but has to be asked for explicitly.
+  const asZero = Object.assign({}, SETTINGS, { cutoff_price_mode: 'zero' });
+  assert.ok(/RIC,,ASH1002,,100,0,/.test(nse.build(BIDS, asZero, {}).text));
 });
 
 test('exchange files are CRLF and checksummed over the exact bytes', () => {
@@ -81,11 +91,19 @@ test('BSE cancellation is D, not C', () => {
   assert.equal(bse.actionCode({ status: 'Live' }), 'N');
 });
 
-test('BSE categories stay within the published set', () => {
-  assert.deepEqual(bse.VALID_CATEGORIES, ['MF', 'IC', 'OTHS', 'NII', 'RI']);
-  // an unrecognised code from settings must not reach the exchange
-  const odd = Object.assign({}, SETTINGS, { cat_retail: 'ZZ', cat_hni: 'QQ' });
+test('BSE categories are the published set, RIC included', () => {
+  // Notice 20150122-30, Annexure 1: "i.e. IC, MF, OTHS, NII, RI and/or RIC".
+  // RIC was missing, so every retail cut-off bid was being coerced to RI.
+  assert.deepEqual(bse.VALID_CATEGORIES, ['MF', 'IC', 'OTHS', 'NII', 'RI', 'RIC']);
+
+  // Cut-off is a CATEGORY at BSE, not merely a price.
+  assert.equal(bse.categoryCode({ category: 'Retail', is_cutoff: true }, SETTINGS), 'RIC');
+  assert.equal(bse.categoryCode({ category: 'Retail', is_cutoff: false }, SETTINGS), 'RI');
+
+  // An unrecognised code from settings must never reach the exchange.
+  const odd = Object.assign({}, SETTINGS, { cat_retail: 'ZZ', cat_hni: 'QQ', cat_retail_cutoff: 'XX' });
   assert.equal(bse.categoryCode({ category: 'Retail' }, odd), 'RI');
+  assert.equal(bse.categoryCode({ category: 'Retail', is_cutoff: true }, odd), 'RIC');
   assert.equal(bse.categoryCode({ category: 'HNI' }, odd), 'NII');
 });
 

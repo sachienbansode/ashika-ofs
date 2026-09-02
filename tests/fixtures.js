@@ -14,7 +14,7 @@ const ISSUE = {
 const SETTINGS = {
   retail_cap: 200000, hni_min: 200000, enforce_margin: 1, daily_cutoff: '15:15',
   margin_type: 2, cat_retail: 'RI', cat_retail_cutoff: 'RIC', cat_hni: 'NII',
-  cutoff_price_mode: 'zero'
+  cutoff_price_mode: 'floor'
 };
 
 const T_DAY_11AM  = new Date('2026-09-01T11:00:00+05:30');   // HNI window open
