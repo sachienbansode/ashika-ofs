@@ -579,7 +579,24 @@ async function saveIssue() {
     ret_open: $('#fRetOpen').value, ret_close: $('#fRetClose').value
   };
   try {
-    await api('/issues', { method: 'POST', body: body });
+    var r = await api('/issues', { method: 'POST', body: body });
+    var id = r && r.issue && r.issue.id;
+
+    // If this issue came from a circular, attach that circular to it now. The link
+    // is what justifies the floor price and the windows to anyone reading later.
+    var c = STATE.fromCircular;
+    if (id && c && c.link) {
+      try {
+        await api('/issues/' + id + '/docs', { method: 'POST',
+          body: { url: c.link, title: c.title || 'NSE circular', kind: 'circular', source: 'NSE',
+                  circular_id: c.id } });
+        await api('/circulars/' + c.id, { method: 'PUT', body: { status: 'imported', issue_id: id } });
+      } catch (e2) {
+        toast('Issue saved, circular not attached', e2.message, 'warn');
+      }
+      STATE.fromCircular = null;
+    }
+
     toast('Issue added', body.symbol + ' is now in the master.', 'ok');
     $('#miForm').classList.add('hide');
     loadIssues(); loadDash();
@@ -851,14 +868,18 @@ async function setCircular(id, status) {
 }
 
 /** "Set up issue" — mark it, then open the manual issue form with the name filled in. */
-async function circularToIssue(id, company) {
+async function circularToIssue(id, company, link, title) {
   await setCircular(id, 'imported');
+  // Remember the circular so the issue, once saved, carries the document that
+  // justifies its floor price and windows.
+  STATE.fromCircular = { id: id, link: link, title: title };
   showMTab('issues');
   issueForm();
   var el = $('#fCompany');
   if (el && company && company !== '—') { el.value = company; }
   var sym = $('#fSymbol');
   if (sym) sym.focus();
+  if (link) toast('Circular remembered', 'It will be attached to the issue when you save.', 'ok');
 }
 
 /* ===================================================================== audit ===
@@ -1279,6 +1300,42 @@ function issueSummaryHtml(d) {
   '</div>';
 }
 
+/**
+ * The paperwork. A link opens the exchange's own page; an uploaded file is streamed
+ * back through the API, never from a static mount, so it stays behind the same
+ * session and page grant as everything else.
+ */
+function docsHtml(d) {
+  var list = d.docs || [];
+  var id = d.issue.id;
+  return '<h2 class="sec">Announcement &amp; documents (' + list.length + ')</h2>' +
+    '<div class="docs">' +
+      (list.length ? list.map(function (x) {
+        var href = x.storage === 'file'
+          ? '/api/issues/' + id + '/docs/' + x.id + '/file'
+          : x.url;
+        return '<div class="doc">' +
+          '<span class="ic">' + (x.storage === 'file' ? 'PDF' : 'WEB') + '</span>' +
+          '<div class="tx"><a href="' + esc(href) + '" target="_blank" rel="noopener"><b>' +
+            esc(x.title) + '</b></a>' +
+            '<div class="sub">' + esc(x.source) + ' · ' + esc(x.kind) +
+            (x.bytes ? ' · ' + Math.max(1, Math.round(x.bytes / 1024)) + ' KB' : '') +
+            ' · added ' + dt(x.added_at) + (x.added_by ? ' by ' + esc(x.added_by) : '') + '</div>' +
+            (x.storage === 'link' ? '<div class="sub m">' + esc(x.url) + '</div>' : '') +
+          '</div>' +
+          '<button class="mini" data-docdel="' + x.id + '" data-docissue="' + id + '">Remove</button>' +
+        '</div>';
+      }).join('') : '<div class="note">No document attached yet. The circular or member ' +
+        'notice is what justifies the floor price and the windows — attach it here.</div>') +
+      '<div class="bar" style="margin-top:10px">' +
+        '<input type="url" data-doclink="' + id + '" placeholder="https://… circular or notice link" style="flex:1 1 320px">' +
+        '<input type="text" data-doctitle="' + id + '" placeholder="Title (optional)" style="flex:0 1 200px">' +
+        '<button class="mini" data-docadd="' + id + '">Attach link</button>' +
+        '<button class="mini" data-docup="' + id + '">Upload PDF</button>' +
+      '</div>' +
+    '</div>';
+}
+
 function issueTablesHtml(d) {
   return '<h2 class="sec">Files generated (' + d.exports.length + ')</h2>' +
     '<div class="wrap"><table>' + (d.exports.length
@@ -1357,7 +1414,7 @@ async function toggleIssueRow(tr, id) {
         '<button class="mini" data-expand="' + id + '">Expand</button> ' +
         '<button class="mini" data-window="' + id + '">Open in new window</button> ' +
         '<button class="mini" data-collapse="1">Close</button>' }) +
-      issueSummaryHtml(d) + '<div class="rowdet-more hide"></div>';
+      issueSummaryHtml(d) + docsHtml(d) + '<div class="rowdet-more hide"></div>';
 
     box.addEventListener('click', function (e) {
       var x = e.target.closest('[data-expand]');
@@ -1376,6 +1433,58 @@ async function toggleIssueRow(tr, id) {
   }
 }
 
+/* ---- document actions, delegated so they work in the expander, the archive
+   drill-down and the standalone window alike ---- */
+async function docAddLink(id, url, title) {
+  if (!url) return toast('Nothing to attach', 'Paste the circular or notice link first.', 'bad');
+  try {
+    await api('/issues/' + id + '/docs', { method: 'POST',
+      body: { url: url, title: title || 'Announcement', kind: 'circular' } });
+    toast('Attached', 'The link is now on this issue.', 'ok');
+    refreshOpenDetail(id);
+  } catch (e) { toast('Could not attach', (e.body && e.body.message) || e.message, 'bad'); }
+}
+
+function docUpload(id) {
+  var f = document.createElement('input');
+  f.type = 'file';
+  f.accept = '.pdf,.zip,.png,.jpg,.jpeg,application/pdf,application/zip,image/png,image/jpeg';
+  f.addEventListener('change', async function () {
+    var file = f.files && f.files[0];
+    if (!file) return;
+    try {
+      var qs = '?title=' + encodeURIComponent(file.name) + '&name=' + encodeURIComponent(file.name) +
+               '&kind=notice';
+      var r = await fetch('/api/issues/' + id + '/docs/upload' + qs, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': file.type || 'application/pdf' },
+        body: file
+      });
+      var data = {};
+      try { data = await r.json(); } catch (e2) {}
+      if (!r.ok) throw new Error(data.message || ('Upload failed (' + r.status + ')'));
+      toast('Uploaded', file.name + ' is attached to this issue.', 'ok');
+      refreshOpenDetail(id);
+    } catch (e) { toast('Upload failed', e.message, 'bad'); }
+  });
+  f.click();
+}
+
+async function docRemove(issueId, docId) {
+  if (!window.confirm('Remove this document from the issue?')) return;
+  try {
+    await api('/issues/' + issueId + '/docs/' + docId, { method: 'DELETE' });
+    refreshOpenDetail(issueId);
+  } catch (e) { toast('Could not remove', e.message, 'bad'); }
+}
+
+/** Re-open whichever view is currently showing this issue. */
+function refreshOpenDetail(id) {
+  var row = document.querySelector('[data-detail="' + id + '"]');
+  if (row) { var tr = row.closest('tr'); toggleIssueRow(tr, id); toggleIssueRow(tr, id); return; }
+  if ($('#arDetail') && $('#arDetail').innerHTML) openArchived(id);
+}
+
 function openIssueWindow(id) {
   window.open('/backoffice/issue.html?id=' + encodeURIComponent(id), '_blank', 'noopener');
 }
@@ -1387,7 +1496,7 @@ async function openArchived(id) {
       issueHeadHtml(d, { controls:
         '<button class="mini" data-window="' + id + '">Open in new window</button> ' +
         '<button class="mini" id="arClose">Close</button>' }) +
-      issueSummaryHtml(d) + issueTablesHtml(d) + '</div>';
+      issueSummaryHtml(d) + docsHtml(d) + issueTablesHtml(d) + '</div>';
     $('#arClose').addEventListener('click', function () { $('#arDetail').innerHTML = ''; });
     var w = $('#arDetail').querySelector('[data-window]');
     if (w) w.addEventListener('click', function () { openIssueWindow(id); });
@@ -1519,12 +1628,33 @@ async function boot() {
   $('#scSave').addEventListener('click', saveSchedule);
   $('#auGo').addEventListener('click', function () { loadAudit(0); });
   $('#cirPoll').addEventListener('click', pollCirculars);
+
+  // Document controls appear inside markup that is rebuilt constantly (the row
+  // expander, the archive drill-down), so delegate from the document rather than
+  // re-binding after every render.
+  document.addEventListener('click', function (e) {
+    var add = e.target.closest('[data-docadd]');
+    if (add) {
+      var id = add.dataset.docadd;
+      var scope = add.closest('.docs') || document;
+      docAddLink(id,
+        (scope.querySelector('[data-doclink]') || {}).value,
+        (scope.querySelector('[data-doctitle]') || {}).value);
+      return;
+    }
+    var up = e.target.closest('[data-docup]');
+    if (up) { docUpload(up.dataset.docup); return; }
+    var del = e.target.closest('[data-docdel]');
+    if (del) docRemove(del.dataset.docissue, del.dataset.docdel);
+  });
   $('#cirStatus').addEventListener('change', loadCirculars);
   $('#cirTbl').addEventListener('click', function (e) {
     var n = e.target.closest('[data-cirnew]');
     if (n) {
       var row = n.closest('tr');
-      circularToIssue(n.dataset.cirnew, row.children[1].textContent.trim());
+      var a = row.querySelector('a[href]');
+      circularToIssue(n.dataset.cirnew, row.children[1].textContent.trim(),
+        a ? a.href : null, a ? a.textContent.trim() : null);
       return;
     }
     var d = e.target.closest('[data-cirdone]');   if (d) return setCircular(d.dataset.cirdone, 'reviewed');

@@ -11,6 +11,8 @@ const { sourceFor } = require('../lib/issueSource');
 const runner = require('../lib/syncRunner');
 const scheduler = require('../lib/syncScheduler');
 const archiver = require('../lib/archiver');
+const docs = require('../lib/issueDocs');
+const fs = require('fs');
 const { upsertIssues } = require('../lib/issueSync');
 
 const router = express.Router();
@@ -201,6 +203,88 @@ router.get('/sync/status', requirePage('ofs-desk', PAGE), async (req, res, next)
   catch (e) { next(e); }
 });
 
+/* ---------------------------------------------------------------- documents --
+ * The circular or notice that created an issue, attached to the issue. Six months
+ * later "why did we bid at that floor price?" is answered by opening the document,
+ * not by trusting a number somebody typed.
+ */
+
+/** GET /api/issues/:id/docs */
+router.get('/:id(\\d+)/docs', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try { res.json({ docs: await docs.list(req.params.id) }); }
+  catch (e) { next(e); }
+});
+
+/** POST /api/issues/:id/docs { kind, source, title, url } — attach a link. */
+router.post('/:id(\\d+)/docs', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    const issue = await one(`SELECT id, symbol FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [req.params.id]);
+    if (!issue) return res.status(404).json({ error: 'not_found' });
+    const d = await docs.addLink({
+      issueId: issue.id, kind: req.body.kind, source: req.body.source,
+      title: req.body.title, url: req.body.url, circularId: req.body.circular_id,
+      actor: String(req.user.email || req.user.id)
+    });
+    await audit.log(req, 'attach_doc', 'ofs_issue', String(issue.id), null,
+      { symbol: issue.symbol, title: d.title, url: d.url });
+    res.status(201).json({ doc: d });
+  } catch (e) { next(e); }
+});
+
+/**
+ * POST /api/issues/:id/docs/upload?title=...&kind=...  with the file as the body.
+ * Raw body rather than multipart: one dependency fewer, and the only thing we accept
+ * is a document, so there are no other form fields to parse.
+ */
+router.post('/:id(\\d+)/docs/upload',
+  requirePage(PAGE), requireEdit(PAGE),
+  express.raw({ type: Object.keys(docs.MIME), limit: docs.MAX_BYTES }),
+  async (req, res, next) => {
+    try {
+      const issue = await one(`SELECT id, symbol FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [req.params.id]);
+      if (!issue) return res.status(404).json({ error: 'not_found' });
+      const d = await docs.addFile({
+        issueId: issue.id,
+        kind: req.query.kind, source: req.query.source,
+        title: req.query.title, origName: req.query.name,
+        mime: req.headers['content-type'], buffer: req.body,
+        actor: String(req.user.email || req.user.id)
+      });
+      await audit.log(req, 'attach_doc', 'ofs_issue', String(issue.id), null,
+        { symbol: issue.symbol, title: d.title, file: d.orig_name, bytes: d.bytes, sha256: d.sha256 });
+      res.status(201).json({ doc: d });
+    } catch (e) { next(e); }
+  });
+
+/** GET /api/issues/:id/docs/:docId/file — served through auth, never from a static mount. */
+router.get('/:id(\\d+)/docs/:docId(\\d+)/file', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try {
+    const d = await docs.get(req.params.id, req.params.docId);
+    if (!d || d.storage !== 'file') return res.status(404).json({ error: 'not_found' });
+    const p = docs.filePath(d);
+    if (!p || !fs.existsSync(p)) return res.status(410).json({ error: 'file_missing' });
+
+    res.setHeader('Content-Type', d.mime || 'application/octet-stream');
+    res.setHeader('Content-Length', d.bytes);
+    // inline so a PDF opens in the browser's viewer; the name is ours, not the
+    // uploader's, and it is quoted so a stray character cannot break the header.
+    res.setHeader('Content-Disposition',
+      'inline; filename="' + String(d.orig_name || d.file_name).replace(/["\\]/g, '') + '"');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    fs.createReadStream(p).pipe(res);
+  } catch (e) { next(e); }
+});
+
+/** DELETE /api/issues/:id/docs/:docId */
+router.delete('/:id(\\d+)/docs/:docId(\\d+)', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
+  try {
+    const d = await docs.remove(req.params.id, req.params.docId);
+    if (!d) return res.status(404).json({ error: 'not_found' });
+    await audit.log(req, 'remove_doc', 'ofs_issue', String(req.params.id), d, null);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 /* ------------------------------------------------------------------ archive --
  * Archiving is a flag, never a move or a delete: bids, exported files, allotments
  * and audit rows keep pointing at the same issue, so a closed OFS can be opened in
@@ -245,7 +329,7 @@ router.get('/:id(\\d+)/summary', requirePage('ofs-desk', PAGE), async (req, res,
       `SELECT * FROM ${SCHEMA}.ofs_issue_summary WHERE id = $1`, [req.params.id]);
     if (!issue) return res.status(404).json({ error: 'not_found' });
 
-    const [bids, exports_, allotments, trail] = await Promise.all([
+    const [bids, exports_, allotments, trail, documents] = await Promise.all([
       rows(`SELECT ref, client_ucc, category, qty, price, is_cutoff, value, status,
                    placed_by, created_at, updated_at
               FROM ${SCHEMA}.ofs_bid WHERE issue_id = $1 ORDER BY created_at`, [req.params.id]),
@@ -255,7 +339,8 @@ router.get('/:id(\\d+)/summary', requirePage('ofs-desk', PAGE), async (req, res,
       rows(`SELECT client_ucc, allot_qty, allot_price, allot_value, mail_status, allotted_at
               FROM ${SCHEMA}.ofs_allotment WHERE issue_id = $1 ORDER BY client_ucc`, [req.params.id]),
       rows(`SELECT actor, action, before, after, at FROM ${SCHEMA}.ofs_audit
-             WHERE entity = 'ofs_issue' AND entity_id = $1 ORDER BY at`, [String(req.params.id)])
+             WHERE entity = 'ofs_issue' AND entity_id = $1 ORDER BY at`, [String(req.params.id)]),
+      docs.list(req.params.id)
     ]);
 
     // PII is masked here as everywhere: an archive is not a way around it.
@@ -265,6 +350,7 @@ router.get('/:id(\\d+)/summary', requirePage('ofs-desk', PAGE), async (req, res,
       exports: exports_,
       allotments,
       audit: trail,
+      docs: documents,
       pii_unmasked: canViewPII(req, 'ofs-desk')
     });
   } catch (e) { next(e); }

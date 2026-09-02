@@ -7,3 +7,6 @@ logs/
 tmp/
 exports/
 .DS_Store
+
+# uploaded circulars/notices (OFS_DOC_DIR)
+var/
