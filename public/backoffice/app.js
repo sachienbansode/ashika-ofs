@@ -855,6 +855,18 @@ async function loadSyncStatus() {
     $('#scEx').value = (st.exchanges || []).join(',') || 'NSE,BSE';
     $('#scMarketOnly').value = st.market_only ? '1' : '0';
 
+    // Say plainly what each exchange can do. Pressing "Pull now" and reading a
+    // failure log is a poor way to learn that NSE needs credentials.
+    var cap = st.capability || {};
+    var box = $('#syCapability');
+    if (box) {
+      box.innerHTML = Object.keys(cap).map(function (k) {
+        var c = cap[k];
+        return '<div class="note ' + (c.level === 'api' ? 'good' : 'warn') + '">' +
+          '<b>' + esc(k) + ' — ' + esc(c.label) + '.</b> ' + esc(c.detail) + '</div>';
+      }).join('');
+    }
+
     $('#scNext').textContent = !st.enabled
       ? 'Auto-pull is off. Pulls happen only when someone presses Pull now.'
       : st.holding_for_market

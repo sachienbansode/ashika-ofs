@@ -7,7 +7,7 @@ const { maskRows } = require('../lib/pii');
 const settings = require('../lib/settings');
 const { issueStatus, catStatus } = require('../lib/domain');
 const audit = require('../lib/audit');
-const { sourceFor } = require('../lib/issueSource');
+const { sourceFor, capability } = require('../lib/issueSource');
 const runner = require('../lib/syncRunner');
 const scheduler = require('../lib/syncScheduler');
 const archiver = require('../lib/archiver');
@@ -195,6 +195,13 @@ router.get('/sync/runs/:id(\\d+)', requirePage('ofs-desk', PAGE), async (req, re
 router.get('/sync/runs', requirePage('ofs-desk', PAGE), async (req, res, next) => {
   try { res.json({ runs: await runner.recent(req.query.limit) }); }
   catch (e) { next(e); }
+});
+
+/** GET /api/issues/sync/capability — what each exchange can actually do today. */
+router.get('/sync/capability', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try {
+    res.json({ exchanges: { NSE: capability('NSE'), BSE: capability('BSE') } });
+  } catch (e) { next(e); }
 });
 
 /** GET /api/issues/sync/status — schedule, next run, market state, live run. */
