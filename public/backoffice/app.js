@@ -501,12 +501,14 @@ function showMTab(t) {
   $('#mMargins').classList.toggle('hide', t !== 'margins');
   $('#mArchive').classList.toggle('hide', t !== 'archive');
   $('#mSync').classList.toggle('hide', t !== 'sync');
+  $('#mAudit').classList.toggle('hide', t !== 'audit');
   $('#mSettings').classList.toggle('hide', t !== 'settings');
   if (t === 'margins') loadMargins();
   if (t === 'settings') loadSettings();
   if (t === 'issues') loadIssues();
   if (t === 'archive') loadArchive();
   if (t === 'sync') loadSync(); else stopSyncPoll();
+  if (t === 'audit') loadAudit(0);
 }
 function loadMasters() { showMTab(STATE.mtab); }
 
@@ -766,21 +768,147 @@ async function loadSyncRuns() {
 
 function loadSync() { loadSyncStatus(); loadSyncRuns(); }
 
+/* ===================================================================== audit ===
+ * Read-only by construction. The point is that compliance can answer "who changed
+ * this, when, and from where" without a DBA — including whether a bid came from the
+ * client, their AP or the back office, which is on the bid row, not the actor.
+ */
+var AUDIT = { offset: 0, limit: 100, total: 0, rows: [] };
+
+function auditQuery(offset) {
+  var q = [];
+  var add = function (k, v) { if (v) q.push(k + '=' + encodeURIComponent(v)); };
+  add('area', $('#auArea').value);
+  add('placed_by', $('#auPlacedBy').value);
+  add('actor', $('#auActor').value.trim());
+  add('from', $('#auFrom').value);
+  add('to', $('#auTo').value);
+  add('q', $('#auQ').value.trim());
+  q.push('limit=' + AUDIT.limit);
+  q.push('offset=' + (offset || 0));
+  return '/audit?' + q.join('&');
+}
+
+/** What actually changed, in words — a raw JSON blob is not a review. */
+function auditDiff(e) {
+  var b = e.before || {}, a = e.after || {};
+  if (!e.before && !e.after) return '';
+  if (!e.before) {
+    var keys = ['symbol', 'client_ucc', 'category', 'qty', 'price', 'is_cutoff', 'value', 'available', 'status'];
+    return keys.filter(function (k) { return a[k] != null; })
+      .map(function (k) { return k + ' ' + a[k]; }).join(' · ');
+  }
+  var out = [];
+  Object.keys(a).forEach(function (k) {
+    if (['updated_at', 'created_at', 'id'].indexOf(k) >= 0) return;
+    var was = b[k], now = a[k];
+    if (JSON.stringify(was) !== JSON.stringify(now)) {
+      out.push(k + ': ' + (was == null ? '—' : was) + ' → ' + (now == null ? '—' : now));
+    }
+  });
+  return out.join(' · ') || 'no field changed';
+}
+
+function renderAudit() {
+  var r = AUDIT.rows;
+  $('#auditTbl').innerHTML = r.length ? (
+    '<thead><tr><th>When</th><th>Who</th><th>Source</th><th>Action</th><th>On</th>' +
+    '<th>What changed</th><th>IP</th></tr></thead><tbody>' +
+    r.map(function (e) {
+      return '<tr><td class="m">' + dt(e.at) + '</td>' +
+        '<td>' + esc(e.actor || '—') + '</td>' +
+        '<td>' + (e.placed_by_label ? '<span class="chip grey">' + esc(e.placed_by_label) + '</span>' : '') + '</td>' +
+        '<td><b>' + esc(e.action) + '</b></td>' +
+        '<td class="m">' + esc(e.entity) + (e.entity_id ? ' #' + esc(e.entity_id) : '') + '</td>' +
+        '<td class="sm">' + esc(auditDiff(e)) + '</td>' +
+        '<td class="m sm">' + esc(e.ip || '') + '</td></tr>';
+    }).join('') + '</tbody>'
+  ) : '<tbody><tr><td class="empty">Nothing recorded for those filters.</td></tr></tbody>';
+
+  var from = AUDIT.total ? AUDIT.offset + 1 : 0;
+  var to = Math.min(AUDIT.offset + AUDIT.limit, AUDIT.total);
+  $('#auCount').textContent = AUDIT.total ? (from + '–' + to + ' of ' + AUDIT.total) : 'nothing recorded';
+  $('#auPrev').disabled = AUDIT.offset <= 0;
+  $('#auNext').disabled = to >= AUDIT.total;
+}
+
+async function loadAudit(offset) {
+  try {
+    var d = await api(auditQuery(offset));
+    AUDIT.offset = d.offset; AUDIT.total = d.total; AUDIT.rows = d.entries || [];
+    var sel = $('#auArea');
+    if (sel.options.length <= 1 && d.areas) {
+      sel.innerHTML = '<option value="">All areas</option>' + d.areas.map(function (a) {
+        return '<option value="' + esc(a.key) + '">' + esc(a.label) + '</option>';
+      }).join('');
+    }
+    renderAudit();
+  } catch (e) { toast('Audit failed', e.message, 'bad'); }
+}
+
+/** Export what is on screen, filters and all — compliance asks for a file. */
+function auditCsv() {
+  var head = ['at', 'actor', 'source', 'action', 'entity', 'entity_id', 'changed', 'ip'];
+  var lines = [head.join(',')].concat(AUDIT.rows.map(function (e) {
+    return [e.at, e.actor, e.placed_by_label || '', e.action, e.entity, e.entity_id || '',
+            auditDiff(e), e.ip || ''].map(csvCell).join(',');
+  }));
+  downloadText('ofs_audit_' + new Date().toISOString().slice(0, 10) + '.csv', lines.join('\r\n'));
+}
+
+function csvCell(v) {
+  var s = v == null ? '' : String(v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+
 async function loadMargins() {
   try {
     var d = await api('/margin');
     var r = d.margins || [];
     $('#marginTbl').innerHTML = r.length ? (
       '<thead><tr><th>UCC</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
-      '<th>Source</th><th>Updated</th><th>By</th></tr></thead><tbody>' +
+      '<th>Source</th><th>Updated</th><th>By</th><th></th></tr></thead><tbody>' +
       r.map(function (m) {
         return '<tr><td class="m">' + esc(m.client_ucc) + '</td>' +
           '<td class="n">' + inr(m.available, 0) + '</td><td class="n">' + inr(m.used, 0) + '</td>' +
           '<td class="n">' + inr(m.free, 0) + '</td><td>' + esc(m.source) + '</td>' +
-          '<td class="m">' + dt(m.updated_at) + '</td><td>' + esc(m.updated_by || '') + '</td></tr>';
+          '<td class="m">' + dt(m.updated_at) + '</td><td>' + esc(m.updated_by || '') + '</td>' +
+          '<td><button class="mini" data-mglog="' + esc(m.client_ucc) + '">History</button></td></tr>';
       }).join('') + '</tbody>'
     ) : '<tbody><tr><td class="empty">No margin snapshot loaded. RMS has no available-margin read API yet — set margins here or via CSV.</td></tr></tbody>';
   } catch (e) { toast('Margins failed', e.message, 'bad'); }
+}
+
+/**
+ * One margin row per client — a new figure REPLACES the old one, and the change is
+ * kept here. So "what was their margin when that bid was placed?" is answerable
+ * months later without keeping a row per snapshot on the live table.
+ */
+async function marginHistory(ucc) {
+  try {
+    var d = await api('/margin/' + encodeURIComponent(ucc) + '/log');
+    var r = d.log || d.rows || [];
+    $('#mgHistory').innerHTML =
+      '<h2 class="sec">Margin history — ' + esc(ucc) + '</h2>' +
+      '<div class="wrap"><table>' +
+      (r.length
+        ? '<thead><tr><th>When</th><th class="n">From</th><th class="n">To</th>' +
+          '<th class="n">Change</th><th>Source</th><th>By</th><th>Note</th></tr></thead><tbody>' +
+          r.map(function (x) {
+            var d1 = Number(x.new_value) - Number(x.old_value || 0);
+            return '<tr><td class="m">' + dt(x.at) + '</td>' +
+              '<td class="n">' + (x.old_value == null ? '—' : inr(x.old_value, 0)) + '</td>' +
+              '<td class="n">' + inr(x.new_value, 0) + '</td>' +
+              '<td class="n" style="color:' + (d1 < 0 ? 'var(--red)' : 'var(--green)') + '">' +
+              (d1 >= 0 ? '+' : '') + inr(d1, 0) + '</td>' +
+              '<td>' + esc(x.source || '') + '</td><td>' + esc(x.actor || '') + '</td>' +
+              '<td class="sm">' + esc(x.note || '') + '</td></tr>';
+          }).join('') + '</tbody>'
+        : '<tbody><tr><td class="empty">No change recorded for ' + esc(ucc) + ' yet.</td></tr></tbody>') +
+      '</table></div>';
+    $('#mgHistory').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) { toast('History failed', e.message, 'bad'); }
 }
 
 async function setMargin() {
@@ -1033,78 +1161,143 @@ async function loadArchive() {
 }
 
 /** The permanent record for one issue: every bid, file, allotment and action. */
+/* ------------------------------------------------------------ issue detail --
+ * One builder, three places: the row expander in the Archive table, the standalone
+ * window, and the desk's own drill-down. `full` decides whether the bid/file/
+ * allotment tables come with it — a summary that dumps 400 bid rows into the table
+ * you were reading is not a summary.
+ */
+function issueSummaryHtml(d) {
+  var i = d.issue;
+  var money = function (k, v) {
+    return '<div class="f"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
+  };
+  return '<div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
+    money('Floor', rupee(i.floor_price)) +
+    money('Bids', inr(i.bid_count, 0) + ' (' + inr(i.cancelled_bids, 0) + ' cancelled)') +
+    money('Clients', inr(i.client_count, 0)) +
+    money('Quantity', inr(i.total_qty, 0)) +
+    money('Value', crore(i.total_value)) +
+    money('Retail / HNI', crore(i.retail_value_bid) + ' / ' + crore(i.hni_value_bid)) +
+    money('Book VWAP', i.vwap == null ? '—' : rupee(i.vwap)) +
+    money('Allotted', inr(i.allot_qty, 0) + ' to ' + inr(i.allottees, 0)) +
+    money('Allotment value', crore(i.allot_value)) +
+    money('Emails sent', inr(i.allot_mails_sent, 0)) +
+  '</div>';
+}
+
+function issueTablesHtml(d) {
+  return '<h2 class="sec">Files generated (' + d.exports.length + ')</h2>' +
+    '<div class="wrap"><table>' + (d.exports.length
+      ? '<thead><tr><th>When</th><th>Exchange</th><th>File</th><th class="n">Rows</th>' +
+        '<th>Checksum</th><th>By</th></tr></thead><tbody>' +
+        d.exports.map(function (x) {
+          return '<tr><td class="m">' + dt(x.generated_at) + '</td><td>' + esc(x.exchange) + '</td>' +
+            '<td class="m">' + esc(x.file_name) + '</td><td class="n">' + inr(x.row_count, 0) + '</td>' +
+            '<td class="m">' + esc(String(x.checksum).slice(0, 16)) + '…</td>' +
+            '<td>' + esc(x.generated_by || '') + '</td></tr>';
+        }).join('') + '</tbody>'
+      : '<tbody><tr><td class="empty">No exchange file was generated.</td></tr></tbody>') + '</table></div>' +
+
+    '<h2 class="sec">Bids (' + d.bids.length + ')</h2>' +
+    '<div class="wrap"><table>' + (d.bids.length
+      ? '<thead><tr><th>Ref</th><th>UCC</th><th>Cat</th><th class="n">Qty</th>' +
+        '<th class="n">Price</th><th class="n">Value</th><th>Status</th><th>Placed</th></tr></thead><tbody>' +
+        d.bids.map(function (b) {
+          return '<tr><td class="m">' + esc(b.ref) + '</td><td class="m">' + esc(b.client_ucc) + '</td>' +
+            '<td><span class="tag ' + (b.category === 'Retail' ? 'ret' : 'hni') + '">' +
+              esc(b.category) + '</span></td>' +
+            '<td class="n">' + inr(b.qty, 0) + '</td>' +
+            '<td class="n">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
+            '<td class="n">' + inr(b.value, 0) + '</td>' +
+            '<td><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
+            '<td class="m">' + dt(b.created_at) + '</td></tr>';
+        }).join('') + '</tbody>'
+      : '<tbody><tr><td class="empty">No bids were placed.</td></tr></tbody>') + '</table></div>' +
+
+    (d.allotments.length
+      ? '<h2 class="sec">Allotments (' + d.allotments.length + ')</h2><div class="wrap"><table>' +
+        '<thead><tr><th>UCC</th><th class="n">Qty</th><th class="n">Price</th>' +
+        '<th class="n">Value</th><th>Email</th></tr></thead><tbody>' +
+        d.allotments.map(function (x) {
+          return '<tr><td class="m">' + esc(x.client_ucc) + '</td>' +
+            '<td class="n">' + inr(x.allot_qty, 0) + '</td>' +
+            '<td class="n">' + (x.allot_price == null ? '—' : inr(x.allot_price, 2)) + '</td>' +
+            '<td class="n">' + inr(x.allot_value, 0) + '</td>' +
+            '<td>' + esc(x.mail_status) + '</td></tr>';
+        }).join('') + '</tbody></table></div>'
+      : '') +
+    (d.pii_unmasked ? '' : '<div class="note">Client PII is masked, as everywhere else.</div>');
+}
+
+function issueHeadHtml(d, opts) {
+  var i = d.issue;
+  return '<div class="bar"><b style="font-size:15px">' + esc(i.symbol) + '</b>' +
+    '<span style="color:var(--muted)">' + esc(i.company || '') + '</span>' +
+    '<span class="tag">' + esc(i.exchange) + '</span>' +
+    (i.archived_at ? '<span class="chip closed">Archived ' + dt(i.archived_at) +
+      (i.archived_by ? ' by ' + esc(i.archived_by) : '') + '</span>' : '') +
+    '<div class="sp"></div>' +
+    (opts && opts.controls ? opts.controls : '') + '</div>' +
+    (i.archive_reason ? '<div class="note">' + esc(i.archive_reason) + '</div>' : '');
+}
+
+/**
+ * The expander under the row itself. Opens as a SUMMARY — the detail tables are one
+ * click further, and a new window is one click sideways for anyone comparing two
+ * issues side by side.
+ */
+async function toggleIssueRow(tr, id) {
+  var open = tr.nextElementSibling;
+  if (open && open.classList.contains('rowdet')) { open.remove(); return; }
+  $$('.rowdet').forEach(function (x) { x.remove(); });
+
+  var det = document.createElement('tr');
+  det.className = 'rowdet';
+  det.innerHTML = '<td colspan="' + tr.children.length + '"><div class="rowdet-in">Loading…</div></td>';
+  tr.parentNode.insertBefore(det, tr.nextSibling);
+
+  try {
+    var d = await api('/issues/' + id + '/summary');
+    var box = det.querySelector('.rowdet-in');
+    box.innerHTML = issueHeadHtml(d, { controls:
+        '<button class="mini" data-expand="' + id + '">Expand</button> ' +
+        '<button class="mini" data-window="' + id + '">Open in new window</button> ' +
+        '<button class="mini" data-collapse="1">Close</button>' }) +
+      issueSummaryHtml(d) + '<div class="rowdet-more hide"></div>';
+
+    box.addEventListener('click', function (e) {
+      var x = e.target.closest('[data-expand]');
+      if (x) {
+        var more = box.querySelector('.rowdet-more');
+        var showing = !more.classList.contains('hide');
+        if (showing) { more.classList.add('hide'); x.textContent = 'Expand'; }
+        else { more.innerHTML = issueTablesHtml(d); more.classList.remove('hide'); x.textContent = 'Collapse'; }
+        return;
+      }
+      if (e.target.closest('[data-window]')) { openIssueWindow(id); return; }
+      if (e.target.closest('[data-collapse]')) det.remove();
+    });
+  } catch (e) {
+    det.querySelector('.rowdet-in').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>';
+  }
+}
+
+function openIssueWindow(id) {
+  window.open('/backoffice/issue.html?id=' + encodeURIComponent(id), '_blank', 'noopener');
+}
+
 async function openArchived(id) {
   try {
     var d = await api('/issues/' + id + '/summary');
-    var i = d.issue;
-    var money = function (k, v) {
-      return '<div class="f"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
-    };
-    $('#arDetail').innerHTML =
-      '<div class="card" style="margin-top:14px">' +
-        '<div class="bar"><b style="font-size:15px">' + esc(i.symbol) + '</b>' +
-          '<span style="color:var(--muted)">' + esc(i.company || '') + '</span>' +
-          '<span class="tag">' + esc(i.exchange) + '</span>' +
-          (i.archived_at ? '<span class="chip closed">Archived ' + dt(i.archived_at) +
-            (i.archived_by ? ' by ' + esc(i.archived_by) : '') + '</span>' : '') +
-          '<div class="sp"></div><button class="mini" id="arClose">Close</button></div>' +
-        (i.archive_reason ? '<div class="note">' + esc(i.archive_reason) + '</div>' : '') +
-        '<div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
-          money('Floor', rupee(i.floor_price)) +
-          money('Bids', inr(i.bid_count, 0) + ' (' + inr(i.cancelled_bids, 0) + ' cancelled)') +
-          money('Clients', inr(i.client_count, 0)) +
-          money('Quantity', inr(i.total_qty, 0)) +
-          money('Value', crore(i.total_value)) +
-          money('Retail / HNI', crore(i.retail_value_bid) + ' / ' + crore(i.hni_value_bid)) +
-          money('Book VWAP', i.vwap == null ? '—' : rupee(i.vwap)) +
-          money('Allotted', inr(i.allot_qty, 0) + ' to ' + inr(i.allottees, 0)) +
-          money('Allotment value', crore(i.allot_value)) +
-          money('Emails sent', inr(i.allot_mails_sent, 0)) +
-        '</div>' +
-
-        '<h2 class="sec">Files generated (' + d.exports.length + ')</h2>' +
-        '<div class="wrap"><table>' + (d.exports.length
-          ? '<thead><tr><th>When</th><th>Exchange</th><th>File</th><th class="n">Rows</th>' +
-            '<th>Checksum</th><th>By</th></tr></thead><tbody>' +
-            d.exports.map(function (x) {
-              return '<tr><td class="m">' + dt(x.generated_at) + '</td><td>' + esc(x.exchange) + '</td>' +
-                '<td class="m">' + esc(x.file_name) + '</td><td class="n">' + inr(x.row_count, 0) + '</td>' +
-                '<td class="m">' + esc(String(x.checksum).slice(0, 16)) + '…</td>' +
-                '<td>' + esc(x.generated_by || '') + '</td></tr>';
-            }).join('') + '</tbody>'
-          : '<tbody><tr><td class="empty">No exchange file was generated.</td></tr></tbody>') + '</table></div>' +
-
-        '<h2 class="sec">Bids (' + d.bids.length + ')</h2>' +
-        '<div class="wrap"><table>' + (d.bids.length
-          ? '<thead><tr><th>Ref</th><th>UCC</th><th>Cat</th><th class="n">Qty</th>' +
-            '<th class="n">Price</th><th class="n">Value</th><th>Status</th><th>Placed</th></tr></thead><tbody>' +
-            d.bids.map(function (b) {
-              return '<tr><td class="m">' + esc(b.ref) + '</td><td class="m">' + esc(b.client_ucc) + '</td>' +
-                '<td><span class="tag ' + (b.category === 'Retail' ? 'ret' : 'hni') + '">' +
-                  esc(b.category) + '</span></td>' +
-                '<td class="n">' + inr(b.qty, 0) + '</td>' +
-                '<td class="n">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
-                '<td class="n">' + inr(b.value, 0) + '</td>' +
-                '<td><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
-                '<td class="m">' + dt(b.created_at) + '</td></tr>';
-            }).join('') + '</tbody>'
-          : '<tbody><tr><td class="empty">No bids were placed.</td></tr></tbody>') + '</table></div>' +
-
-        (d.allotments.length
-          ? '<h2 class="sec">Allotments (' + d.allotments.length + ')</h2><div class="wrap"><table>' +
-            '<thead><tr><th>UCC</th><th class="n">Qty</th><th class="n">Price</th>' +
-            '<th class="n">Value</th><th>Email</th></tr></thead><tbody>' +
-            d.allotments.map(function (x) {
-              return '<tr><td class="m">' + esc(x.client_ucc) + '</td>' +
-                '<td class="n">' + inr(x.allot_qty, 0) + '</td>' +
-                '<td class="n">' + (x.allot_price == null ? '—' : inr(x.allot_price, 2)) + '</td>' +
-                '<td class="n">' + inr(x.allot_value, 0) + '</td>' +
-                '<td>' + esc(x.mail_status) + '</td></tr>';
-            }).join('') + '</tbody></table></div>'
-          : '') +
-        (d.pii_unmasked ? '' : '<div class="note">Client PII is masked, as everywhere else.</div>') +
-      '</div>';
+    $('#arDetail').innerHTML = '<div class="card" style="margin-top:14px">' +
+      issueHeadHtml(d, { controls:
+        '<button class="mini" data-window="' + id + '">Open in new window</button> ' +
+        '<button class="mini" id="arClose">Close</button>' }) +
+      issueSummaryHtml(d) + issueTablesHtml(d) + '</div>';
     $('#arClose').addEventListener('click', function () { $('#arDetail').innerHTML = ''; });
+    var w = $('#arDetail').querySelector('[data-window]');
+    if (w) w.addEventListener('click', function () { openIssueWindow(id); });
     $('#arDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) { toast('Could not open', e.message, 'bad'); }
 }
@@ -1231,13 +1424,25 @@ async function boot() {
   $('#miSync').addEventListener('click', syncIssues);
   $('#syRun').addEventListener('click', function () { startSync(); });
   $('#scSave').addEventListener('click', saveSchedule);
+  $('#auGo').addEventListener('click', function () { loadAudit(0); });
+  $('#auQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadAudit(0); });
+  ['#auArea', '#auPlacedBy', '#auFrom', '#auTo'].forEach(function (sel) {
+    $(sel).addEventListener('change', function () { loadAudit(0); });
+  });
+  $('#auPrev').addEventListener('click', function () { loadAudit(Math.max(0, AUDIT.offset - AUDIT.limit)); });
+  $('#auNext').addEventListener('click', function () { loadAudit(AUDIT.offset + AUDIT.limit); });
+  $('#auCsv').addEventListener('click', auditCsv);
+  $('#marginTbl').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-mglog]');
+    if (b) marginHistory(b.dataset.mglog);
+  });
   $('#sySchedOpen').addEventListener('click', function () { $('#sySched').classList.toggle('hide'); });
   $('#arGo').addEventListener('click', loadArchive);
   $('#arQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadArchive(); });
   $('#arRun').addEventListener('click', runArchive);
   $('#archiveTbl').addEventListener('click', function (e) {
     var d = e.target.closest('[data-detail]');
-    if (d) { openArchived(d.dataset.detail); return; }
+    if (d) { toggleIssueRow(d.closest('tr'), d.dataset.detail); return; }
     var u = e.target.closest('[data-unarch]');
     if (u) unarchive(u.dataset.unarch);
   });
@@ -1266,4 +1471,9 @@ async function boot() {
   setAutoRefresh();
 }
 
-document.addEventListener('DOMContentLoaded', boot);
+// app.js is also loaded by issue.html purely for its builders and api(); booting the
+// desk there would bind handlers to elements that do not exist. The tab strip is the
+// marker for "this is the desk".
+document.addEventListener('DOMContentLoaded', function () {
+  if (document.getElementById('tabs')) boot();
+});

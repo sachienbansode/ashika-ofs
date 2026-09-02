@@ -112,3 +112,35 @@ test('a suspended issue accepts nothing', () => {
   assert.ok(d.validateBid(issue, { category: 'HNI', qty: 1000, price: 390, is_cutoff: false }, ctx())
     .some((e) => /is suspended/.test(e)));
 });
+
+/* -------------------------------------------------------------------------
+ * Bid changes stop at the cut-off — modification AND cancellation.
+ * Cancellation used to skip this check entirely, so a bid could be withdrawn
+ * after the desk had generated and uploaded the exchange file.
+ * ----------------------------------------------------------------------- */
+const mh2 = require('../lib/marketHours');
+
+test('a bid may be modified up to the cut-off and not after', () => {
+  const s = { market_open: '09:15', market_close: '15:30', daily_cutoff: '15:15',
+              market_days: '1-5', trading_holidays: '', enforce_margin: '0' };
+  const at = (utc) => new Date('2026-09-01T' + utc + ':00Z');   // a Tuesday
+  const issue = {
+    symbol: 'ABC', lot: 1, tick: 0.05, floor_price: 100, cut_price_min: 100,
+    cutoff_flag: true,
+    hni_open: at('03:45'), hni_close: at('10:00'),
+    ret_open: at('03:45'), ret_close: at('10:00')
+  };
+  const bid = { category: 'Retail', qty: 10, price: 101, is_cutoff: false, editingId: 7 };
+  const ctx = { settings: s, availableMargin: 1e7 };
+
+  // 15:14 IST — one minute before the cut-off.
+  assert.deepEqual(d.validateBid(issue, bid, Object.assign({ now: at('09:44') }, ctx)), []);
+
+  // 15:15 IST — the cut-off itself.
+  const after = d.validateBid(issue, bid, Object.assign({ now: at('09:45') }, ctx));
+  assert.ok(after.some((m) => /cut-off of 15:15/.test(m)), after.join(' | '));
+
+  // The same gate the cancel route uses.
+  assert.equal(mh2.marketState(s, at('09:44')).open, true);
+  assert.equal(mh2.marketState(s, at('09:45')).open, false);
+});

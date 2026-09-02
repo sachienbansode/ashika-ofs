@@ -131,6 +131,7 @@
       <button class="mini" data-mtab="sync">Exchange pull</button>
       <button class="mini" data-mtab="margins">Margins</button>
       <button class="mini" data-mtab="archive">Archive</button>
+      <button class="mini" data-mtab="audit">Audit</button>
       <button class="mini" data-mtab="settings">Settings</button>
     </div>
     <div id="importPane" class="hide"></div>
@@ -148,6 +149,7 @@
         <button class="mini" id="mgTemplate">Download template</button>
       </div>
       <div class="wrap"><table id="marginTbl"></table></div>
+      <div id="mgHistory"></div>
     </div>
     <div id="mArchive" class="hide">
       <div class="bar">
@@ -217,6 +219,36 @@
 
       <h2 class="sec">Recent pulls</h2>
       <div class="wrap"><table id="syRunTbl"></table></div>
+    </div>
+
+    <div id="mAudit" class="hide">
+      <div class="bar">
+        <select id="auArea"><option value="">All areas</option></select>
+        <select id="auPlacedBy">
+          <option value="">Any source</option>
+          <option value="desk">Back office</option>
+          <option value="client">Client (self)</option>
+          <option value="ap">Authorised Partner</option>
+        </select>
+        <input type="text" id="auActor" placeholder="Who (email)">
+        <input type="date" id="auFrom" title="From">
+        <input type="date" id="auTo" title="To">
+        <input type="text" id="auQ" placeholder="Search UCC, symbol, value…">
+        <button class="btn ghost" id="auGo">Search</button>
+        <button class="mini" id="auCsv">Export CSV</button>
+        <div class="sp"></div>
+        <span class="tag" id="auCount"></span>
+      </div>
+      <div class="note">
+        Every write is recorded: bids placed by a client, an AP or the back office;
+        issue masters and exchange pulls; settings; margins; generated exchange files;
+        allotment imports and mails; and sign-ins. Nothing here can be edited or deleted.
+      </div>
+      <div class="wrap"><table id="auditTbl"></table></div>
+      <div class="bar" style="margin-top:10px">
+        <button class="mini" id="auPrev">← Newer</button>
+        <button class="mini" id="auNext">Older →</button>
+      </div>
     </div>
 
     <div id="mSettings" class="hide"><div class="wrap"><table id="setTbl"></table></div></div>

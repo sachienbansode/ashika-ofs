@@ -108,9 +108,22 @@ The ordering is the security property: an unverified visitor typing a shared mob
 learns nothing about how many accounts use it, or whose. `routes/clientAuth.js`
 (`/verify` → `accounts`, then `/select`) and `ofs.ofs_client_otp.uccs`.
 
-**Still open for Phase 2:** whether one family member may place a bid for another's
-UCC without signing in as them. That is the client-authorisation question in spec §3
-and needs Ashika's answer, not a code change.
+**Decision taken (2 Sep 2026): allowed for now.** A client who verifies a one-time
+code sent to the shared mobile and email may select any UCC on that pair and bid for
+it. Anyone who can read those messages can therefore bid for every account that
+shares them.
+
+**This must be highlighted in the client documentation and signed off by Ashika**,
+because it is a compliance position, not a technical default. Two things make it
+defensible today and both should be stated when it is presented:
+
+* every bid records the UCC it was placed for and `placed_by` (client / AP / desk),
+  so an audit can always show which account a bid belongs to; and
+* the session binds to one UCC, so a bid is never placed against the wrong account
+  by accident.
+
+If Ashika wants it tightened, the smallest change is to require a per-UCC
+authorisation flag from LD before that UCC appears in the chooser.
 
 ## "No client found" at sign-in — a deliberate trade-off
 
@@ -125,3 +138,34 @@ genuine typo painful.
 If compliance would rather give nothing away, `Masters → Settings → Unknown sign-in
 identifier` switches it to `generic`, which answers identically either way. **This is
 a compliance choice, not a technical one** — record which way Ashika wants it.
+
+
+---
+
+## Exchange APIs — answered (2 Sep 2026)
+
+The "is there an API?" question is now researched in full: see
+[`EXCHANGE_APIS.md`](EXCHANGE_APIS.md).
+
+**There is exactly one**, and Ashika already qualifies for it at no extra cost: the
+**NSE e-OFS Web API**, whose `GET /query/activeSecurities` returns ISIN, tick, lot,
+floor price, offer size and both windows — the whole issue master the desk retypes —
+and whose order endpoints would replace file upload on NSE entirely.
+
+**BSE has no OFS API.** iBBS is web entry plus a 100-record CSV upload, which this
+app already generates. That is the sanctioned interface, not a workaround.
+
+Actions sit with Ashika (ENIT request to NSE MSD, and the circular numbers listed in
+that document). Until the ENIT enablement is done, nothing on our side can change.
+
+## Margin, audit and bid modification — settled in code (2 Sep 2026)
+
+* **One margin row per client.** `ofs.ofs_margin` is keyed on `client_ucc`, so a new
+  figure replaces the old one; every change writes `ofs.ofs_margin_log` (old → new,
+  source, who, when) plus an `ofs_audit` row. Readable at Masters → Margins → History.
+* **Audit is now readable from the desk**, not only in SQL: Masters → Audit, filtered
+  by area, by who, by date, and by whether a bid came from the client, their AP or
+  the back office. Exportable to CSV. Nothing there can be edited or deleted.
+* **Bid modification and cancellation both stop at the cut-off.** Modification was
+  already gated; cancellation was not, so a bid could be withdrawn after the desk had
+  generated and uploaded the exchange file. Now both are gated.

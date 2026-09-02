@@ -6,7 +6,7 @@ const ld = require('../db/ldAdapter');
 const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAccess');
 const { maskRows } = require('../lib/pii');
 const settings = require('../lib/settings');
-const { validateBid, bidValue, minPrice, makeRef } = require('../lib/domain');
+const { validateBid, bidValue, minPrice, makeRef, marketState, closedMessage } = require('../lib/domain');
 const audit = require('../lib/audit');
 
 const router = express.Router();
@@ -161,6 +161,16 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
   try {
     const before = await one(`SELECT * FROM ${SCHEMA}.ofs_bid WHERE id = $1`, [req.params.id]);
     if (!before) return res.status(404).json({ error: 'not_found' });
+    if (before.status === 'Cancelled') return res.status(409).json({ error: 'already_cancelled' });
+
+    // A cancellation is a bid change like any other: allowed until the cut-off, not
+    // after it. Modify was already gated through validateBid; this was not, so a bid
+    // could be withdrawn after the desk had generated and uploaded the file.
+    const mkt = marketState(await settings.all(), new Date());
+    if (!mkt.open && String(req.body && req.body.force) !== 'true') {
+      return res.status(422).json({ error: 'window_closed', message: closedMessage(mkt) });
+    }
+
     const r = await one(
       `UPDATE ${SCHEMA}.ofs_bid SET status = 'Cancelled', reject_reason = $2 WHERE id = $1 RETURNING *`,
       [before.id, req.body && req.body.reason ? String(req.body.reason).slice(0, 300) : null]);

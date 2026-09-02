@@ -255,3 +255,11 @@ td.sm{font-size:11.5px;color:var(--muted);max-width:280px}
   section.pane{border:0;box-shadow:none;padding:0}
   .wrap{overflow:visible}
 }
+
+/* ---- expandable detail directly under a table row ---- */
+tr.rowdet > td{padding:0 !important;background:#f7fbfc;border-bottom:1px solid var(--line)}
+.rowdet-in{padding:14px 16px}
+.rowdet-in .bar{margin-bottom:12px}
+.rowdet-in .grid2{margin-top:0}
+.rowdet-more{margin-top:6px}
+.rowdet-more .sec:first-child{margin-top:14px}
