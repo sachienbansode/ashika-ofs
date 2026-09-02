@@ -285,10 +285,12 @@ tr.rowdet > td{padding:0 !important;background:#f7fbfc;border-bottom:1px solid v
 }
 section.pane,.card,.kpi,.sync-prog,.sync-card,.sync-sched{border-color:var(--edge)}
 
-/* ---- field grid: dividers, not a wireframe ---- */
-.grid2{gap:0;background:transparent;border:1px solid var(--edge);border-radius:11px}
-.f{background:transparent;padding:11px 14px;
-   border-right:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+/* ---- field grid ----
+   The separators are the 1px GAP showing the container's background through, not
+   borders on the cells. Borders leave a stub on the last column and the last row
+   (which have no neighbour); a gap cannot, because there is nothing after it. */
+.grid2{gap:1px;background:var(--hair);border:1px solid var(--edge);border-radius:11px;overflow:hidden}
+.f{background:#fff;padding:11px 14px}
 .f .k{font-size:9px;letter-spacing:.13em;color:var(--muted)}
 .f .v{font-size:14px;color:var(--ink);margin-top:3px;letter-spacing:-.01em}
 .f:hover{background:var(--tint)}
@@ -361,3 +363,64 @@ h2.sec::after{content:'';flex:1;height:1px;background:var(--hair)}
 .doc .tx b{font-size:13px;color:var(--navy)}
 .doc .sub{font-size:11px;color:var(--muted);margin-top:2px;word-break:break-all}
 .doc .sub.m{font-family:var(--mono);font-size:10.5px;opacity:.75}
+
+/* ==========================================================================
+   Layout. Two things were wrong and both were structural, not cosmetic:
+
+   1. `.cards` used auto-FILL, which keeps empty tracks. On a 1900px screen that
+      laid two cards out at ~350px each and left three empty columns of nothing —
+      exactly what a "Place bid" form looked like squeezed into a corner.
+      auto-FIT collapses the empty tracks so the cards actually use the width.
+   2. Nothing capped the content width, so on a wide monitor a table stretched to
+      1900px and the eye lost the row between one column and the next.
+   ========================================================================== */
+
+main{max-width:1560px;margin:0 auto}
+nav.tabs{max-width:1560px;margin:0 auto}
+header.top{padding-left:max(20px,calc((100vw - 1560px) / 2));
+           padding-right:max(20px,calc((100vw - 1560px) / 2))}
+
+.cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));align-items:start}
+
+/* Place bid is a form beside a read-out, not two equal columns: the form wants a
+   comfortable measure, the client panel wants whatever is left. */
+#pane-place .cards{grid-template-columns:minmax(320px,440px) minmax(320px,1fr)}
+@media (max-width:900px){ #pane-place .cards{grid-template-columns:1fr} }
+
+/* Inside a card the field grid should pair fields wherever two will fit. */
+.card .grid2{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
+
+/* ---- mobile ---- */
+@media (max-width:640px){
+  header.top{padding:9px 12px;gap:8px;flex-wrap:wrap}
+  header.top .clock{font-size:11px;order:2}
+  header.top #btnRefresh,header.top #autoRefresh{order:5}
+  header.top .who{order:9;flex:1 1 100%;display:flex;align-items:baseline;gap:8px;
+    border-top:1px solid var(--hair);padding-top:7px;margin-top:2px}
+  header.top .who b{font-size:12px}
+  header.top #btnSignOut{order:8}
+
+  /* Toasts must not cover the controls they are describing. */
+  .toast{left:10px;right:10px;bottom:10px}
+  .toast>div{width:auto}
+
+  /* A select showing "NSE — e-OFS bulk upload" cannot also be 100px wide. */
+  .bar select,.bar input{flex:1 1 100%;min-width:0}
+  .bar .btn{flex:1 1 auto}
+
+  .docs .bar input{flex:1 1 100%}
+  .doc{flex-wrap:wrap}
+  .doc .ic{order:1}
+  .doc .tx{order:3;flex:1 1 100%}
+  .doc button{order:2;margin-left:auto}
+
+  section.pane{border-radius:12px}
+  h2.sec{font-size:10px}
+}
+
+@media (max-width:400px){
+  .kpis{grid-template-columns:1fr}
+  main{padding:0 8px 28px}
+  nav.tabs{padding:8px 8px 0}
+  nav.tabs button{padding:9px 11px;font-size:12px}
+}

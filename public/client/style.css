@@ -135,3 +135,11 @@
 :root{--hair:rgba(27,42,78,.09);--edge:rgba(27,42,78,.13)}
 .card,.login-card,.topbar{border-color:var(--edge)}
 :focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:6px}
+
+/* ---- the same auto-fill trap on the client side ---- */
+.cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.wrap{max-width:1240px}
+@media (max-width:640px){
+  .toast{left:10px;right:10px;bottom:10px}
+  .toast>div{width:auto}
+}

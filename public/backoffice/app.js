@@ -176,6 +176,12 @@ function fillIssueSelects() {
   var pb0 = $('#pbNoIssues');
   if (pb0) pb0.classList.toggle('hide', !none);
 
+  // With nothing to bid on, leaving the form live invites filling it in and being
+  // told "pick an issue" — which is not the user's mistake to fix.
+  ['#pbIssue', '#pbUcc', '#pbCat', '#pbQty', '#pbType', '#pbPrice', '#pbCheck'].forEach(function (sel) {
+    var el = $(sel); if (el) el.disabled = none;
+  });
+
   var opts = STATE.issues.map(function (i) {
     return '<option value="' + i.id + '">' + esc(i.symbol) + ' — ' + esc(i.company) + '</option>';
   }).join('');
@@ -454,7 +460,25 @@ async function previewExport() {
       lines.slice(1).map(function (l) {
         return '<tr>' + l.split(',').map(function (v) { return '<td class="m">' + esc(v.replace(/^"|"$/g, '')) + '</td>'; }).join('') + '</tr>';
       }).join('') + '</tbody>';
-  } catch (e) { toast('Preview failed', (e.body && e.body.error) || e.message, 'bad'); }
+  } catch (e) { toast('Preview failed', exportError(e), 'bad'); }
+}
+
+/**
+ * "Failed to fetch" is what the browser says when the request never reached the
+ * server — almost always a restart mid-request or a dropped connection. Saying that
+ * is more useful than repeating the browser's wording, and the codes the export
+ * route returns deserve sentences rather than identifiers.
+ */
+function exportError(e) {
+  var code = (e.body && (e.body.error || e.body.code)) || e.code || '';
+  if (code === 'no_rows') return 'There are no bids matching this selection, so there is nothing to put in a file.';
+  if (code === 'isin_missing') return (e.body && e.body.message) || 'An issue in this selection has no confirmed ISIN yet.';
+  if (e.status === 401) return 'Your session has ended. Reload the page and sign in again.';
+  if (e.status === 403) return 'Your role does not allow generating exchange files.';
+  if (/failed to fetch|networkerror|load failed/i.test(e.message || '')) {
+    return 'The server did not respond — it may have just restarted. Reload the page and try again.';
+  }
+  return (e.body && e.body.message) || e.message || 'Something went wrong.';
 }
 
 async function downloadExport(part) {
@@ -462,7 +486,12 @@ async function downloadExport(part) {
   var headers = TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {};
   try {
     var res = await fetch(url, { headers: headers, credentials: 'same-origin' });
-    if (!res.ok) { var j = await res.json().catch(function () { return {}; }); throw new Error(j.error || res.statusText); }
+    if (!res.ok) {
+      var j = await res.json().catch(function () { return {}; });
+      var err = new Error(j.message || j.error || res.statusText);
+      err.status = res.status; err.body = j;
+      throw err;
+    }
     var name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
     var blob = await res.blob();
     var a = document.createElement('a');
@@ -473,7 +502,7 @@ async function downloadExport(part) {
     toast('File generated', 'Logged to ofs_export_log with checksum ' +
       String(res.headers.get('X-OFS-Checksum') || '').slice(0, 12) + '…', 'ok');
     loadExportLog();
-  } catch (e) { toast('Download failed', e.message, 'bad'); }
+  } catch (e) { toast('Download failed', exportError(e), 'bad'); }
 }
 
 async function loadExportLog() {
