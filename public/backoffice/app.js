@@ -1426,10 +1426,31 @@ function issueHeadHtml(d, opts) {
  * click further, and a new window is one click sideways for anyone comparing two
  * issues side by side.
  */
+/**
+ * Open/close the detail under a row. Clicking the row again — or its Open button,
+ * or Close — collapses it. Only one is open at a time: two expanded rows in a bid
+ * book push everything else off the screen.
+ */
+function markRowOpen(tr, on) {
+  if (!tr) return;
+  tr.classList.toggle('row-open', !!on);
+  var b = tr.querySelector('[data-detail]');
+  if (b) b.textContent = on ? 'Close' : 'Open';
+}
+
 async function toggleIssueRow(tr, id) {
   var open = tr.nextElementSibling;
-  if (open && open.classList.contains('rowdet')) { open.remove(); return; }
-  $$('.rowdet').forEach(function (x) { x.remove(); });
+  if (open && open.classList.contains('rowdet')) {
+    open.remove();
+    markRowOpen(tr, false);
+    return;
+  }
+  // Close whatever else is open, and reset the row it belonged to.
+  $$('.rowdet').forEach(function (x) {
+    markRowOpen(x.previousElementSibling, false);
+    x.remove();
+  });
+  markRowOpen(tr, true);
 
   var det = document.createElement('tr');
   det.className = 'rowdet';
@@ -1455,7 +1476,7 @@ async function toggleIssueRow(tr, id) {
         return;
       }
       if (e.target.closest('[data-window]')) { openIssueWindow(id); return; }
-      if (e.target.closest('[data-collapse]')) det.remove();
+      if (e.target.closest('[data-collapse]')) { det.remove(); markRowOpen(tr, false); }
     });
   } catch (e) {
     det.querySelector('.rowdet-in').innerHTML = '<div class="note bad">' + esc(e.message) + '</div>';
@@ -1708,6 +1729,13 @@ async function boot() {
   $('#archiveTbl').addEventListener('click', function (e) {
     var d = e.target.closest('[data-detail]');
     if (d) { toggleIssueRow(d.closest('tr'), d.dataset.detail); return; }
+    // The whole row is a target too — a 60px button is a small thing to hit on a
+    // phone. Links and the other buttons keep their own behaviour.
+    if (!e.target.closest('a,button,input,select')) {
+      var tr0 = e.target.closest('tr');
+      var opener = tr0 && tr0.querySelector('[data-detail]');
+      if (opener) { toggleIssueRow(tr0, opener.dataset.detail); return; }
+    }
     var u = e.target.closest('[data-unarch]');
     if (u) unarchive(u.dataset.unarch);
   });

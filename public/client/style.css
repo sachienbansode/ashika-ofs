@@ -105,23 +105,6 @@
   color:#8a5a10;font-size:11.5px;font-weight:600;padding:7px 14px;letter-spacing:.02em}
 .test-banner+.login-brand,.test-banner~*{position:relative}
 
-/* ---- responsive: fill the gaps left by the single 480px query above ---- */
-@media (max-width: 900px) {
-  .wrap{padding:16px 14px 48px}
-  .topbar{padding:11px 14px;gap:12px}
-  .cards,.grid2{grid-template-columns:1fr}
-}
-@media (max-width: 560px) {
-  .wrap{padding:12px 11px 36px}
-  .topbar{gap:9px}
-  .brand img{height:30px}
-  input,select,textarea{font-size:16px}     /* stops iOS zooming on focus */
-  .btn{min-height:46px}
-}
-@media (hover: none) and (pointer: coarse) {
-  .btn,.mini{min-height:44px}
-}
-
 /* ---- which identifier is signing in (shown from "send code" until signed in) ---- */
 .id-used{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 16px;
   padding:9px 13px;background:#f2f7fb;border:1px solid var(--line);border-radius:var(--r-s)}
@@ -131,15 +114,60 @@
   font-size:11.5px;font-weight:600;color:var(--navy);text-decoration:underline}
 .id-used .chg:hover{background:#e4eef6;text-decoration:none}
 
-/* ---- polish: softer edges, colour for status only ---- */
+
+/* ==========================================================================
+   ONE consolidated responsive + polish layer, replacing three stacked blocks.
+   The client journey is used on a phone far more than the back office is, so the
+   phone case is the one that gets the attention here.
+   ========================================================================== */
 :root{--hair:rgba(27,42,78,.09);--edge:rgba(27,42,78,.13)}
+
 .card,.login-card,.topbar{border-color:var(--edge)}
 :focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:6px}
 
-/* ---- the same auto-fill trap on the client side ---- */
+/* auto-FILL keeps empty tracks, so two cards on a wide screen sat in a corner
+   beside three columns of nothing. auto-FIT collapses them. */
 .cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
 .wrap{max-width:1240px}
+
+/* A disabled button must not keep the gradient that says "press me". */
+.btn:disabled,.btn[disabled]{background:#eef2f6 !important;color:#9aa9bd !important;
+  box-shadow:none !important;filter:none !important;transform:none !important;opacity:1}
+
+@media (max-width:900px){
+  .wrap{padding:16px 14px 48px}
+  .topbar{padding:11px 14px;gap:12px}
+  .cards,.grid2{grid-template-columns:1fr}
+}
+
 @media (max-width:640px){
+  .wrap{padding:12px 11px 36px}
+  .topbar{gap:9px;flex-wrap:wrap}
+  .topbar .who{flex:1 1 100%;border-top:1px solid var(--hair);padding-top:8px}
+  .brand img{height:30px}
+
+  /* 16px stops iOS zooming the page the moment a field takes focus — on a
+     bidding form that zoom is genuinely disorienting. */
+  input,select,textarea{font-size:16px}
+  .btn{min-height:46px}
+
+  /* The toast must never cover the button it is talking about. */
   .toast{left:10px;right:10px;bottom:10px}
   .toast>div{width:auto}
+
+  table{font-size:12.5px}
+  th,td{padding:9px 10px}
+}
+
+@media (max-width:420px){
+  .login-card .pad{padding:20px 16px 18px}
+  .otpbox input{width:38px;height:46px;font-size:19px}
+  .steps .step span{display:none}       /* keep the numbers, drop the words */
+}
+
+@media (hover:none) and (pointer:coarse){
+  .btn,.mini,.btn-lnk{min-height:44px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;transition-duration:.001ms !important}
 }

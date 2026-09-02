@@ -168,94 +168,6 @@ tbody tr:hover{background:#fafcfd}
 .sync-sched label span{color:var(--muted);font-weight:500}
 .sync-sched .btn{margin:0}
 td.sm{font-size:11.5px;color:var(--muted);max-width:280px}
-
-/* ==========================================================================
-   Responsive.
-   The desk is used on a trading screen, a laptop and — during a bidding window —
-   a phone. Three things break first at small widths and are handled explicitly:
-   the sticky header, the tab strip, and tables that must stay scannable rather
-   than reflow into unreadable stacks. Bid data keeps its columns and scrolls.
-   ========================================================================== */
-
-/* Any table can outgrow the viewport; give every one its own scroller so the page
-   itself never scrolls sideways. */
-.wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-.wrap table{min-width:max-content}
-
-@media (max-width: 1100px) {
-  main{padding:0 14px 40px}
-  nav.tabs{padding:12px 14px 0}
-  section.pane{padding:15px;border-radius:var(--r)}
-}
-
-@media (max-width: 820px) {
-  header.top{gap:10px;padding:10px 14px;position:static}   /* sticky wastes height here */
-  header.top .clock{order:3}
-  header.top .who{order:9;text-align:left;flex:1 1 100%;border-top:1px solid var(--line-s);padding-top:8px}
-  header.top .who b{display:inline;font-size:12px}
-  header.top .who span{margin-left:6px}
-
-  /* The tab strip scrolls rather than wrapping into two rows that push content down. */
-  nav.tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
-  nav.tabs::-webkit-scrollbar{display:none}
-  nav.tabs button{flex:0 0 auto;padding:9px 14px}
-
-  .kpis{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px}
-  .kpi .v{font-size:19px}
-  .cards{grid-template-columns:1fr}
-
-  /* Controls stack and go full width — a 9px-tall select is not a touch target. */
-  .bar{gap:8px}
-  .bar input,.bar select{flex:1 1 190px;min-width:0}
-  .bar .btn,.bar .mini{flex:0 0 auto}
-  input[type=text],input[type=number],input[type=datetime-local],input[type=email],select{padding:11px 12px}
-
-  .sync-sched .row{flex-direction:column;align-items:stretch}
-  .sync-sched label{width:100%}
-  .sync-sched select{width:100%}
-}
-
-@media (max-width: 560px) {
-  main{padding:0 10px 32px}
-  nav.tabs{padding:10px 10px 0}
-  section.pane{padding:12px}
-  header.top{padding:9px 12px}
-  header.top img{height:28px}
-  .brand{font-size:11.5px;letter-spacing:.1em}
-  .clock{font-size:11.5px}
-
-  /* One field per row: two 50% columns at 360px are unusable. */
-  .grid2{grid-template-columns:1fr}
-  .kpis{grid-template-columns:1fr 1fr}
-  .kpi{padding:11px 12px}
-  .kpi .v{font-size:18px}
-
-  .bar input,.bar select{flex:1 1 100%}
-  .bar .btn{flex:1 1 100%}
-  .btn,.mini{min-height:40px}
-
-  table.tbl{font-size:12px}
-  table.tbl th,table.tbl td{padding:8px 10px}
-  .sync-prog .log{max-height:180px}
-  .sync-cards{flex-direction:column}
-}
-
-/* A pointer that is not a mouse gets bigger hit areas throughout. */
-@media (hover: none) and (pointer: coarse) {
-  .btn,.mini,nav.tabs button,[data-mtab]{min-height:40px}
-  table.tbl td .mini{min-height:34px}
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,*::before,*::after{animation-duration:.001ms !important;transition-duration:.001ms !important}
-}
-
-@media print {
-  header.top,nav.tabs,.bar,.toast,#gate{display:none !important}
-  section.pane{border:0;box-shadow:none;padding:0}
-  .wrap{overflow:visible}
-}
-
 /* ---- expandable detail directly under a table row ---- */
 tr.rowdet > td{padding:0 !important;background:#f7fbfc;border-bottom:1px solid var(--line)}
 .rowdet-in{padding:14px 16px}
@@ -271,51 +183,101 @@ tr.rowdet > td{padding:0 !important;background:#f7fbfc;border-bottom:1px solid v
 .conf i{display:block;height:100%;background:var(--teal)}
 
 /* ==========================================================================
-   Polish pass. Nothing structural — this is contrast, weight and rhythm.
-   The desk is read at a glance during a bidding window, so the rules are:
-   figures carry the weight, borders recede, and colour means status only.
-   Loaded last, so it wins over the block above without editing it.
+   ONE consolidated layer. Everything below replaces what used to be three
+   stacked "polish" blocks — those were the reason sizes and weights fought each
+   other: a later block would override half a rule and leave the other half.
+
+   Type scale (there are only five sizes, and each has one job):
+     18px  600  a page or panel title
+     14px  600  a figure you read at a glance
+     13px  400  body, inputs, table cells
+     11.5px     secondary detail under something
+     9.5px 600  an all-caps label, tracked
    ========================================================================== */
 
-/* ---- borders: one soft line, not three competing greys ---- */
 :root{
-  --hair:rgba(27,42,78,.09);        /* separators inside a surface */
-  --edge:rgba(27,42,78,.13);        /* the outer edge of a surface */
-  --tint:rgba(23,180,185,.06);      /* the faintest teal wash      */
+  --hair:rgba(27,42,78,.09);      /* separator inside a surface */
+  --edge:rgba(27,42,78,.13);      /* boundary of a surface      */
+  --tint:rgba(23,180,185,.06);    /* faintest teal wash         */
+  --ctl:38px;                     /* one control height, everywhere */
 }
+
+/* ---------------------------------------------------------------- typography */
+h2.sec{display:flex;align-items:center;gap:11px;font-size:9.5px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin:22px 0 11px}
+h2.sec:first-child{margin-top:0}
+h2.sec::after{content:'';flex:1;height:1px;background:var(--hair)}
+
+.f .k{display:block;font-size:9.5px;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;color:#8194ad;line-height:1.4}
+.f .v{font-size:14px;font-weight:600;color:var(--ink);margin-top:4px;letter-spacing:-.01em}
+td.sm,.sub{font-size:11.5px;color:var(--muted)}
+
+/* ------------------------------------------------------------------ surfaces */
 section.pane,.card,.kpi,.sync-prog,.sync-card,.sync-sched{border-color:var(--edge)}
+.card{padding:18px}
+.kpi{background:linear-gradient(180deg,#fff,#fbfdfe)}
+.kpi .v{letter-spacing:-.02em}
 
-/* ---- field grid ----
-   The separators are the 1px GAP showing the container's background through, not
-   borders on the cells. Borders leave a stub on the last column and the last row
-   (which have no neighbour); a gap cannot, because there is nothing after it. */
-.grid2{gap:1px;background:var(--hair);border:1px solid var(--edge);border-radius:11px;overflow:hidden}
-.f{background:#fff;padding:11px 14px}
-.f .k{font-size:9px;letter-spacing:.13em;color:var(--muted)}
-.f .v{font-size:14px;color:var(--ink);margin-top:3px;letter-spacing:-.01em}
+/* ------------------------------------------------------------------ controls
+   Every control is the same height. Inputs and buttons on one row used to differ
+   by 4px, which is exactly the amount that reads as "broken" without being
+   obviously wrong. */
+input[type=text],input[type=number],input[type=datetime-local],input[type=email],
+input[type=url],input[type=date],select{
+  height:var(--ctl);padding:0 12px;font-size:13px;line-height:normal;
+  border:1px solid var(--edge);border-radius:9px;background:#fbfdfe;color:var(--ink)}
+select{padding-right:30px;appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath fill='%236b7f9e' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 11px center}
+input:hover,select:hover{border-color:#c4d5e3}
+input:focus,select:focus{border-color:var(--teal);background:#fff;
+  box-shadow:0 0 0 3px rgba(23,180,185,.15);outline:none}
+input:disabled,select:disabled{background:#f3f6f9;color:#9aa9bd;cursor:not-allowed}
+
+button.btn{height:var(--ctl);padding:0 18px;font-size:13px;font-weight:600;border-radius:9px}
+button.btn.ghost{background:#fff;border:1px solid var(--edge);color:var(--navy)}
+button.btn.ghost:hover:not(:disabled){border-color:var(--teal);background:#f8fdfd}
+/* A disabled primary must not keep its confident gradient — that is what made
+   "Place bid" look pressable when it was not. */
+button.btn:disabled,button.btn[disabled]{background:#eef2f6 !important;color:#9aa9bd !important;
+  border-color:transparent !important;box-shadow:none !important;filter:none !important;
+  transform:none !important;opacity:1;cursor:not-allowed}
+button.mini{height:30px;padding:0 11px;font-size:11.5px;font-weight:600;border-radius:7px;
+  background:#fff;border:1px solid var(--edge);color:#5a6b85;box-shadow:0 1px 1px rgba(27,42,78,.04)}
+button.mini:hover:not(:disabled){border-color:var(--teal);color:var(--navy);background:#f8fdfd}
+button.mini:active:not(:disabled){transform:translateY(1px)}
+button.mini:disabled{opacity:.5;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:6px}
+
+.bar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:14px}
+.bar .sp{flex:1}
+
+/* --------------------------------------------------------------- field grid
+   Separators are the 1px GAP showing the container through — borders on cells
+   leave a stub on the last column and row, which have no neighbour. */
+.grid2{display:grid;gap:1px;background:var(--hair);border:1px solid var(--edge);
+  border-radius:11px;overflow:hidden;margin-top:12px;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,168px),1fr))}
+.f{background:#fff;padding:11px 14px;min-width:0}
 .f:hover{background:var(--tint)}
+.f input,.f select,.f textarea{width:100%;max-width:100%;min-width:0;margin-top:5px}
 
-/* ---- tables: lighter rules, heavier numbers ---- */
-th{background:#fbfdfe;border-bottom:1px solid var(--edge);color:#7e8fa8}
-td{border-bottom:1px solid var(--hair)}
+/* ---------------------------------------------------------------- tables */
+th{background:#fbfdfe;border-bottom:1px solid var(--edge);color:#7e8fa8;
+  font-size:9.5px;letter-spacing:.11em;padding:10px 12px}
+td{border-bottom:1px solid var(--hair);padding:11px 12px;font-size:13px}
 tbody tr:last-child td{border-bottom:0}
 tbody tr{transition:background .12s}
 tbody tr:hover{background:var(--tint)}
 td.n{font-weight:600;color:var(--ink)}
 td b{font-weight:600;color:var(--navy)}
+.wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.wrap table{min-width:max-content}
+.empty{color:var(--muted);text-align:center;padding:34px 16px;font-size:13px}
 
-/* ---- buttons: a real resting state, and a visible focus ring ---- */
-button.mini{background:#fff;border-color:var(--edge);color:#5a6b85;
-  box-shadow:0 1px 1px rgba(27,42,78,.04)}
-button.mini:hover{border-color:var(--teal);color:var(--navy);background:#f8fdfd}
-button.mini:active{transform:translateY(1px)}
-button.mini:disabled{opacity:.45;cursor:not-allowed;transform:none}
-button.btn.ghost{background:#fff;border-color:var(--edge);color:var(--navy)}
-button.btn.ghost:hover{border-color:var(--teal);background:#f8fdfd}
-:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:6px}
-
-/* ---- chips: one shape, colour only where it means something ---- */
-.chip,.tag{border:1px solid transparent;letter-spacing:.02em}
+/* ---------------------------------------------------------- chips and notes */
+.chip,.tag{border:1px solid transparent;letter-spacing:.02em;white-space:nowrap}
 .chip.open{background:rgba(11,177,131,.11);border-color:rgba(11,177,131,.25);color:#07845f}
 .chip.soon{background:rgba(217,138,31,.11);border-color:rgba(217,138,31,.28);color:#96610f}
 .chip.closed,.chip.grey{background:#f1f5f9;border-color:var(--hair);color:#6b7f9e}
@@ -323,34 +285,22 @@ button.btn.ghost:hover{border-color:var(--teal);background:#f8fdfd}
 .tag.ret{background:rgba(11,177,131,.1);border-color:rgba(11,177,131,.22)}
 .tag.hni{background:rgba(36,63,142,.08);border-color:rgba(36,63,142,.18)}
 
-/* ---- the row expander: tied to its row by an accent, not a grey slab ---- */
-tr.rowdet > td{background:linear-gradient(180deg,#f9fcfd,#f4f9fb);
-  border-bottom:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hair)}
-.rowdet-in{padding:16px 18px 18px;border-left:3px solid var(--teal);margin-left:-1px}
-.rowdet-in > .bar b{color:var(--navy);letter-spacing:-.01em}
-.rowdet-in .grid2{background:#fff;box-shadow:var(--shadow-s)}
-.rowdet-in .note{background:#fff}
-
-/* ---- KPI tiles ---- */
-.kpi{background:linear-gradient(180deg,#fff,#fbfdfe)}
-.kpi .v{letter-spacing:-.02em}
-
-/* ---- section headings: a rule that guides the eye across ---- */
-h2.sec{display:flex;align-items:center;gap:11px}
-h2.sec::after{content:'';flex:1;height:1px;background:var(--hair)}
-
-/* ---- notes: the left rule carries the meaning ---- */
-.note{border-color:var(--hair);border-left-width:3px}
+.note{font-size:12.5px;line-height:1.65;border-color:var(--hair);border-left-width:3px;
+  padding:12px 15px;margin:12px 0}
+.note b{font-weight:600}
 .note.bad{border-left-color:var(--red)}
 .note.good{border-left-color:var(--green)}
 .note.warn{border-left-color:var(--amber)}
 
-/* ---- the bar: breathing room, and inputs that match the buttons ---- */
-.bar{gap:8px}
-.bar input,.bar select{border-color:var(--edge)}
-.bar input:hover,.bar select:hover{border-color:#c7d6e2}
+/* ------------------------------------------------------------ row expander */
+tr.rowdet > td{background:linear-gradient(180deg,#f9fcfd,#f4f9fb);
+  border-bottom:1px solid var(--edge);box-shadow:inset 0 1px 0 var(--hair)}
+.rowdet-in{padding:16px 18px 18px;border-left:3px solid var(--teal)}
+.rowdet-in > .bar b{color:var(--navy);letter-spacing:-.01em}
+.rowdet-in .grid2{background:var(--hair);box-shadow:var(--shadow-s)}
+.rowdet-in .note{background:#fff}
 
-/* ---- attached documents ---- */
+/* ------------------------------------------------------------------- docs */
 .docs{margin-top:10px}
 .doc{display:flex;align-items:flex-start;gap:12px;padding:11px 13px;background:#fff;
   border:1px solid var(--edge);border-radius:10px;margin-bottom:8px;transition:.14s}
@@ -361,66 +311,117 @@ h2.sec::after{content:'';flex:1;height:1px;background:var(--hair)}
 .doc .tx a{text-decoration:none}
 .doc .tx a:hover b{text-decoration:underline}
 .doc .tx b{font-size:13px;color:var(--navy)}
-.doc .sub{font-size:11px;color:var(--muted);margin-top:2px;word-break:break-all}
+.doc .sub{margin-top:2px;word-break:break-word}
 .doc .sub.m{font-family:var(--mono);font-size:10.5px;opacity:.75}
 
 /* ==========================================================================
-   Layout. Two things were wrong and both were structural, not cosmetic:
-
-   1. `.cards` used auto-FILL, which keeps empty tracks. On a 1900px screen that
-      laid two cards out at ~350px each and left three empty columns of nothing —
-      exactly what a "Place bid" form looked like squeezed into a corner.
-      auto-FIT collapses the empty tracks so the cards actually use the width.
-   2. Nothing capped the content width, so on a wide monitor a table stretched to
-      1900px and the eye lost the row between one column and the next.
+   Layout. `.cards` used auto-FILL, which KEEPS empty tracks: on a 1900px screen
+   that left two cards at ~350px each beside three columns of nothing. auto-FIT
+   collapses them. Content is capped so a table does not stretch to 1900px and
+   lose the eye between one column and the next.
    ========================================================================== */
-
-main{max-width:1560px;margin:0 auto}
-nav.tabs{max-width:1560px;margin:0 auto}
+main{max-width:1560px;margin:0 auto;padding:0 20px 48px}
+nav.tabs{max-width:1560px;margin:0 auto;padding:14px 20px 0}
 header.top{padding-left:max(20px,calc((100vw - 1560px) / 2));
            padding-right:max(20px,calc((100vw - 1560px) / 2))}
 
-.cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));align-items:start}
+.cards{display:grid;gap:14px;align-items:start;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr))}
 
-/* Place bid is a form beside a read-out, not two equal columns: the form wants a
-   comfortable measure, the client panel wants whatever is left. */
-#pane-place .cards{grid-template-columns:minmax(320px,440px) minmax(320px,1fr)}
-@media (max-width:900px){ #pane-place .cards{grid-template-columns:1fr} }
+/* Place bid is a form beside a read-out, not two equal columns. */
+#pane-place .cards{grid-template-columns:minmax(320px,440px) minmax(300px,1fr)}
+#pane-place .card .bar{margin:16px 0 0}
+#pane-place .card .bar .btn{flex:1 1 auto}
 
-/* Inside a card the field grid should pair fields wherever two will fit. */
-.card .grid2{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
+/* ==========================================================================
+   Responsive. Tables keep their columns and scroll; nothing reflows into an
+   unreadable stack, because a bid book with wrapped columns is worse than one
+   you swipe.
+   ========================================================================== */
+@media (max-width:1100px){
+  main{padding:0 14px 40px}
+  nav.tabs{padding:12px 14px 0}
+  section.pane{padding:15px;border-radius:var(--r)}
+}
 
-/* ---- mobile ---- */
-@media (max-width:640px){
-  header.top{padding:9px 12px;gap:8px;flex-wrap:wrap}
-  header.top .clock{font-size:11px;order:2}
-  header.top #btnRefresh,header.top #autoRefresh{order:5}
+@media (max-width:900px){
+  #pane-place .cards{grid-template-columns:1fr}
+}
+
+@media (max-width:820px){
+  header.top{gap:10px;padding:10px 14px;position:static;flex-wrap:wrap}
+  header.top .clock{order:3;font-size:11.5px}
   header.top .who{order:9;flex:1 1 100%;display:flex;align-items:baseline;gap:8px;
-    border-top:1px solid var(--hair);padding-top:7px;margin-top:2px}
-  header.top .who b{font-size:12px}
-  header.top #btnSignOut{order:8}
+    text-align:left;border-top:1px solid var(--hair);padding-top:8px;margin-top:2px}
+  header.top .who b{display:inline;font-size:12.5px}
 
-  /* Toasts must not cover the controls they are describing. */
+  nav.tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  nav.tabs::-webkit-scrollbar{display:none}
+  nav.tabs button{flex:0 0 auto;padding:9px 14px}
+
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px}
+  .kpi .v{font-size:19px}
+  .cards{grid-template-columns:1fr}
+
+  .bar input,.bar select{flex:1 1 190px;min-width:0}
+  .sync-sched .row{flex-direction:column;align-items:stretch}
+  .sync-sched label,.sync-sched select{width:100%}
+}
+
+@media (max-width:640px){
+  main{padding:0 11px 32px}
+  nav.tabs{padding:10px 11px 0}
+  section.pane{padding:13px;border-radius:12px}
+  .card{padding:14px}
+  header.top{padding:9px 12px}
+  header.top img{height:28px}
+  .brand{font-size:11.5px;letter-spacing:.1em}
+
+  /* 16px stops iOS zooming the page when a field takes focus. */
+  input[type=text],input[type=number],input[type=datetime-local],input[type=email],
+  input[type=url],input[type=date],select{font-size:16px;height:42px}
+  button.btn{height:42px}
+  button.mini{height:34px}
+
+  .grid2{grid-template-columns:1fr}
+  .kpis{grid-template-columns:1fr 1fr}
+  .bar input,.bar select{flex:1 1 100%}
+  .bar .btn{flex:1 1 auto}
+
+  /* A toast must not sit on top of the control it is describing. */
   .toast{left:10px;right:10px;bottom:10px}
   .toast>div{width:auto}
 
-  /* A select showing "NSE — e-OFS bulk upload" cannot also be 100px wide. */
-  .bar select,.bar input{flex:1 1 100%;min-width:0}
-  .bar .btn{flex:1 1 auto}
-
   .docs .bar input{flex:1 1 100%}
   .doc{flex-wrap:wrap}
-  .doc .ic{order:1}
-  .doc .tx{order:3;flex:1 1 100%}
-  .doc button{order:2;margin-left:auto}
+  .doc .tx{flex:1 1 100%;order:3}
+  .doc button{margin-left:auto}
 
-  section.pane{border-radius:12px}
-  h2.sec{font-size:10px}
+  th,td{padding:9px 10px}
+  .rowdet-in{padding:13px 14px}
+  .sync-prog .log{max-height:180px}
+  .sync-cards{flex-direction:column}
 }
 
 @media (max-width:400px){
   .kpis{grid-template-columns:1fr}
-  main{padding:0 8px 28px}
-  nav.tabs{padding:8px 8px 0}
   nav.tabs button{padding:9px 11px;font-size:12px}
 }
+
+@media (hover:none) and (pointer:coarse){
+  button.btn,button.mini,nav.tabs button{min-height:40px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;transition-duration:.001ms !important}
+}
+@media print{
+  header.top,nav.tabs,.bar,.toast,#gate{display:none !important}
+  section.pane{border:0;box-shadow:none;padding:0}
+  .wrap{overflow:visible}
+}
+
+/* The row whose detail is open — so it reads as the parent of the panel below it. */
+tbody tr.row-open{background:var(--tint)}
+tbody tr.row-open td{border-bottom-color:transparent}
+tbody tr.row-open td:first-child{box-shadow:inset 3px 0 0 var(--teal)}
+tbody tr[data-rowclick],tbody tr:has([data-detail]){cursor:pointer}
