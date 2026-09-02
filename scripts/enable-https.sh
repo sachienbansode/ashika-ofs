@@ -7,7 +7,7 @@
 # cookie over HTTP, and upgrade-insecure-requests makes the page ask for assets
 # over a port that is not listening.
 #
-#   bash scripts/enable-https.sh ofs-bid.ashikagroup.com
+#   bash scripts/enable-https.sh ofs-bids.ashikagroup.com
 set -euo pipefail
 
 DOMAIN="${1:-}"

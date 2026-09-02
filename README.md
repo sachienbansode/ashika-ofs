@@ -113,7 +113,7 @@ which is production. Password via `PGPASSWORD` only.
 
 ## Domain and certificate
 
-`ofs-bid.ashikagroup.com` → Azure VM `20.244.33.142` → nginx → `127.0.0.1:4011`.
+`ofs-bids.ashikagroup.com` → Azure VM `20.244.33.142` → nginx → `127.0.0.1:4011`.
 
 Its own server block, deliberately: a config change for one app must never be able
 to take the other down, and the rate-limit zones are sized for a bidding window
@@ -129,10 +129,10 @@ sudo rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/ofs-ip.conf
 sudo nginx -t && sudo systemctl reload nginx
 
 # 2. certificate (needs port 80 open to the world for the ACME challenge)
-sudo certbot --nginx -d ofs-bid.ashikagroup.com
+sudo certbot --nginx -d ofs-bids.ashikagroup.com
 
 # 3. only now flip the app to HTTPS
-bash scripts/enable-https.sh ofs-bid.ashikagroup.com
+bash scripts/enable-https.sh ofs-bids.ashikagroup.com
 ```
 
 Step 3 is a separate step on purpose. `COOKIE_SECURE=true` and `FORCE_HTTPS=true`
@@ -145,6 +145,21 @@ restarts PM2 itself.
 Renewal is certbot's own timer (`systemctl list-timers | grep certbot`). The ACME
 challenge location stays outside the HTTPS redirect so a renewal can always answer
 on port 80.
+
+### Retiring a wrong hostname
+
+A certificate issued for a name you no longer use keeps being renewed, and every
+renewal is an ACME request against a rate limit for a host that may no longer even
+resolve. Delete it rather than leaving it:
+
+```bash
+sudo certbot certificates                                   # what exists now
+sudo certbot delete --cert-name ofs-bid.ashikagroup.com     # the retired name
+sudo systemctl reload nginx
+```
+
+Do this **after** the replacement certificate is working, never before — deleting the
+one nginx is currently serving takes the site down until the new block is in place.
 
 **Azure NSG** must allow 80 and 443 inbound. Port 80 cannot be closed after issuing —
 renewal needs it.
