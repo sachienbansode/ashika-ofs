@@ -161,7 +161,7 @@
 
 @media (max-width:420px){
   .login-card .pad{padding:20px 16px 18px}
-  .otpbox input{width:38px;height:46px;font-size:19px}
+  .otpbox input{font-size:18px}
   .steps .step span{display:none}       /* keep the numbers, drop the words */
 }
 
