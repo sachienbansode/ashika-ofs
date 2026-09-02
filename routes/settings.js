@@ -81,6 +81,13 @@ const EDITABLE = {
       String(v).split(/[,\s;]+/).filter(Boolean).every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))
       || 'Use YYYY-MM-DD dates separated by commas'
   },
+  client_login_unknown: {
+    label: 'Unknown sign-in identifier', kind: 'choice', choices: ['reveal', 'generic'],
+    hint: 'reveal = tell the visitor "no client found" (kinder, and stops "I never got my OTP" calls). '
+        + 'generic = answer identically whether or not it matched, so the page cannot be used to discover '
+        + 'which mobiles and emails belong to clients.',
+    check: (v) => ['reveal', 'generic'].includes(v) || 'Use reveal or generic'
+  },
   archive_auto: {
     label: 'Archive expired issues automatically', kind: 'bool',
     hint: '1 archives an issue once its last window closed more than the number of days below. Nothing is deleted.',

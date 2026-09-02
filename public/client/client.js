@@ -138,8 +138,12 @@ async function sendCode() {
     var r = await api('/client/auth/start', { method: 'POST', body: { identifier: identifier } });
     S.ref = r.ref || null;
 
-    // The server answers the same way whether or not the details matched, so the
-    // page must not imply an account exists either.
+    // Keep what they typed on screen for the rest of the sign-in. Without it the
+    // OTP step is anonymous: nothing tells them WHICH code or number the code went
+    // to, so a typo is only discovered when the SMS never arrives.
+    S.identifier = r.identifier || identifier;
+    showIdentifier(S.identifier, r.kind);
+
     $('#otpSentTo').textContent = r.sent_to ? ('Sent to ' + r.sent_to)
       : 'Check your registered email and mobile';
     $('#otpHint').className = 'hint';
@@ -156,13 +160,39 @@ async function sendCode() {
     setStep(2); showPane('otp');
     var first = $('#otpBox input'); if (first) first.focus();
   } catch (e) {
+    // A miss must NOT advance to the code step — there is no code coming. Stay put,
+    // mark the field, and say so.
     hint.className = 'hint bad';
-    hint.textContent = e.message || 'Could not send a code just now.';
+    hint.textContent = (e.body && e.body.message) || e.message || 'Could not send a code just now.';
+    $('#idInput').setAttribute('aria-invalid', 'true');
+    $('#idInput').focus();
+    $('#idInput').select();
     if (e.body && e.body.retry_after_s) S.resendAt = Date.now() + e.body.retry_after_s * 1000;
   } finally {
     busy('#sendBtn', false, 'Send code');
     refreshDetails();
   }
+}
+
+function backToDetails() {
+  setStep(1); showPane('details');
+  showIdentifier(null);
+  refreshDetails();                         // what was typed is preserved, not cleared
+  $('#idInput').focus();
+  $('#idInput').select();
+}
+
+/** Show the client code / mobile / email being signed in with, until it completes. */
+function showIdentifier(value, kind) {
+  var el = $('#idUsed');
+  if (!el) return;
+  if (!value) { el.classList.add('hide'); el.textContent = ''; return; }
+  var label = kind === 'ucc' ? 'Client code' : kind === 'mobile' ? 'Mobile' : kind === 'email' ? 'Email' : 'Signing in as';
+  el.innerHTML = '<span class="k">' + esc(label) + '</span><b>' + esc(value) + '</b>' +
+    '<button type="button" class="chg" id="idChange">Change</button>';
+  el.classList.remove('hide');
+  var b = $('#idChange');
+  if (b) b.addEventListener('click', backToDetails);
 }
 
 /* ---------------- step 2: the code ---------------- */
@@ -385,6 +415,7 @@ async function loadAllotments() {
 }
 
 function sessionLost() {
+  showIdentifier(null);
   if (S.timer) clearInterval(S.timer);
   $('#app').classList.add('hide');
   $('#loginStage').classList.remove('hide');
@@ -415,11 +446,7 @@ async function boot() {
   $('#idInput').addEventListener('blur', refreshDetails);
   refreshDetails();
   $('#verifyBtn').addEventListener('click', verifyCode);
-  $('#otpBackBtn').addEventListener('click', function () {
-    setStep(1); showPane('details');
-    refreshDetails();                       // what was typed is preserved, not cleared
-    $('#idInput').focus();
-  });
+  $('#otpBackBtn').addEventListener('click', backToDetails);
   $('#resendBtn').addEventListener('click', sendCode);
   $('#acctList').addEventListener('click', function (e) {
     var b = e.target.closest('[data-ucc]');

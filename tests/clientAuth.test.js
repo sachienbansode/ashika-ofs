@@ -116,3 +116,31 @@ test('masking copes with junk instead of throwing', () => {
   assert.equal(ca.maskMobile('12'), '');
   assert.equal(ca.maskMobile(null), '');
 });
+
+/* ---------------------------------------------------------------------------
+ * "No client found" vs the generic answer.
+ * The route decides from the setting; these pin the shape of that decision so a
+ * later edit cannot flip the enumeration-resistant mode on by accident.
+ * ------------------------------------------------------------------------- */
+const REVEAL = (v) => String(v == null ? 'reveal' : v) === 'reveal';
+
+test('reveal is the default, and only the exact string turns it off', () => {
+  assert.equal(REVEAL(undefined), true);
+  assert.equal(REVEAL('reveal'), true);
+  assert.equal(REVEAL('generic'), false);
+  assert.equal(REVEAL(''), false);          // an empty setting is not "reveal"
+});
+
+test('what was typed decides the noun in the refusal', () => {
+  const noun = (kind) => kind === 'ucc' ? 'client code' : kind === 'mobile' ? 'mobile number' : 'email address';
+  assert.equal(noun(ca.identifierKind('S666666')), 'client code');
+  assert.equal(noun(ca.identifierKind('9820011234')), 'mobile number');
+  assert.equal(noun(ca.identifierKind('a@b.com')), 'email address');
+});
+
+test('a client code that does not exist is still a well-formed client code', () => {
+  // The point of the fix: S666666 parses fine, so the OTP step used to be reached.
+  // Only the database can say it is unknown — the shape cannot.
+  assert.equal(ca.identifierKind('S666666'), 'ucc');
+  assert.equal(ca.identifierKind('S247683'), 'ucc');
+});

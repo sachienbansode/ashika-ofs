@@ -121,3 +121,12 @@
 @media (hover: none) and (pointer: coarse) {
   .btn,.mini{min-height:44px}
 }
+
+/* ---- which identifier is signing in (shown from "send code" until signed in) ---- */
+.id-used{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 16px;
+  padding:9px 13px;background:#f2f7fb;border:1px solid var(--line);border-radius:var(--r-s)}
+.id-used .k{font-size:10px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+.id-used b{font-family:var(--mono);font-size:13.5px;color:var(--navy);word-break:break-all;flex:1 1 auto}
+.id-used .chg{border:0;background:transparent;padding:2px 6px;border-radius:6px;
+  font-size:11.5px;font-weight:600;color:var(--navy);text-decoration:underline}
+.id-used .chg:hover{background:#e4eef6;text-decoration:none}

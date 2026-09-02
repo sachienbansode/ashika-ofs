@@ -84,3 +84,44 @@ bidding on a client's behalf is a compliance position, not an engineering choice
 B and G together unblock BSE, and A unblocks NSE — those three are the only things
 between the desk and a real OFS window. F matters before any bid is placed for a
 client by the desk rather than by the client themselves.
+
+
+---
+
+## Multiple accounts on one mobile or email — settled, and worth documenting
+
+Families and HUFs share a mobile and an email across several UCCs, so a single
+identifier legitimately matches more than one client. **This is built and working**,
+and belongs in the final documentation:
+
+1. The visitor signs in with any one identifier — client code, mobile or email.
+2. The one-time code is sent to the contacts **on file**, never to what was typed.
+3. **Only after the code is verified** does the app reveal that several accounts
+   share those contacts, and list them (UCC, name, branch) for selection.
+4. Selecting one establishes a session bound to that single UCC; every bid, margin
+   check and allotment from then on is that UCC's alone.
+5. To act for another account in the same family, the client signs out and back in,
+   and picks the other one. There is no account switcher inside a live session —
+   one session, one UCC, so a bid can never be attributed to the wrong client.
+
+The ordering is the security property: an unverified visitor typing a shared mobile
+learns nothing about how many accounts use it, or whose. `routes/clientAuth.js`
+(`/verify` → `accounts`, then `/select`) and `ofs.ofs_client_otp.uccs`.
+
+**Still open for Phase 2:** whether one family member may place a bid for another's
+UCC without signing in as them. That is the client-authorisation question in spec §3
+and needs Ashika's answer, not a code change.
+
+## "No client found" at sign-in — a deliberate trade-off
+
+The client sign-in page now says *"No active Ashika account found for that client
+code"* instead of advancing to the code step for an identifier that matches nothing.
+
+The cost is that the endpoint confirms whether an identifier belongs to an Ashika
+client. It is kept behind the existing throttle (5 attempts per identifier per hour,
+20 per IP per hour), which makes bulk enumeration impractical without making a
+genuine typo painful.
+
+If compliance would rather give nothing away, `Masters → Settings → Unknown sign-in
+identifier` switches it to `generic`, which answers identically either way. **This is
+a compliance choice, not a technical one** — record which way Ashika wants it.

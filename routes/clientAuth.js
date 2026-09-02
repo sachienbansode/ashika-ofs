@@ -21,6 +21,7 @@ const mailer = require('../lib/mailer');
 const { brandedEmail } = require('../lib/emailBranding');
 const ld = require('../db/ldAdapter');
 const sms = require('../lib/sms');
+const settings = require('../lib/settings');
 
 const router = express.Router();
 
@@ -57,13 +58,32 @@ router.post('/start', startLimiter, async (req, res) => {
       message: 'Enter your client code, your registered mobile number, or your registered email address.' });
   }
 
+  const cfg = await settings.all();
+
+  // Two answers are possible when nothing matches, and the choice is a real
+  // trade-off rather than a detail:
+  //
+  //   'reveal'  (default) says "no client found". Kinder — a client who mistypes a
+  //             code learns it now instead of waiting for an SMS that never comes,
+  //             and the desk stops fielding "I never got my OTP" calls. The cost is
+  //             that the endpoint confirms whether an identifier is an Ashika
+  //             client, so it is kept behind the throttle below.
+  //   'generic' answers identically either way, so the endpoint cannot be used to
+  //             discover which mobiles/emails belong to clients at all. Choose this
+  //             if enumeration is the bigger worry.
+  //
+  // Masters -> Settings -> "Unknown sign-in identifier".
+  const reveal = String(cfg.client_login_unknown || 'reveal') === 'reveal';
+
   // The generic answer. Every success path returns exactly this, so a caller cannot
   // learn whether an identifier belongs to a client.
   const generic = {
     ok: true,
     ttl_minutes: ca.OTP_TTL_MIN,
     resend_after_s: ca.RESEND_COOLDOWN_S,
-    message: 'If that matches an active account, a code has been sent to the registered email and mobile.'
+    message: reveal
+      ? 'A code has been sent to the email and mobile registered for this account.'
+      : 'If that matches an active account, a code has been sent to the registered email and mobile.'
   };
 
   try {
@@ -85,7 +105,20 @@ router.post('/start', startLimiter, async (req, res) => {
       ucc: kind === 'ucc' ? identifier : null,
       ok: clients.length > 0, reason: clients.length ? null : 'no_match' });
 
-    if (!clients.length) return res.json(generic);          // deliberately indistinguishable
+    if (!clients.length) {
+      if (!reveal) return res.json(generic);               // deliberately indistinguishable
+
+      // Name what was actually typed back to them: "no client found" against a
+      // number they did not enter is its own kind of confusing.
+      const what = kind === 'ucc' ? 'client code' : kind === 'mobile' ? 'mobile number' : 'email address';
+      return res.status(404).json({
+        error: 'no_client',
+        kind,
+        identifier,
+        message: 'No active Ashika account found for that ' + what + '. '
+               + 'Check it and try again, or contact your relationship manager.'
+      });
+    }
 
     // Contacts ON FILE — never what was typed. Typing one identifier must not let
     // anyone redirect the code somewhere else.
@@ -94,7 +127,7 @@ router.post('/start', startLimiter, async (req, res) => {
       identifier, mobile: target.mobile, email: target.email,
       uccs: clients.map((c) => c.ucc), ip, userAgent: ua });
 
-    const out = Object.assign({ ref: ch.ref, sent_to: ch.sentTo }, generic);
+    const out = Object.assign({ ref: ch.ref, sent_to: ch.sentTo, identifier, kind }, generic);
 
     if (ca.testMode()) {
       console.warn('[client-auth] TEST MODE — fixed code, nothing sent');
