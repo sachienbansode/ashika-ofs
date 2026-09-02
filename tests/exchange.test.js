@@ -19,40 +19,84 @@ test('adapterFor resolves by name and rejects anything else', () => {
   assert.throws(() => adapterFor('MCX'), /Unknown exchange/);
 });
 
-test('NSE file: header, category codes, UCC case, totals', () => {
+/* ===================================================================== NSE ===
+ * From "NSE Offer for Sale System WEB API Protocol" v1.3.0 (Feb 2024). The point of
+ * these is that NSE's file is NOT BSE's: every one of these assertions was the other
+ * way round while the NSE adapter was a copy of the BSE one.
+ */
+
+test('NSE writes its own field set — no category column exists', () => {
   const out = nse.build(BIDS, SETTINGS, { symbol: 'COALINDIA' });
   const lines = out.text.split('\r\n').filter(Boolean);
   assert.equal(lines[0], nse.HEADER.join(','));
   assert.equal(out.rowCount, 4);
   assert.equal(out.totalQty, 1800);
-  assert.ok(lines[1].startsWith('COALINDIA,RI,,ASH1001,,500,390,2,0,N'), lines[1]);
-  assert.ok(lines[2].includes('NII'), 'HNI maps to NII');
-  assert.ok(lines[2].includes('CP01'), 'CP code carried through');
-  assert.ok(lines[3].includes('RIC'), 'retail cut-off gets its own code');
+
+  // The BSE category codes must appear nowhere at all.
+  assert.ok(!/\bRIC?\b|\bNII\b|\bOTHS\b/.test(out.text), 'no BSE category code may leak into an NSE file');
+  assert.ok(out.header.includes('series') && out.header.includes('clientType'));
+  assert.ok(!out.header.includes('Category'));
 });
 
-test('action codes are N / M / D — D, not C', () => {
-  // BSE Notice 20150122-30, Annexure 1: "'N' for new record, 'M' for to be modified
-  // record and 'D' for to deletion records." The prototype used C, which would have
-  // had every cancellation rejected at the exchange.
+test('NSE series and clientType replace the category', () => {
+  // v1.3.0 allows IS, RS, ES. The meanings are not stated in the document, so the
+  // mapping is a setting — and an unrecognised value must never reach the exchange.
+  assert.deepEqual(nse.VALID_SERIES, ['IS', 'RS', 'ES']);
+  assert.equal(nse.seriesFor({ category: 'HNI' }, null, SETTINGS), 'IS');
+  assert.equal(nse.seriesFor({ category: 'Retail' }, null, SETTINGS), 'RS');
+  const junk = Object.assign({}, SETTINGS, { nse_series_hni: 'ZZ', nse_series_retail: 'QQ' });
+  assert.equal(nse.seriesFor({ category: 'HNI' }, null, junk), 'IS');
+  assert.equal(nse.seriesFor({ category: 'Retail' }, null, junk), 'RS');
+
+  assert.equal(nse.clientType({}), 'CLI', 'bidding on behalf of a client is CLI');
+  assert.equal(nse.clientType({ pro_client: 'PRO' }), 'PRO');
+});
+
+test('NSE margin flag is INVERTED against BSE', () => {
+  // v1.3.0: "For 100% Margin - 1 For 0% Margin - 0."  BSE: 1 = 0%, 2 = 100%.
+  // Writing BSE's number through would upload cleanly and block the wrong margin.
+  assert.equal(nse.marginType({ margin_type: '2' }), 1, '100% upfront is 1 at NSE');
+  assert.equal(nse.marginType({ margin_type: '1' }), 0, '0% margin is 0 at NSE');
+});
+
+test('an NSE cut-off bid is a MARKET order with a blank price', () => {
+  // v1.3.0: "In case if Market orders this field should be blank." Not the floor
+  // price — that is BSE's rule, for BSE's RIC category.
+  const cut = BIDS.find((b) => b.is_cutoff);
+  assert.equal(nse.isMarketOrder(cut), true);
+  const line = nse.build([cut], SETTINGS, {}).text.split('\r\n')[1];
+  assert.ok(/,true,100,,/.test(line), 'market order, quantity, then an empty price: ' + line);
+});
+
+test('NSE operation codes are E / M / C — not BSE\'s N / M / D', () => {
+  // v1.3.0 operationType: "'E' - Place Order, 'M' - Modify Order, 'C' - Cancel Order".
+  // The shared helper used to hand NSE whichever code BSE needed.
   const lines = nse.build(BIDS, SETTINGS, {}).text.split('\r\n').filter(Boolean);
-  assert.ok(lines[1].endsWith(',N'));
-  assert.ok(lines[3].endsWith(',D'), 'a cancelled row is a D action, never C');
-  assert.ok(lines[4].endsWith(',M'), 'modified row is an M action');
-  assert.ok(lines[4].includes('99001'), 'modify carries the exchange order number');
+  assert.ok(/,E,/.test(lines[1]) || lines[1].endsWith(',E,'), 'a new bid is E: ' + lines[1]);
+  assert.ok(/,C,/.test(lines[3]), 'a cancellation is C at NSE: ' + lines[3]);
+  assert.ok(/,M,/.test(lines[4]), 'a modification is M: ' + lines[4]);
+  assert.ok(lines[4].includes('99001'), 'modify carries the exchange order id');
+  assert.ok(lines[1].endsWith(','), 'orderId is blank for a new entry: ' + lines[1]);
 });
 
-test('a cut-off bid carries the FLOOR PRICE, not zero', () => {
-  // Notice 20150122-30 says it twice: Annexure 1, "Please mention floor price when
-  // category is RIC"; and 4.3.5, "Margin for bids placed at cut-off price shall be
-  // at the floor price". A zero fails the exchange's own at-or-above-floor check,
-  // so every retail cut-off row in the file would have come back rejected.
-  assert.ok(/RIC,,ASH1002,,100,385,/.test(nse.build(BIDS, SETTINGS, {}).text),
-    'default must be the floor price');
+/* ===================================================================== BSE === */
 
-  // The escape hatch remains, but has to be asked for explicitly.
+test('BSE cut-off bids carry the FLOOR PRICE in category RIC', () => {
+  // Notice 20150122-30 twice over: Annexure 1, "Please mention floor price when
+  // category is RIC"; 4.3.5, "Margin for bids placed at cut-off price shall be at
+  // the floor price". A zero fails the exchange's at-or-above-floor check.
+  const text = bse.build(BIDS, SETTINGS, {}).text;
+  assert.ok(/RIC,,ASH1002,,100,385\.00,/.test(text), 'RIC at the floor price: ' + text);
+
   const asZero = Object.assign({}, SETTINGS, { cutoff_price_mode: 'zero' });
-  assert.ok(/RIC,,ASH1002,,100,0,/.test(nse.build(BIDS, asZero, {}).text));
+  assert.ok(/RIC,,ASH1002,,100,0\.00,/.test(bse.build(BIDS, asZero, {}).text));
+});
+
+test('BSE action codes are N / M / D', () => {
+  const lines = bse.build(BIDS, SETTINGS, {}).text.split('\r\n').filter(Boolean);
+  assert.ok(lines[0].endsWith(',N'), 'no header row, and the first bid is N');
+  assert.ok(lines[2].endsWith(',D'), 'a cancellation is D at BSE, never C');
+  assert.ok(lines[3].endsWith(',M'));
 });
 
 test('exchange files are CRLF and checksummed over the exact bytes', () => {

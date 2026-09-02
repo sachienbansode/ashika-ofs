@@ -169,3 +169,59 @@ that document). Until the ENIT enablement is done, nothing on our side can chang
 * **Bid modification and cancellation both stop at the cut-off.** Modification was
   already gated; cancellation was not, so a bid could be withdrawn after the desk had
   generated and uploaded the exchange file. Now both are gated.
+
+
+---
+
+## Exchange file formats — resolved 2 September 2026
+
+Two documents landed, and between them they closed most of what was open.
+
+### BSE — confirmed and corrected
+
+**Notice 20150122-30 (22 Jan 2015)**, "Comprehensive Modified Guidelines for Bidding
+in OFS Segment", supplied by Ashika. Our ten fields, their order, lengths and the
+100-record limit were right. Three things were wrong, two of which would have had
+bids rejected:
+
+* a cut-off bid was written with price `0`; the notice says the floor price, twice;
+* `RIC` was missing from the category list, so retail cut-off bids were coerced to `RI`;
+* the shared helper emitted `C` for a cancellation instead of `D`.
+
+The notice also carries the **allocation file layout**, which had been recorded as
+blocked on Notice 20130129-23. That blocker is cleared.
+
+### NSE — rebuilt, one item still open
+
+**"OFS System WEB API Protocol" v1.3.0 (Feb 2024)**, public on nsearchives. The NSE
+adapter had been a copy of the BSE layout. It is not remotely the same file:
+
+| | BSE | NSE |
+|---|---|---|
+| Category | `RI` / `RIC` / `NII` | no category field; `series` + `clientType` |
+| Action | `N` / `M` / `D` | `operationType` `E` / `M` / `C` (`CF` carry-forward) |
+| Margin | `1` = 0%, `2` = 100% | `0` = 0%, `1` = 100% — **inverted** |
+| Cut-off | category `RIC`, floor price | `isMarketOrder = true`, price **blank** |
+| Client | `UCC` column | `clientId` |
+
+The inverted margin flag is the dangerous one: a file would have uploaded cleanly
+and blocked the wrong margin.
+
+**Still open — the column ORDER.** v1.3.0 gives the field set and the allowed values
+authoritatively, but not the CSV column order for `/order/batch`. Ours follows the
+order the protocol lists the fields in, which is the best available inference.
+**Pin it against circular NSE/CMTR/72975 (24 Feb 2026) before the first live
+upload.**
+
+**Also to confirm with NSE:** the `series` values are documented as `IS`, `RS`, `ES`
+without their meanings. We map HNI→`IS`, Retail→`RS` as a setting
+(`nse_series_hni`, `nse_series_retail`) on the obvious reading — Institutional,
+Retail, Employee. Ask NSE to confirm, and whether an employee OFS tranche needs `ES`.
+
+### Two BSE rules not yet enforced
+
+* **0%-margin bids cannot be cancelled at all**, and may only be modified *upward*
+  in price or quantity (4.3.7). 100%-upfront bids allow both. Only bites if
+  `margin_type` is set to 0% margin, which Ashika does not currently use.
+* Retail bidding in the **NII** category forfeits the discount, and may only do so
+  **above ₹2 lakh** (4.3.5).
