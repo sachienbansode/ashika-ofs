@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OFS Desk — Ashika</title>
+<title>OFS BackOffice — Ashika</title>
 <link rel="icon" href="/shared/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/shared/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/shared/icon-192.png">
@@ -14,7 +14,7 @@
 
 <header class="top">
   <img src="/shared/brand-logo.png" alt="Ashika" width="34" height="34">
-  <div class="brand">OFS <span>Desk</span></div>
+  <div class="brand">OFS <span>BackOffice</span></div>
   <div class="clock" id="clock">--:--:--</div>
   <div class="sp"></div>
   <button class="mini" id="btnRefresh">Refresh</button>
@@ -131,6 +131,7 @@
       <button class="mini" data-mtab="sync">Exchange pull</button>
       <button class="mini" data-mtab="margins">Margins</button>
       <button class="mini" data-mtab="archive">Archive</button>
+      <button class="mini" data-mtab="circulars">Circulars <span class="badge hide" id="cirBadge"></span></button>
       <button class="mini" data-mtab="audit">Audit</button>
       <button class="mini" data-mtab="settings">Settings</button>
     </div>
@@ -160,7 +161,7 @@
         <button class="btn" id="arRun">Archive closed issues</button>
       </div>
       <div class="note">
-        Archiving hides an issue from the desk and the client app. Nothing is deleted:
+        Archiving hides an issue from the OFS BackOffice and the client app. Nothing is deleted:
         bids, generated files, allotments and the audit trail stay attached, and any
         archived issue can be opened in full or restored.
       </div>
@@ -219,6 +220,28 @@
 
       <h2 class="sec">Recent pulls</h2>
       <div class="wrap"><table id="syRunTbl"></table></div>
+    </div>
+
+    <div id="mCirculars" class="hide">
+      <div class="bar">
+        <select id="cirStatus">
+          <option value="new">Needs review</option>
+          <option value="">All OFS circulars</option>
+          <option value="imported">Set up</option>
+          <option value="ignored">Ignored</option>
+        </select>
+        <button class="btn" id="cirPoll">Check NSE now</button>
+        <div class="sp"></div>
+        <span class="tag" id="cirFeed"></span>
+      </div>
+      <div class="note">
+        NSE publishes a circular for every OFS. This polls their public RSS feed —
+        free, licensed, and nothing is scraped. It tells you an OFS <b>exists</b>;
+        the floor price and windows are in the PDF, so open the circular and set the
+        issue up under <b>Issues</b>. The feed is a rolling window of recent
+        circulars, so also subscribe to NSE's circular emails as a backstop.
+      </div>
+      <div class="wrap"><table id="cirTbl"></table></div>
     </div>
 
     <div id="mAudit" class="hide">

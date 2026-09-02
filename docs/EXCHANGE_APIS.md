@@ -96,6 +96,41 @@ parties but BSE blocked verification; test it from the office network.
 
 ---
 
+## 4b. BSE announcements — the harder half, and how to close it
+
+BSE has no OFS API and, unlike NSE, **no usable public feed**: `notices.xml` and the
+RSS index both return **403 to any non-browser client** (verified 2 Sep 2026). A
+poller running on the Azure VM would get the same 403, so building against it would
+be building against something that does not answer. Do not.
+
+Three routes, best first.
+
+**1. NSE already covers most of it — measure the gap before spending on it.**
+An OFS on both exchanges gets an NSE circular, so the NSE feed catches it. In our own
+2026 calendar that is **21 of 27 issues (78%)**. The six it misses are BSE-exclusive
+micro-caps — Aanchal Ispat, CLC Industries, HMA Agro, String Metaverse, Riddhi Siddhi
+and East India Drums. If Ashika does not participate in that tier, BSE detection may
+not be worth building at all. **Ask the desk before assuming it is.**
+
+**2. BSE email notices → a watched mailbox (recommended).**
+BSE already emails notices to members. That is BSE *sending* Ashika the data, which
+sidesteps both the 403 and the terms question entirely. Create a dedicated mailbox
+(e.g. `ofs-notices@ashikagroup.com`), subscribe it to BSE member notices, and have
+this app read it over IMAP with the same title matching the NSE watcher uses.
+
+We can build that in a day once the mailbox exists — the matching, storage, dedupe,
+queue and alerting are already written and source-agnostic (`ofs_circular.source`).
+What we need from Ashika: the mailbox, IMAP host and credentials, and confirmation
+that BSE notice emails will be delivered to it.
+
+**3. Ask BSE to whitelist the server, in the same letter as everything else.**
+Add one line: *"Please advise the correct machine-readable source for BSE notices, or
+whitelist our server IP for `bseindia.com/data/xml/notices.xml`."* Costs nothing to
+ask, and their answer decides whether route 2 is permanent or a stopgap.
+
+Until one of these lands, BSE-only issues are entered by hand — which is what happens
+today, so nothing regresses.
+
 ## 5. NSE Extranet API — for the allotment files, not announcements
 
 `https://www.connect2nse.com/extranet-api/`. Register on the Member Portal

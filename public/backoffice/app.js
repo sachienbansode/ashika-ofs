@@ -501,6 +501,7 @@ function showMTab(t) {
   $('#mMargins').classList.toggle('hide', t !== 'margins');
   $('#mArchive').classList.toggle('hide', t !== 'archive');
   $('#mSync').classList.toggle('hide', t !== 'sync');
+  $('#mCirculars').classList.toggle('hide', t !== 'circulars');
   $('#mAudit').classList.toggle('hide', t !== 'audit');
   $('#mSettings').classList.toggle('hide', t !== 'settings');
   if (t === 'margins') loadMargins();
@@ -509,6 +510,7 @@ function showMTab(t) {
   if (t === 'archive') loadArchive();
   if (t === 'sync') loadSync(); else stopSyncPoll();
   if (t === 'audit') loadAudit(0);
+  if (t === 'circulars') loadCirculars();
 }
 function loadMasters() { showMTab(STATE.mtab); }
 
@@ -767,6 +769,97 @@ async function loadSyncRuns() {
 }
 
 function loadSync() { loadSyncStatus(); loadSyncRuns(); }
+
+/* ================================================================= circulars ===
+ * NSE publishes a circular for every OFS, and an RSS feed of every circular. A feed
+ * exists to be polled, so this is licensed and free — unlike scraping their pages,
+ * which is why EXCHANGE_WEB_FETCH stays off.
+ *
+ * It answers ONE question: is there an OFS we have not set up? The numbers are in
+ * the PDF and a human still enters them.
+ */
+async function loadCirculars() {
+  try {
+    var st = $('#cirStatus').value;
+    var d = await api('/circulars' + (st ? '?status=' + encodeURIComponent(st) : ''));
+    var r = d.circulars || [];
+    var f = (d.status && d.status.feed) || {};
+
+    $('#cirFeed').textContent = !d.status.enabled ? 'Watch is off'
+      : f.last_ok_at ? ('NSE checked ' + dt(f.last_ok_at) +
+          (f.last_status === 304 ? ' · unchanged' : '') +
+          (d.status.alert_email ? ' · alerts to ' + d.status.alert_email : ' · no email alert set'))
+      : 'Not checked yet';
+
+    var unread = Number(d.status.counts && d.status.counts.unreviewed) || 0;
+    var badge = $('#cirBadge');
+    badge.textContent = unread;
+    badge.classList.toggle('hide', !unread);
+
+    $('#cirTbl').innerHTML = r.length ? (
+      '<thead><tr><th>Published</th><th>Company</th><th>Circular</th><th>Dept</th>' +
+      '<th>Match</th><th>Status</th><th></th></tr></thead><tbody>' +
+      r.map(function (c) {
+        var conf = c.is_ofs ? 3 : 0;
+        return '<tr><td class="m">' + dt(c.published_at) + '</td>' +
+          '<td><b>' + esc(c.company || '—') + '</b></td>' +
+          '<td class="sm"><a href="' + esc(c.link) + '" target="_blank" rel="noopener">' +
+            esc(c.title) + '</a></td>' +
+          '<td class="m">' + esc(c.department || '') + '</td>' +
+          '<td><span class="conf"><i style="width:' + (conf / 3 * 100) + '%"></i></span></td>' +
+          '<td><span class="chip ' + (c.status === 'new' ? 'soon' : c.status === 'imported' ? 'open' : 'grey') + '">' +
+            esc(c.status) + '</span>' +
+            (c.handled_by ? '<div class="sm">' + esc(c.handled_by) + '</div>' : '') + '</td>' +
+          '<td>' +
+            (c.status === 'new'
+              ? '<button class="mini" data-cirnew="' + c.id + '">Set up issue</button> ' +
+                '<button class="mini" data-cirdone="' + c.id + '">Reviewed</button> ' +
+                '<button class="mini" data-cirskip="' + c.id + '">Ignore</button>'
+              : '<button class="mini" data-cirreopen="' + c.id + '">Reopen</button>') +
+          '</td></tr>';
+      }).join('') + '</tbody>'
+    ) : '<tbody><tr><td class="empty">' +
+        (st === 'new' ? 'Nothing waiting — no unreviewed OFS circular.'
+                      : 'No circular recorded yet. Press “Check NSE now”.') +
+        '</td></tr></tbody>';
+  } catch (e) { toast('Circulars failed', e.message, 'bad'); }
+}
+
+async function pollCirculars() {
+  var b = $('#cirPoll');
+  b.disabled = true; b.textContent = 'Checking…';
+  try {
+    var r = await api('/circulars/poll', { method: 'POST' });
+    toast(r.inserted ? r.inserted + ' new OFS circular(s)' : 'Nothing new',
+      r.notModified ? 'NSE reports the feed unchanged since the last check.'
+        : r.error ? r.error
+        : (r.items || 0) + ' circular(s) in the feed, ' + (r.matched || 0) + ' matched OFS.',
+      r.error ? 'bad' : r.inserted ? 'ok' : 'warn');
+    loadCirculars();
+  } catch (e) {
+    toast('Check failed', (e.body && e.body.message) || e.message, 'bad');
+  } finally {
+    b.disabled = false; b.textContent = 'Check NSE now';
+  }
+}
+
+async function setCircular(id, status) {
+  try {
+    await api('/circulars/' + id, { method: 'PUT', body: { status: status } });
+    loadCirculars();
+  } catch (e) { toast('Could not update', e.message, 'bad'); }
+}
+
+/** "Set up issue" — mark it, then open the manual issue form with the name filled in. */
+async function circularToIssue(id, company) {
+  await setCircular(id, 'imported');
+  showMTab('issues');
+  issueForm();
+  var el = $('#fCompany');
+  if (el && company && company !== '—') { el.value = company; }
+  var sym = $('#fSymbol');
+  if (sym) sym.focus();
+}
 
 /* ===================================================================== audit ===
  * Read-only by construction. The point is that compliance can answer "who changed
@@ -1070,7 +1163,7 @@ function importIssues() {
        { key: 'hni_open', label: 'HNI open' }, { key: 'hni_close', label: 'HNI close' },
        { key: 'ret_open', label: 'Retail open' }, { key: 'ret_close', label: 'Retail close' }],
       parsed,
-      'Windows are read in the browser’s timezone (IST on the desk). Rows are posted one by one — a duplicate symbol/ISIN for the same day is rejected by the database.',
+      'Windows are read in the browser’s timezone (IST). Rows are posted one by one — a duplicate symbol/ISIN for the same day is rejected by the database.',
       async function (valid) {
         var ok = 0, failed = [];
         for (var i = 0; i < valid.length; i++) {
@@ -1319,7 +1412,7 @@ async function runArchive() {
 async function unarchive(id) {
   try {
     await api('/issues/' + id + '/unarchive', { method: 'POST', body: {} });
-    toast('Restored', 'The issue is back on the desk.', 'ok');
+    toast('Restored', 'The issue is back in the OFS BackOffice.', 'ok');
     loadArchive(); loadIssues(); loadDash();
   } catch (e) { toast('Restore failed', e.message, 'bad'); }
 }
@@ -1364,9 +1457,9 @@ async function checkSession() {
       return DESK.indexOf(String(p).split(':')[0]) >= 0;
     });
     if (!granted) {
-      showGate('No access to the OFS desk',
+      showGate('No access to the OFS BackOffice',
         'Your account is signed in, but the ' + (me.user.role || 'assigned') +
-        ' role does not include the OFS desk.',
+        ' role does not include the OFS BackOffice.',
         'An administrator grants the "ofs-desk" page to your role in the Admin console.');
       return false;
     }
@@ -1425,6 +1518,19 @@ async function boot() {
   $('#syRun').addEventListener('click', function () { startSync(); });
   $('#scSave').addEventListener('click', saveSchedule);
   $('#auGo').addEventListener('click', function () { loadAudit(0); });
+  $('#cirPoll').addEventListener('click', pollCirculars);
+  $('#cirStatus').addEventListener('change', loadCirculars);
+  $('#cirTbl').addEventListener('click', function (e) {
+    var n = e.target.closest('[data-cirnew]');
+    if (n) {
+      var row = n.closest('tr');
+      circularToIssue(n.dataset.cirnew, row.children[1].textContent.trim());
+      return;
+    }
+    var d = e.target.closest('[data-cirdone]');   if (d) return setCircular(d.dataset.cirdone, 'reviewed');
+    var s2 = e.target.closest('[data-cirskip]');  if (s2) return setCircular(s2.dataset.cirskip, 'ignored');
+    var r = e.target.closest('[data-cirreopen]'); if (r) return setCircular(r.dataset.cirreopen, 'new');
+  });
   $('#auQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadAudit(0); });
   ['#auArea', '#auPlacedBy', '#auFrom', '#auTo'].forEach(function (sel) {
     $(sel).addEventListener('change', function () { loadAudit(0); });

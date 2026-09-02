@@ -21,7 +21,7 @@
     box.innerHTML = issueHeadHtml(d, {}) + issueSummaryHtml(d) + issueTablesHtml(d);
   }).catch(function (e) {
     box.innerHTML = '<div class="note bad">' + esc(e.status === 401
-      ? 'Your session has ended — sign in on the desk and reopen this window.'
+      ? 'Your session has ended — sign in to the OFS BackOffice and reopen this window.'
       : (e.message || 'Could not load this issue.')) + '</div>';
   });
 })();

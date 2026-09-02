@@ -79,14 +79,14 @@ async function redeemTicket(req, token) {
 }
 
 const FAIL_TEXT = {
-  TICKET_EXPIRED: 'That sign-in link has expired. Please open the OFS desk from the portal again.',
-  TICKET_REPLAYED: 'That sign-in link has already been used. Please open the OFS desk from the portal again.',
+  TICKET_EXPIRED: 'That sign-in link has expired. Please open the OFS BackOffice from the portal again.',
+  TICKET_REPLAYED: 'That sign-in link has already been used. Please open the OFS BackOffice from the portal again.',
   TICKET_INVALID: 'That sign-in link is not valid.',
   SSO_UNCONFIGURED: 'Single sign-on is not configured on this server.',
   USER_UNKNOWN: 'No matching user account.',
   USER_INACTIVE: 'That account is inactive.',
   MFA_REQUIRED: 'This account requires multi-factor authentication; sign in at the portal first.',
-  SESSION_STALE: 'You have signed in elsewhere since. Please open the OFS desk from the portal again.'
+  SESSION_STALE: 'You have signed in elsewhere since. Please open the OFS BackOffice from the portal again.'
 };
 
 /** GET /auth/sso?t=<ticket> — the portal redirects the browser here. */
@@ -129,11 +129,11 @@ router.post('/logout', (req, res) => {
 function page(message) {
   const esc = String(message).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const portal = process.env.PORTAL_URL || '';
-  return `<!doctype html><meta charset="utf-8"><title>OFS Desk — sign in</title>
+  return `<!doctype html><meta charset="utf-8"><title>OFS BackOffice — sign in</title>
 <body style="font:14px system-ui,sans-serif;background:#0d1117;color:#e6edf6;margin:0;
 display:flex;align-items:center;justify-content:center;height:100vh">
 <div style="max-width:420px;padding:28px;background:#141a23;border:1px solid #232c3a;border-radius:10px">
-<h1 style="font-size:16px;margin:0 0 10px">OFS Desk</h1>
+<h1 style="font-size:16px;margin:0 0 10px">OFS BackOffice</h1>
 <p style="color:#8b98ab;margin:0 0 16px">${esc}</p>
 ${portal ? `<a href="${portal}" style="color:#4f8cff">Go to the portal</a>` : ''}
 </div></body>`;

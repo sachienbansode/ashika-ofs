@@ -89,7 +89,7 @@ async function issueSession(res, user, req) {
 function otpEmail(name, code, mins) {
   return brandedEmail(`
     <p style="margin:0 0 14px">Hello ${String(name || 'there').replace(/[&<>]/g, '')},</p>
-    <p style="margin:0 0 18px">Use this code to sign in to the Ashika OFS desk:</p>
+    <p style="margin:0 0 18px">Use this code to sign in to the Ashika OFS BackOffice:</p>
     <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:30px;font-weight:700;
                 letter-spacing:.22em;color:#243f8e;background:#f2f7fb;border:1px solid #e2ecf2;
                 border-radius:10px;padding:16px;text-align:center;margin:0 0 18px">${code}</div>
@@ -122,7 +122,7 @@ async function startMfa(req, user) {
   }
 
   const r = await mailer.send({
-    to: user.email, subject: 'Your Ashika OFS desk sign-in code',
+    to: user.email, subject: 'Your Ashika OFS BackOffice sign-in code',
     html: otpEmail(user.first_name, code, otp.OTP_TTL_MIN),
     purpose: 'ofs_staff_otp', triggeredBy: 'desk-signin', ip: ipOf(req)
   });

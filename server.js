@@ -117,6 +117,7 @@ api.use('/margin',    require('./routes/margin'));
 api.use('/export',    require('./routes/export'));
 api.use('/allotment', require('./routes/allotment'));
 api.use('/audit',     require('./routes/audit'));
+api.use('/circulars', require('./routes/circulars'));
 
 app.use('/api', api);
 

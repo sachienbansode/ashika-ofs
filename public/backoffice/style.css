@@ -263,3 +263,9 @@ tr.rowdet > td{padding:0 !important;background:#f7fbfc;border-bottom:1px solid v
 .rowdet-in .grid2{margin-top:0}
 .rowdet-more{margin-top:6px}
 .rowdet-more .sec:first-child{margin-top:14px}
+
+/* ---- circular queue ---- */
+.badge{display:inline-block;min-width:17px;padding:1px 5px;margin-left:5px;border-radius:99px;
+  background:var(--red);color:#fff;font-size:10px;font-weight:700;line-height:1.5;text-align:center}
+.conf{display:inline-block;width:34px;height:5px;border-radius:99px;background:var(--line-s);overflow:hidden;vertical-align:middle}
+.conf i{display:block;height:100%;background:var(--teal)}

@@ -350,6 +350,32 @@ Archiving is a flag, never a move or a delete: bids, generated files, allotments
 audit rows keep pointing at the same issue, and Masters → Archive opens any of them
 in full or restores it.
 
+## Circular watch — knowing an OFS exists
+
+NSE publishes a circular for every OFS and an RSS feed of every circular. A feed is
+published *to be polled* — that is what RSS is for — so this needs no consent and
+breaches nothing, unlike scraping their pages (which is why `EXCHANGE_WEB_FETCH`
+stays off).
+
+`lib/circularWatch.js` polls `https://nsearchives.nseindia.com/content/RSS/Circulars.xml`
+every 15 minutes by default, on the same one-minute scheduler tick as everything else,
+with **conditional GET** — an unchanged feed costs one 304, not a download. Matches
+land in `ofs.ofs_circular` and appear under **Masters → Circulars** with a badge, and
+optionally as an email (`circulars_alert_email`).
+
+It answers one question: **is there an OFS we have not set up?** Floor price and
+windows live in the PDF, so a human still opens it and fills them in — *Set up issue*
+marks the circular and opens the issue form with the company pre-filled.
+
+Two things it is honest about:
+
+* The feed is a **rolling window**, not an archive, so a poller down for a day can
+  miss one. Subscribe to NSE's circular emails as a backstop.
+* **BSE has no equivalent** — `notices.xml` returns 403 to any non-browser client.
+  NSE circulars cover the 78% of issues that run on both exchanges; the rest are
+  BSE-only micro-caps. See [`docs/EXCHANGE_APIS.md`](docs/EXCHANGE_APIS.md) §4b for
+  the mailbox route that closes it.
+
 ## When a bid may be placed
 
 Three gates, narrowest wins (`lib/marketHours.js`, `lib/domain.js`):

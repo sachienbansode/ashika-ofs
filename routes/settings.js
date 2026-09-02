@@ -81,6 +81,22 @@ const EDITABLE = {
       String(v).split(/[,\s;]+/).filter(Boolean).every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))
       || 'Use YYYY-MM-DD dates separated by commas'
   },
+  circulars_enabled: {
+    label: 'Watch NSE circulars', kind: 'bool',
+    hint: '1 polls the NSE circulars RSS feed for "Offer for Sale" announcements. Free, licensed, no scraping.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
+  circulars_poll_minutes: {
+    label: 'Check circulars every (minutes)', kind: 'number',
+    hint: 'Between 5 and 240. A poll is a conditional GET, so an unchanged feed costs one 304.',
+    check: (v) => (Number(v) >= 5 && Number(v) <= 240) || 'Between 5 and 240'
+  },
+  circulars_alert_email: {
+    label: 'Email alert for new OFS circulars', kind: 'text',
+    hint: 'Who to tell when NSE publishes an OFS circular. Blank = no email, the queue is still shown.',
+    check: (v) => (!String(v).trim() || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v).trim()))
+      || 'Enter one email address, or leave blank'
+  },
   client_login_unknown: {
     label: 'Unknown sign-in identifier', kind: 'choice', choices: ['reveal', 'generic'],
     hint: 'reveal = tell the visitor "no client found" (kinder, and stops "I never got my OTP" calls). '

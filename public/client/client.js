@@ -353,7 +353,7 @@ async function loadIssues(quiet) {
     $('#clientIssues').innerHTML = list.length
       ? list.map(issueCard).join('')
       : '<div class="tbl-empty">There is no open Offer for Sale right now. ' +
-        'Issues appear here as soon as the desk publishes them.</div>';
+        'Issues appear here as soon as Ashika publishes them.</div>';
   } catch (e) {
     if (e.status === 401) return sessionLost();
     if (!quiet) toast('Could not load issues', e.message, 'bad');
