@@ -111,20 +111,43 @@ cd /var/apps/ashika-ofs-app && ./scripts/deploy.sh
 OFS migrations run against **`ofs_bids`** on `13.233.106.37` — never against `uat_ananta_staging`,
 which is production. Password via `PGPASSWORD` only.
 
-## nginx (own server block — do not co-host under staging-api-app)
-```nginx
-server {
-  listen 443 ssl http2;
-  server_name ofs.example.com;
-  location / {
-    proxy_pass http://127.0.0.1:4011;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-}
+## Domain and certificate
+
+`ofs-bid.ashikagroup.com` → Azure VM `20.244.33.142` → nginx → `127.0.0.1:4011`.
+
+Its own server block, deliberately: a config change for one app must never be able
+to take the other down, and the rate-limit zones are sized for a bidding window
+rather than for an API portal. `deploy/nginx/ofs.conf` is the file — it separates
+sign-in and OTP (`1r/s`, burst 10) from ordinary API traffic (`20r/s`, burst 40),
+and leaves `/healthz` and `/readyz` unlimited and unlogged.
+
+```bash
+# 1. install the server block
+sudo cp deploy/nginx/ofs.conf /etc/nginx/sites-available/ofs.conf
+sudo ln -sf /etc/nginx/sites-available/ofs.conf /etc/nginx/sites-enabled/ofs.conf
+sudo rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/ofs-ip.conf
+sudo nginx -t && sudo systemctl reload nginx
+
+# 2. certificate (needs port 80 open to the world for the ACME challenge)
+sudo certbot --nginx -d ofs-bid.ashikagroup.com
+
+# 3. only now flip the app to HTTPS
+bash scripts/enable-https.sh ofs-bid.ashikagroup.com
 ```
+
+Step 3 is a separate step on purpose. `COOKIE_SECURE=true` and `FORCE_HTTPS=true`
+without a working certificate take the site down rather than securing it: the browser
+stops sending the session cookie, and `upgrade-insecure-requests` makes the page ask
+for its assets over a port that is not listening. So the script verifies
+`https://<domain>/healthz` answers before it changes a thing, backs up `.env`, and
+restarts PM2 itself.
+
+Renewal is certbot's own timer (`systemctl list-timers | grep certbot`). The ACME
+challenge location stays outside the HTTPS redirect so a renewal can always answer
+on port 80.
+
+**Azure NSG** must allow 80 and 443 inbound. Port 80 cannot be closed after issuing —
+renewal needs it.
 
 ## Two front ends
 
