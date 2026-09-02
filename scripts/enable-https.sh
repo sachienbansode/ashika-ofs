@@ -18,19 +18,24 @@ APP_NAME="${PM2_APP:-ashika-ofs-app}"
 [ -n "$DOMAIN" ] || { echo "usage: bash scripts/enable-https.sh <domain>" >&2; exit 1; }
 [ -f "$ENV_FILE" ] || { echo "!! no .env at $ENV_FILE" >&2; exit 1; }
 
+# The real test is whether TLS answers, not whether this user can read the key.
+# /etc/letsencrypt/live is mode 700, so a plain `test -f` here is false for anyone
+# but root even when the certificate exists — checking the file was the wrong gate.
 CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
-if [ ! -f "$CERT" ]; then
-  echo "!! no certificate at $CERT" >&2
-  echo "   Run this first:  sudo certbot --nginx -d $DOMAIN" >&2
-  exit 1
+if [ -r "$CERT" ] || sudo -n test -f "$CERT" 2>/dev/null; then
+  echo "==> certificate present: $CERT"
+else
+  echo "==> cannot read $CERT (root-only, or absent) — relying on the live TLS check"
 fi
 
-# Prove the certificate is being served before trusting it.
+# Authoritative: does the site actually serve HTTPS right now?
 if ! curl -fsS --max-time 15 "https://$DOMAIN/healthz" >/dev/null; then
   echo "!! https://$DOMAIN/healthz did not answer over TLS — not changing anything." >&2
-  echo "   Check: sudo nginx -t && sudo systemctl reload nginx" >&2
+  echo "   If the certificate was just issued:  sudo nginx -t && sudo systemctl reload nginx" >&2
+  echo "   If it was never issued:              sudo certbot --nginx -d $DOMAIN" >&2
   exit 1
 fi
+echo "==> https://$DOMAIN is serving TLS"
 
 cp "$ENV_FILE" "$ENV_FILE.bak.$(date +%Y%m%d%H%M%S)"
 
