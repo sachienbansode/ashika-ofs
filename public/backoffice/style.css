@@ -425,3 +425,9 @@ tbody tr.row-open{background:var(--tint)}
 tbody tr.row-open td{border-bottom-color:transparent}
 tbody tr.row-open td:first-child{box-shadow:inset 3px 0 0 var(--teal)}
 tbody tr[data-rowclick],tbody tr:has([data-detail]){cursor:pointer}
+
+/* ---- footer ---- */
+.app-foot{max-width:1560px;margin:26px auto 0;padding:16px 20px 30px;
+  border-top:1px solid var(--hair);font-size:11.5px;line-height:1.8;color:var(--muted);text-align:center}
+.app-foot .copy{color:#93a4bb}
+@media print{.app-foot{display:none}}

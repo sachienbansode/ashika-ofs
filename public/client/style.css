@@ -171,3 +171,6 @@
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms !important;transition-duration:.001ms !important}
 }
+
+/* ---- copyright line, in both footers ---- */
+.foot .copy,.copy{display:block;margin-top:7px;font-size:11px;color:#93a4bb}
