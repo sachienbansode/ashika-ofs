@@ -231,6 +231,20 @@
           <option value="ignored">Ignored</option>
         </select>
         <button class="btn" id="cirPoll">Check NSE now</button>
+        <label class="inline"><span>Every</span>
+          <select id="cirEvery">
+            <option value="5">5 min</option>
+            <option value="10">10 min</option>
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+            <option value="60">1 hour</option>
+            <option value="120">2 hours</option>
+            <option value="240">4 hours</option>
+          </select>
+        </label>
+        <label class="inline"><span>Create issues</span>
+          <select id="cirAuto"><option value="1">Yes</option><option value="0">No</option></select>
+        </label>
         <div class="sp"></div>
         <span class="tag" id="cirFeed"></span>
       </div>
@@ -249,6 +263,10 @@
         circulars, so also subscribe to NSE's circular emails as a backstop.
       </div>
       <div class="wrap"><table id="cirTbl"></table></div>
+
+      <h2 class="sec">Check history</h2>
+      <div id="cirRunSummary"></div>
+      <div class="wrap"><table id="cirRunTbl"></table></div>
     </div>
 
     <div id="mAudit" class="hide">

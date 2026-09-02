@@ -24,12 +24,21 @@ router.get('/status', requirePage('ofs-desk', PAGE), async (req, res, next) => {
   try { res.json(await watch.status()); } catch (e) { next(e); }
 });
 
+/** GET /api/circulars/runs — every check, newest first, with the totals. */
+router.get('/runs', requirePage('ofs-desk', PAGE), async (req, res, next) => {
+  try {
+    res.json({ runs: await watch.runs(req.query.limit), summary: await watch.runSummary() });
+  } catch (e) { next(e); }
+});
+
 /** POST /api/circulars/poll — check the feed now, rather than waiting for the timer. */
 router.post('/poll', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const out = await watch.poll({ force: true });
+    await watch.recordRun(out, 'manual', String(req.user.email || req.user.id));
     await audit.log(req, 'circular_poll', 'ofs_circular', null, null, {
-      status: out.status, items: out.items, new: out.inserted, alerted: out.alerted });
+      status: out.status, items: out.items, new: out.inserted,
+      issues_created: out.issues_made, alerted: out.alerted });
     res.json(out);
   } catch (e) { next(e); }
 });

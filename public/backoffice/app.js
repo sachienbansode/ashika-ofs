@@ -51,6 +51,92 @@ function toast(title, msg, kind) {
   setTimeout(function () { box.remove(); }, 6000);
 }
 
+/* ================================================================ pagination ===
+ * Ten rows a page, everywhere. One helper rather than eight implementations: give
+ * it the rows and a renderer, it returns the page's rows and draws the control.
+ *
+ * Deliberately client-side. Every list here is bounded — an issue master is tens of
+ * rows, a bid book hundreds — so the whole set is already in hand, and paging in the
+ * browser keeps sorting and filtering instant. The audit trail is the exception: it
+ * grows without limit and pages on the server.
+ */
+var PAGE_SIZE = 10;
+var PAGES = {};                       // key -> current page index
+
+function pageOf(key, rows) {
+  var total = rows.length;
+  var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  var at = Math.min(PAGES[key] || 0, pages - 1);
+  PAGES[key] = at;
+  return { rows: rows.slice(at * PAGE_SIZE, at * PAGE_SIZE + PAGE_SIZE),
+           at: at, pages: pages, total: total,
+           from: total ? at * PAGE_SIZE + 1 : 0,
+           to: Math.min(total, at * PAGE_SIZE + PAGE_SIZE) };
+}
+
+/** The control itself. Hidden entirely when everything fits on one page. */
+function pagerHtml(key, p, noun) {
+  if (p.total <= PAGE_SIZE) return '';
+  return '<div class="pager" data-pager="' + esc(key) + '">' +
+    '<span class="range">' + p.from + '–' + p.to + ' of ' + p.total + ' ' + esc(noun || 'rows') + '</span>' +
+    '<div class="sp"></div>' +
+    '<button class="mini" data-pg="first"' + (p.at ? '' : ' disabled') + '>« First</button>' +
+    '<button class="mini" data-pg="prev"' + (p.at ? '' : ' disabled') + '>‹ Prev</button>' +
+    '<span class="of">Page ' + (p.at + 1) + ' of ' + p.pages + '</span>' +
+    '<button class="mini" data-pg="next"' + (p.at < p.pages - 1 ? '' : ' disabled') + '>Next ›</button>' +
+    '<button class="mini" data-pg="last"' + (p.at < p.pages - 1 ? '' : ' disabled') + '>Last »</button>' +
+    '</div>';
+}
+
+/** Wire every pager once, from the document — the tables are rebuilt constantly. */
+function initPagers() {
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-pg]');
+    if (!b) return;
+    var wrap = b.closest('[data-pager]');
+    if (!wrap) return;
+    var key = wrap.dataset.pager;
+    var p = PAGERS[key];
+    if (!p) return;
+    var last = Math.max(0, p.pages - 1);
+    var at = PAGES[key] || 0;
+    PAGES[key] = b.dataset.pg === 'first' ? 0
+      : b.dataset.pg === 'prev' ? Math.max(0, at - 1)
+      : b.dataset.pg === 'next' ? Math.min(last, at + 1)
+      : last;
+    if (typeof p.redraw === 'function') p.redraw();
+  });
+}
+var PAGERS = {};                      // key -> { pages, redraw }
+
+/**
+ * Render a paged table in one call.
+ *
+ *   pagedTable('issues', $('#issueTbl'), rows, function (page) { return HEAD + page.map(...) },
+ *              'issues', loadIssues, 'No issue in the master yet.')
+ *
+ * The builder receives only the rows for the current page, so every existing table
+ * body keeps its exact markup — the change at each call site is one wrapper, not a
+ * rewrite of the row HTML.
+ */
+function pagedTable(key, tbl, rows, build, noun, redraw, emptyMsg) {
+  var p = pageOf(key, rows);
+  PAGERS[key] = { pages: p.pages, redraw: redraw };
+  tbl.innerHTML = p.total
+    ? build(p.rows)
+    : '<tbody><tr><td class="empty">' + esc(emptyMsg || 'Nothing to show.') + '</td></tr></tbody>';
+
+  // The pager lives after the scrolling box, not inside it.
+  var host = tbl.closest('.wrap') || tbl;
+  var existing = host.parentNode.querySelector('[data-pager="' + key + '"]');
+  if (existing) existing.remove();
+  var html = pagerHtml(key, p, noun);
+  if (html) host.insertAdjacentHTML('afterend', html);
+}
+
+/** A filter changed — go back to page one, or the user stares at an empty page 4. */
+function resetPage(key) { PAGES[key] = 0; }
+
 /* ---------------- api ---------------- */
 async function api(path, opts) {
   opts = opts || {};
@@ -230,10 +316,10 @@ async function loadBook() {
     $('#bkCount').textContent = b.length + ' bid(s) · ' +
       inr(b.reduce(function (t, x) { return t + Number(x.qty || 0); }, 0), 0) + ' shares · ' +
       crore(b.reduce(function (t, x) { return t + Number(x.value || 0); }, 0));
-    $('#bookTbl').innerHTML = b.length ? (
-      '<thead><tr><th>Ref</th><th>Symbol</th><th>UCC</th><th>Client</th><th>PAN</th><th>Cat</th>' +
+    pagedTable('bids', $('#bookTbl'), b, function (page) {
+      return '<thead><tr><th>Ref</th><th>Symbol</th><th>UCC</th><th>Client</th><th>PAN</th><th>Cat</th>' +
       '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>' +
-      b.map(function (x) {
+      page.map(function (x) {
         return '<tr data-bid="' + x.id + '">' +
           '<td class="m">' + esc(x.ref) + '</td><td>' + esc(x.symbol || '') + '</td>' +
           '<td class="m">' + esc(x.client_ucc) + '</td><td>' + esc(x.client_name || '') + '</td>' +
@@ -248,8 +334,8 @@ async function loadBook() {
             '<button class="mini" data-edit="' + x.id + '">Modify</button> ' +
             '<button class="mini" data-cancel="' + x.id + '">Cancel</button>') + '</td>' +
         '</tr>';
-      }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="empty">No bid matches this filter.</td></tr></tbody>';
+      }).join('') + '</tbody>';
+    }, 'bids', loadBook, 'No bid matches this filter.');
   } catch (e) { toast('Bid book failed', e.message, 'bad'); }
 }
 
@@ -509,16 +595,16 @@ async function loadExportLog() {
   try {
     var d = await api('/export/log');
     var r = d.exports || [];
-    $('#exLogTbl').innerHTML = r.length ? (
-      '<thead><tr><th>Generated</th><th>Exchange</th><th>Symbol</th><th>File</th>' +
+    pagedTable('exports', $('#exLogTbl'), r, function (page) {
+      return '<thead><tr><th>Generated</th><th>Exchange</th><th>Symbol</th><th>File</th>' +
       '<th class="n">Rows</th><th class="n">Qty</th><th>Checksum</th><th>By</th></tr></thead><tbody>' +
-      r.map(function (x) {
+      page.map(function (x) {
         return '<tr><td class="m">' + dt(x.generated_at) + '</td><td>' + esc(x.exchange) + '</td>' +
           '<td>' + esc(x.symbol || 'ALL') + '</td><td class="m">' + esc(x.file_name) + '</td>' +
           '<td class="n">' + inr(x.row_count, 0) + '</td><td class="n">' + inr(x.total_qty, 0) + '</td>' +
           '<td class="m">' + esc(String(x.checksum).slice(0, 16)) + '…</td><td>' + esc(x.generated_by || '') + '</td></tr>';
-      }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="empty">No file generated yet.</td></tr></tbody>';
+      }).join('') + '</tbody>';
+    }, 'files', loadExportLog, 'No file generated yet.');
   } catch (e) { /* route is page-gated; ignore */ }
 }
 
@@ -539,7 +625,7 @@ function showMTab(t) {
   if (t === 'archive') loadArchive();
   if (t === 'sync') loadSync(); else stopSyncPoll();
   if (t === 'audit') loadAudit(0);
-  if (t === 'circulars') loadCirculars();
+  if (t === 'circulars') { loadCirculars(); loadCircularRuns(); }
 }
 function loadMasters() { showMTab(STATE.mtab); }
 
@@ -547,11 +633,11 @@ async function loadIssues() {
   try {
     var d = await api('/issues');
     var r = d.issues || [];
-    $('#issueTbl').innerHTML = r.length ? (
-      '<thead><tr><th>Symbol</th><th>Company</th><th>ISIN</th><th>Exch</th>' +
+    pagedTable('issues', $('#issueTbl'), r, function (page) {
+      return '<thead><tr><th>Symbol</th><th>Company</th><th>ISIN</th><th>Exch</th>' +
       '<th class="n">Floor</th><th class="n">Cut-off min</th><th class="n">Tick</th><th class="n">Lot</th>' +
       '<th>HNI window</th><th>Retail window</th><th>Status</th></tr></thead><tbody>' +
-      r.map(function (i) {
+      page.map(function (i) {
         return '<tr><td><b>' + esc(i.symbol) + '</b></td><td>' + esc(i.company) + '</td>' +
           '<td class="m">' + esc(i.isin) + '</td><td>' + esc(i.exchange) + '</td>' +
           '<td class="n">' + inr(i.floor_price) + '</td><td class="n">' + inr(i.cut_price_min) + '</td>' +
@@ -559,8 +645,8 @@ async function loadIssues() {
           '<td class="m">' + dt(i.hni_open) + ' → ' + dt(i.hni_close) + '</td>' +
           '<td class="m">' + dt(i.ret_open) + ' → ' + dt(i.ret_close) + '</td>' +
           '<td><span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span></td></tr>';
-      }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="empty">No issue in the master yet.</td></tr></tbody>';
+      }).join('') + '</tbody>';
+    }, 'issues', loadIssues, 'No issue in the master yet.');
   } catch (e) { toast('Issues failed', e.message, 'bad'); }
 }
 
@@ -797,10 +883,10 @@ async function loadSyncRuns() {
   try {
     var d = await api('/issues/sync/runs?limit=15');
     var r = d.runs || [];
-    $('#syRunTbl').innerHTML = r.length ? (
-      '<thead><tr><th>#</th><th>Started</th><th>By</th><th>From</th><th>Status</th>' +
+    pagedTable('pulls', $('#syRunTbl'), r, function (page) {
+      return '<thead><tr><th>#</th><th>Started</th><th>By</th><th>From</th><th>Status</th>' +
       '<th class="n">Found</th><th class="n">New</th><th class="n">Updated</th><th>Note</th></tr></thead><tbody>' +
-      r.map(function (x) {
+      page.map(function (x) {
         return '<tr><td class="m">' + x.id + '</td><td class="m">' + dt(x.started_at) + '</td>' +
           '<td>' + esc(x.trigger === 'schedule' ? 'schedule' : (x.actor || 'desk')) + '</td>' +
           '<td>' + esc((x.exchanges || []).join(', ')) + '</td>' +
@@ -809,8 +895,8 @@ async function loadSyncRuns() {
           '<td class="n">' + (x.found || 0) + '</td><td class="n">' + (x.inserted || 0) + '</td>' +
           '<td class="n">' + (x.updated || 0) + '</td>' +
           '<td class="sm">' + esc(x.error || '') + '</td></tr>';
-      }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="empty">No pull has run yet.</td></tr></tbody>';
+      }).join('') + '</tbody>';
+    }, 'pulls', loadSyncRuns, 'No pull has run yet.');
   } catch (e) { toast('Pull history failed', e.message, 'bad'); }
 }
 
@@ -906,15 +992,19 @@ async function loadCirculars() {
     // when it may mean "NSE has been refusing us for two days".
     renderFeedHealth(d.status, f);
 
+    $('#cirEvery').value = String(d.status.poll_minutes);
+    if (!$('#cirEvery').value) $('#cirEvery').value = '15';
+    $('#cirAuto').value = d.status.autocreate ? '1' : '0';
+
     var unread = Number(d.status.counts && d.status.counts.unreviewed) || 0;
     var badge = $('#cirBadge');
     badge.textContent = unread;
     badge.classList.toggle('hide', !unread);
 
-    $('#cirTbl').innerHTML = r.length ? (
-      '<thead><tr><th>Published</th><th>Company</th><th>Circular</th><th>Dept</th>' +
+    pagedTable('circulars', $('#cirTbl'), r, function (page) {
+      return '<thead><tr><th>Published</th><th>Company</th><th>Circular</th><th>Dept</th>' +
       '<th>Match</th><th>Status</th><th></th></tr></thead><tbody>' +
-      r.map(function (c) {
+      page.map(function (c) {
         var conf = c.is_ofs ? 3 : 0;
         return '<tr><td class="m">' + dt(c.published_at) + '</td>' +
           '<td><b>' + esc(c.company || '—') + '</b></td>' +
@@ -932,11 +1022,8 @@ async function loadCirculars() {
                 '<button class="mini" data-cirskip="' + c.id + '">Ignore</button>'
               : '<button class="mini" data-cirreopen="' + c.id + '">Reopen</button>') +
           '</td></tr>';
-      }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="empty">' +
-        (st === 'new' ? 'Nothing waiting — no unreviewed OFS circular.'
-                      : 'No circular recorded yet. Press “Check NSE now”.') +
-        '</td></tr></tbody>';
+      }).join('') + '</tbody>';
+    }, 'circulars', loadCirculars, '(st === \'new\' ? \'Nothing waiting — no unreviewed OFS circular.\' : \'No circular recorded yet. Press “Check NSE now”.\') + \'');
   } catch (e) { toast('Circulars failed', e.message, 'bad'); }
 }
 
@@ -960,6 +1047,62 @@ function renderCirSteps(steps, title, pct) {
       '<span class="out ' + outClass(st.outcome) + '">' + esc(st.outcome || '') + '</span></div>';
   }).join('');
   var log = $('#cirLog'); log.scrollTop = log.scrollHeight;
+}
+
+/** Save the interval or the auto-create switch straight from the Circulars bar. */
+async function saveCircularSetting(key, value, what) {
+  try {
+    await api('/settings', { method: 'PUT', body: { key: key, value: String(value) } });
+    toast('Saved', what, 'ok');
+    loadCirculars();
+  } catch (e) { toast('Could not save', (e.body && e.body.message) || e.message, 'bad'); }
+}
+
+/**
+ * Every check, and the totals across them.
+ *
+ * The state row only ever holds the LAST result, so without this "has NSE been
+ * refusing us all week or did it fail once at 3am?" is unanswerable — and those two
+ * need very different responses.
+ */
+async function loadCircularRuns() {
+  try {
+    var d = await api('/circulars/runs?limit=200');
+    var r = d.runs || [];
+    var sm = d.summary || {};
+
+    $('#cirRunSummary').innerHTML = Number(sm.checks)
+      ? '<div class="bar" style="margin:0 0 10px">' +
+          '<span class="tag">' + (sm.checks || 0) + ' check(s)</span>' +
+          '<span class="tag ' + (Number(sm.failed) ? 'hni' : 'ret') + '">' +
+            (sm.failed || 0) + ' failed</span>' +
+          '<span class="tag">' + (sm.unchanged || 0) + ' unchanged (304)</span>' +
+          '<span class="tag">' + (sm.circulars_found || 0) + ' circular(s) found</span>' +
+          '<span class="tag">' + (sm.issues_created || 0) + ' issue(s) created</span>' +
+          (sm.avg_ms ? '<span class="tag">' + sm.avg_ms + ' ms average</span>' : '') +
+          (sm.first_at ? '<span class="tag">since ' + dt(sm.first_at) + '</span>' : '') +
+        '</div>'
+      : '';
+
+    pagedTable('cirruns', $('#cirRunTbl'), r, function (page) {
+      return '<thead><tr><th>When</th><th>By</th><th>Result</th><th class="n">HTTP</th>' +
+        '<th class="n">Took</th><th class="n">In feed</th><th class="n">Matched</th>' +
+        '<th class="n">New</th><th class="n">Issues</th><th>Note</th></tr></thead><tbody>' +
+        page.map(function (x) {
+          var cls = x.status === 'ok' ? 'open' : x.status === 'unchanged' ? 'grey' : 'closed';
+          return '<tr><td class="m">' + dt(x.started_at) + '</td>' +
+            '<td>' + esc(x.trigger === 'schedule' ? 'schedule' : (x.actor || 'desk')) + '</td>' +
+            '<td><span class="chip ' + cls + '">' + esc(x.status) + '</span></td>' +
+            '<td class="n">' + (x.http_status || '—') + '</td>' +
+            '<td class="n">' + (x.duration_ms == null ? '—' : x.duration_ms + ' ms') + '</td>' +
+            '<td class="n">' + (x.items || 0) + '</td>' +
+            '<td class="n">' + (x.matched || 0) + '</td>' +
+            '<td class="n">' + (x.inserted || 0) + '</td>' +
+            '<td class="n">' + (x.issues_made || 0) + '</td>' +
+            '<td class="sm">' + esc(x.error || '') + '</td></tr>';
+        }).join('') + '</tbody>';
+    }, 'checks', loadCircularRuns, 'No check has run yet.');
+  } catch (e) { toast('Check history failed', e.message, 'bad'); }
 }
 
 async function pollCirculars() {
@@ -993,6 +1136,7 @@ async function pollCirculars() {
     }
 
     renderCirSteps(r.steps, r.error ? 'Check failed' : 'Check complete', 100);
+    loadCircularRuns();
     toast(r.inserted ? r.inserted + ' new OFS circular(s)' : r.error ? 'Check failed' : 'Nothing new',
       r.notModified ? 'NSE reports the feed unchanged since the last check.'
         : r.error ? r.error
@@ -1041,7 +1185,7 @@ async function circularToIssue(id, company, link, title) {
  * this, when, and from where" without a DBA — including whether a bid came from the
  * client, their AP or the back office, which is on the bid row, not the actor.
  */
-var AUDIT = { offset: 0, limit: 100, total: 0, rows: [] };
+var AUDIT = { offset: 0, limit: PAGE_SIZE, total: 0, rows: [] };
 
 function auditQuery(offset) {
   var q = [];
@@ -1079,6 +1223,8 @@ function auditDiff(e) {
 
 function renderAudit() {
   var r = AUDIT.rows;
+  // Server-side paging here, not the client helper: the audit trail is the one list
+  // that grows without limit, so the browser must never hold all of it.
   $('#auditTbl').innerHTML = r.length ? (
     '<thead><tr><th>When</th><th>Who</th><th>Source</th><th>Action</th><th>On</th>' +
     '<th>What changed</th><th>IP</th></tr></thead><tbody>' +
@@ -1134,17 +1280,17 @@ async function loadMargins() {
   try {
     var d = await api('/margin');
     var r = d.margins || [];
-    $('#marginTbl').innerHTML = r.length ? (
-      '<thead><tr><th>UCC</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
+    pagedTable('margins', $('#marginTbl'), r, function (page) {
+      return '<thead><tr><th>UCC</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
       '<th>Source</th><th>Updated</th><th>By</th><th></th></tr></thead><tbody>' +
-      r.map(function (m) {
+      page.map(function (m) {
         return '<tr><td class="m">' + esc(m.client_ucc) + '</td>' +
           '<td class="n">' + inr(m.available, 0) + '</td><td class="n">' + inr(m.used, 0) + '</td>' +
           '<td class="n">' + inr(m.free, 0) + '</td><td>' + esc(m.source) + '</td>' +
           '<td class="m">' + dt(m.updated_at) + '</td><td>' + esc(m.updated_by || '') + '</td>' +
           '<td><button class="mini" data-mglog="' + esc(m.client_ucc) + '">History</button></td></tr>';
-      }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="empty">No margin snapshot loaded. RMS has no available-margin read API yet — set margins here or via CSV.</td></tr></tbody>';
+      }).join('') + '</tbody>';
+    }, 'clients', loadMargins, 'No margin snapshot loaded. RMS has no available-margin read API yet — set margins here or via CSV.');
   } catch (e) { toast('Margins failed', e.message, 'bad'); }
 }
 
@@ -1418,13 +1564,13 @@ async function loadArchive() {
     var q = $('#arQ').value.trim();
     var d = await api('/issues/archive' + (q ? '?q=' + encodeURIComponent(q) : ''));
     var a = d.archived || [];
-    $('#archiveTbl').innerHTML = a.length ? (
-      '<thead><tr><th>Scrip</th><th>ISIN</th><th>Exch</th><th>Trading day</th>' +
+    pagedTable('archive', $('#archiveTbl'), a, function (page) {
+      return '<thead><tr><th>Scrip</th><th>ISIN</th><th>Exch</th><th>Trading day</th>' +
       '<th class="n">Floor</th><th class="n">Bids</th><th class="n">Clients</th>' +
       '<th class="n">Qty</th><th class="n">Value</th><th class="n">Allotted</th>' +
       '<th class="n">Files</th><th>Archived</th><th></th></tr></thead><tbody>' +
-      a.map(archiveRow).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="empty">Nothing archived yet.</td></tr></tbody>';
+      page.map(archiveRow).join('') + '</tbody>';
+    }, 'issues', loadArchive, 'Nothing archived yet.');
   } catch (e) { toast('Archive failed', e.message, 'bad'); }
 }
 
@@ -1802,6 +1948,7 @@ async function boot() {
   $('#syRun').addEventListener('click', function () { startSync(); });
   $('#scSave').addEventListener('click', saveSchedule);
   $('#auGo').addEventListener('click', function () { loadAudit(0); });
+  initPagers();
   $('#cirPoll').addEventListener('click', pollCirculars);
 
   // Document controls appear inside markup that is rebuilt constantly (the row
@@ -1822,7 +1969,15 @@ async function boot() {
     var del = e.target.closest('[data-docdel]');
     if (del) docRemove(del.dataset.docissue, del.dataset.docdel);
   });
-  $('#cirStatus').addEventListener('change', loadCirculars);
+  $('#cirStatus').addEventListener('change', function () { resetPage('circulars'); loadCirculars(); });
+  $('#cirEvery').addEventListener('change', function () {
+    saveCircularSetting('circulars_poll_minutes', this.value, 'Checking every ' + this.value + ' minutes.');
+  });
+  $('#cirAuto').addEventListener('change', function () {
+    saveCircularSetting('circulars_autocreate', this.value,
+      this.value === '1' ? 'A provisional issue will be created for each new circular.'
+                         : 'Circulars will be queued for review only.');
+  });
   $('#cirTbl').addEventListener('click', function (e) {
     var n = e.target.closest('[data-cirnew]');
     if (n) {
