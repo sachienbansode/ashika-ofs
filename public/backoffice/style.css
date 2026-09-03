@@ -450,3 +450,10 @@ label.inline{display:inline-flex;align-items:center;gap:7px;font-size:12px;color
   white-space:nowrap}
 label.inline select{min-width:92px}
 @media (max-width:640px){ label.inline{flex:1 1 100%} label.inline select{flex:1} }
+
+/* A control the signed-in role may see but not use. Disabled, not hidden: a
+   read-only user should be able to see the function exists and ask for the grant. */
+[data-edit]:disabled,
+button[data-edit]:disabled,
+.no-grant{opacity:.45;cursor:not-allowed;filter:grayscale(.4)}
+button.no-grant:hover{transform:none}

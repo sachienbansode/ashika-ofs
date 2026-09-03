@@ -5,6 +5,30 @@ var $  = function (s, r) { return (r || document).querySelector(s); };
 var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
 var TOKEN = null;                      // set by the host shell; falls back to the cookie session
+var ME = null;                         // /api/me — the signed-in account and its page grants
+
+/**
+ * Page grants, read exactly the way middleware/pageAccess.js reads them, so the
+ * screen and the server never disagree about what this account may do. A permission
+ * entry is '*', a bare page key (= view), or 'key:view|edit|pii'.
+ *
+ * This is a courtesy, not a control: the server checks every write regardless. What
+ * it buys is that a read-only user is not shown a button that can only fail.
+ */
+var GRANT_LEVELS = { view: 1, edit: 2, pii: 3 };
+function grantLevel(page) {
+  var pages = (ME && ME.permissions && ME.permissions.pages) || [];
+  var best = 0;
+  for (var i = 0; i < pages.length; i++) {
+    var e = String(pages[i]);
+    if (e === '*') return GRANT_LEVELS.pii;
+    var bits = e.split(':');
+    if (bits[0] !== page) continue;
+    best = Math.max(best, GRANT_LEVELS[String(bits[1] || 'view').toLowerCase()] || GRANT_LEVELS.view);
+  }
+  return best;
+}
+function canEdit(page) { return grantLevel(page) >= GRANT_LEVELS.edit; }
 var STATE = { dash: null, issues: [], book: [], editing: null, timer: null, tab: 'dash', mtab: 'issues' };
 
 /* ---------------- helpers ---------------- */
@@ -132,6 +156,10 @@ function pagedTable(key, tbl, rows, build, noun, redraw, emptyMsg) {
   if (existing) existing.remove();
   var html = pagerHtml(key, p, noun);
   if (html) host.insertAdjacentHTML('afterend', html);
+
+  // Rows are rebuilt on every page change, so any write control inside them has to
+  // be re-checked against the account's grants — otherwise page 2 arrives enabled.
+  applyGrants();
 }
 
 /** A filter changed — go back to page one, or the user stares at an empty page 4. */
@@ -151,8 +179,59 @@ async function api(path, opts) {
   var text = await res.text();
   var json = null;
   try { json = text ? JSON.parse(text) : null; } catch (e) { json = { raw: text }; }
-  if (!res.ok) { var err = new Error((json && json.error) || res.statusText); err.status = res.status; err.body = json; throw err; }
+  if (!res.ok) {
+    var err = new Error((json && json.error) || res.statusText);
+    err.status = res.status; err.body = json || {};
+    // A 403 used to surface as the literal string "read_only", which tells a user
+    // nothing about what to do next. Name the missing grant instead.
+    if (err.body.error === 'read_only') {
+      err.body.message = 'Your role can view ' + pageLabel(err.body.page) +
+        ' but not change it. An administrator grants "' + (err.body.page || 'this page') +
+        ':edit" to your role in the Admin console.';
+    } else if (err.body.error === 'forbidden') {
+      err.body.message = 'Your role does not include ' + pageLabel(err.body.page) + '.';
+    } else if (err.body.error === 'pii_forbidden') {
+      err.body.message = 'Your role cannot see unmasked client details on ' + pageLabel(err.body.page) + '.';
+    }
+    throw err;
+  }
   return json;
+}
+
+function pageLabel(key) {
+  if (key === 'ofs-masters') return 'Masters & Margins';
+  if (key === 'ofs-desk') return 'the Bidding Desk';
+  return key || 'this page';
+}
+
+/**
+ * Disable every control marked data-edit="<page>" when the account has view only.
+ * Disabled rather than hidden: a read-only user should still be able to see that the
+ * function exists and ask for the grant, rather than wonder where it went.
+ */
+function applyGrants() {
+  if (!ME) return;          // grants unknown yet — never disable on a guess
+  var blocked = {};
+  $$('[data-edit]').forEach(function (el) {
+    var page = el.getAttribute('data-edit');
+    if (canEdit(page)) return;
+    blocked[page] = true;
+    el.disabled = true;
+    el.classList.add('no-grant');
+    el.title = 'Read-only: your role cannot change ' + pageLabel(page) + '.';
+  });
+  var box = $('#mastersReadOnly');
+  if (box) {
+    if (blocked['ofs-masters']) {
+      box.innerHTML = '<b>Read-only.</b> Your role (' + esc((ME && ME.user && ME.user.role) || '—') +
+        ') can view Masters &amp; Margins but not change them, so issues, margins, ' +
+        'exchange pulls and settings are disabled. An administrator grants ' +
+        '<code>ofs-masters:edit</code> to the role in the Admin console.';
+      box.classList.remove('hide');
+    } else {
+      box.classList.add('hide');
+    }
+  }
 }
 
 /* ---------------- tabs ---------------- */
@@ -1366,15 +1445,15 @@ async function loadSettings() {
       rows.map(function (r) {
         var input;
         if (r.choices && r.choices.length > 1) {
-          input = '<select data-set="' + esc(r.key) + '">' + r.choices.map(function (c) {
+          input = '<select data-edit="ofs-masters" data-set="' + esc(r.key) + '">' + r.choices.map(function (c) {
             return '<option' + (String(r.value) === c ? ' selected' : '') + '>' + esc(c) + '</option>';
           }).join('') + '</select>';
         } else if (r.kind === 'bool') {
-          input = '<select data-set="' + esc(r.key) + '">' +
+          input = '<select data-edit="ofs-masters" data-set="' + esc(r.key) + '">' +
             '<option value="1"' + (String(r.value) === '1' ? ' selected' : '') + '>Yes</option>' +
             '<option value="0"' + (String(r.value) === '0' ? ' selected' : '') + '>No</option></select>';
         } else {
-          input = '<input type="' + (r.kind === 'number' ? 'number' : 'text') + '" ' +
+          input = '<input type="' + (r.kind === 'number' ? 'number' : 'text') + '" data-edit="ofs-masters" ' +
             'data-set="' + esc(r.key) + '" value="' + esc(r.value == null ? '' : r.value) + '"' +
             (r.kind === 'time' ? ' placeholder="15:15"' : '') + ' style="width:100%">';
         }
@@ -1382,11 +1461,12 @@ async function loadSettings() {
           '<td><b>' + esc(r.label) + '</b><br><span class="m" style="font-size:11px;color:var(--muted)">' +
             esc(r.key) + '</span></td>' +
           '<td>' + input + '</td>' +
-          '<td><button class="mini" data-save="' + esc(r.key) + '">Save</button></td>' +
+          '<td><button class="mini" data-edit="ofs-masters" data-save="' + esc(r.key) + '">Save</button></td>' +
           '<td style="white-space:normal;font-size:11.5px;color:var(--muted);max-width:380px">' +
             esc(r.hint) + '</td>' +
         '</tr>';
       }).join('') + '</tbody>';
+    applyGrants();   // the rows were just built, so re-run the sweep over them
   } catch (e) {
     $('#setTbl').innerHTML = '<tbody><tr><td class="empty">' + esc(e.message) + '</td></tr></tbody>';
   }
@@ -1566,7 +1646,7 @@ function archiveRow(i) {
     '<td class="n">' + inr(i.files_generated, 0) + '</td>' +
     '<td class="m">' + (i.archived_at ? dt(i.archived_at) : '—') + '</td>' +
     '<td><button class="mini" data-detail="' + i.id + '">Open</button> ' +
-        '<button class="mini" data-unarch="' + i.id + '">Restore</button></td></tr>';
+        '<button class="mini" data-edit="ofs-masters" data-unarch="' + i.id + '">Restore</button></td></tr>';
 }
 
 async function loadArchive() {
@@ -1893,6 +1973,7 @@ function showGate(title, message, why) {
 async function checkSession() {
   try {
     var me = await api('/me');
+    ME = me;
     $('#whoName').textContent = me.user.email || ('user #' + me.user.id);
     $('#whoRole').textContent = me.user.role || '';
     $('#btnSignOut').classList.remove('hide');
@@ -1930,6 +2011,7 @@ async function signOut() {
 
 async function boot() {
   var ready = await checkSession();
+  if (ready) applyGrants();
 
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
   $$('[data-mtab]').forEach(function (b) { b.addEventListener('click', function () { showMTab(b.dataset.mtab); }); });

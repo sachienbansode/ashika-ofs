@@ -40,12 +40,17 @@ ON CONFLICT (name) DO UPDATE
       updated_at  = NOW();
 
 -- The built-in Admin role gets the desk too (read/write, PII still masked).
-UPDATE "admin-staging-api".roles
-   SET permissions = jsonb_set(permissions, '{pages}',
-         COALESCE(permissions->'pages','[]'::jsonb) || '["ofs-desk","ofs-masters"]'::jsonb, true),
+-- NOTE the ':edit'. A bare 'ofs-masters' is VIEW ONLY, and every save then fails
+-- with {"error":"read_only"} — this block used to grant the bare form.
+UPDATE "admin-staging-api".roles r
+   SET permissions = jsonb_set(
+         COALESCE(r.permissions, '{}'::jsonb), '{pages}',
+         COALESCE((SELECT jsonb_agg(e)
+                     FROM jsonb_array_elements_text(r.permissions->'pages') AS t(e)
+                    WHERE split_part(e, ':', 1) NOT IN ('ofs-desk','ofs-masters')), '[]'::jsonb)
+         || '["ofs-desk:edit","ofs-masters:edit"]'::jsonb, true),
        updated_at = NOW()
- WHERE name = 'Admin'
-   AND NOT (permissions->'pages' @> '["ofs-desk"]');
+ WHERE r.name = 'Admin';
 
 -- ----------------------------------------------------------------- 3. the user
 -- password_hash is bcrypt, cost 12 — the same format the portal writes. Generate
