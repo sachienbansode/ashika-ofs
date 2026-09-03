@@ -68,9 +68,15 @@ test('anything incomplete is rejected with a reason, never half-built', () => {
   assert.match(eofs.toIssue({ configurations: [] }, S).rejected, /no symbol/);
   assert.match(eofs.toIssue({ symbol: 'X' }, S).rejected, /no series configuration/);
 
+  // NOT a rejection: NSE's e-OFS FAQ v3.0 Q12 says the floor price "is not declared
+  // to the market", so an OFS without one is normal. It is stored as null, and null
+  // is not zero — a floor of zero would read as "any price clears".
   const noPrice = Object.assign({}, SEC, {
-    configurations: [Object.assign({}, SEC.configurations[0], { basePrice: 0 })] });
-  assert.match(eofs.toIssue(noPrice, S).rejected, /no basePrice/);
+    configurations: SEC.configurations.map(function (c) { return Object.assign({}, c, { basePrice: 0 }); }) });
+  const undisclosed = eofs.toIssue(noPrice, S);
+  assert.ok(undisclosed.issue, 'an undisclosed floor is not a malformed issue');
+  assert.equal(undisclosed.issue.floor_price, null);
+  assert.equal(undisclosed.issue.cut_price_min, null);
 
   const badWindow = Object.assign({}, SEC, {
     configurations: [Object.assign({}, SEC.configurations[0], { mktCloseTime: '09:00:00' })] });

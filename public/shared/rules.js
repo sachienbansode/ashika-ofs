@@ -22,10 +22,13 @@ window.OFS_RULES = {
       p: 'Non-Retail — institutional and HNI — bid on T day. Retail bid on T+1. Each has its own '
        + 'window on its own day, and a category is closed outside it.',
       src: 'SEBI CIR/MRD/DP/32/2014' },
-    { h: 'Floor price',
-      p: 'The seller announces a floor price by 5pm on T-1. No bid below it is accepted, in either '
-       + 'category.',
-      src: 'SEBI framework · BSE 20150122-30 §1.4' },
+    { h: 'Floor price — and it may not be published',
+      p: 'The floor is the lowest price the seller will accept. Disclosing it is the seller\'s '
+       + 'choice: it is given to the designated exchange after trading closes on T-1, and only '
+       + 'published if the seller chooses to. When it is not published, bids are placed without it '
+       + 'and the exchange applies the floor when it matches — so a bid below the floor is rejected '
+       + 'at the exchange rather than on this screen.',
+      src: 'NSE e-OFS FAQ v3.0 Q12 · BSE 20150122-30 §1.4' },
     { h: 'Cut-off price',
       p: 'Retail investors may bid at cut-off instead of naming a price. The cut-off is derived from '
        + 'the Non-Retail bids received on T day, so it is not known when a retail bid is placed.',
@@ -52,6 +55,15 @@ window.OFS_RULES = {
        + 'Ashika applies its own cut-off, which is earlier than the market close and is shown on '
        + 'the bidding screen.',
       src: 'BSE 20150122-30 §4.1.1' },
+    { h: 'The offer can be withdrawn',
+      p: 'The seller may withdraw the offer at any time before it opens. Once it has opened it '
+       + 'runs to its close.',
+      src: 'NSE e-OFS FAQ v3.0 Q14' },
+    { h: 'How shares are allotted',
+      p: 'The designated exchange allots on the basis the seller declared in advance — either '
+       + 'price-time priority or proportionate. Which one applies is part of the offer '
+       + 'announcement, a day before the OFS.',
+      src: 'NSE e-OFS FAQ v3.0 Q6, Q13' },
     { h: 'If the market halts',
       p: 'A market-wide circuit breaker halts the offer for sale as well.',
       src: 'BSE 20150122-30 §4.1.2' }

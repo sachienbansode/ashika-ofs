@@ -175,3 +175,54 @@ test('a Suspended issue refuses every bid, in both categories', () => {
   const checked = Object.assign({}, provisional, { status: 'Auto', floor_price: 412, cut_price_min: 412 });
   assert.equal(d.catStatus(checked, 'Retail', now), 'Open');
 });
+
+/* -------------------------------------------------------------------------
+ * An OFS whose floor price the seller has not published.
+ *
+ * NSE e-OFS FAQ v3.0 Q12: the floor "is not declared to the market & is informed
+ * to the designated exchange one day prior". Our schema made floor_price NOT NULL
+ * and CHECK (> 0), so this case could not even be stored — and minPrice() did
+ * Number(undefined) || 0, which turned "unknown" into a floor of zero.
+ * ----------------------------------------------------------------------- */
+const NO_FLOOR = {
+  symbol: 'XYZ', lot: 1, tick: 0.05,
+  floor_price: null, cut_price_min: null, cutoff_flag: true,
+  hni_open: new Date('2026-09-01T03:45:00Z'), hni_close: new Date('2026-09-01T10:00:00Z'),
+  ret_open: new Date('2026-09-01T03:45:00Z'), ret_close: new Date('2026-09-01T10:00:00Z')
+};
+const OPEN_SETTINGS = { market_open: '09:15', market_close: '15:30', daily_cutoff: '15:15',
+  market_days: '1-5', trading_holidays: '', enforce_margin: '0', retail_cap: '200000', hni_min: '200000' };
+const NOW = new Date('2026-09-01T05:00:00Z');
+
+test('an undisclosed floor is null, never zero', () => {
+  assert.equal(d.minPrice(NO_FLOOR, 'Retail'), null);
+  assert.equal(d.minPrice(NO_FLOOR, 'HNI'), null);
+  assert.equal(d.floorDisclosed(NO_FLOOR), false);
+  assert.equal(d.floorDisclosed({ floor_price: 412 }), true);
+  // The old bug: a missing floor became 0, so "below floor" could never trigger.
+  assert.notEqual(d.minPrice(NO_FLOOR, 'HNI'), 0);
+});
+
+test('a price bid is accepted with no floor — the exchange applies it at matching', () => {
+  const errs = d.validateBid(NO_FLOOR, { category: 'Retail', qty: 10, price: 5, is_cutoff: false },
+    { settings: OPEN_SETTINGS, now: NOW, availableMargin: 1e7 });
+  assert.deepEqual(errs, [], errs.join(' | '));
+});
+
+test('a cut-off bid is refused when there is no floor to value it against', () => {
+  // The ₹2 lakh cap is a SEBI limit. Skipping it silently because the value is
+  // unknown would be worse than refusing the bid.
+  const errs = d.validateBid(NO_FLOOR, { category: 'Retail', qty: 10, price: null, is_cutoff: true },
+    { settings: OPEN_SETTINGS, now: NOW, availableMargin: 1e7 });
+  assert.ok(errs.some((m) => /has not been published/.test(m)), errs.join(' | '));
+  assert.equal(d.bidValue(NO_FLOOR, 'Retail', 10, null, true), null);
+});
+
+test('with a floor published, everything behaves as before', () => {
+  const withFloor = Object.assign({}, NO_FLOOR, { floor_price: 400, cut_price_min: 400 });
+  assert.equal(d.minPrice(withFloor, 'HNI'), 400);
+  assert.equal(d.bidValue(withFloor, 'Retail', 10, null, true), 4000);
+  const below = d.validateBid(withFloor, { category: 'Retail', qty: 10, price: 5, is_cutoff: false },
+    { settings: OPEN_SETTINGS, now: NOW, availableMargin: 1e7 });
+  assert.ok(below.some((m) => /Cannot bid below 400/.test(m)), below.join(' | '));
+});

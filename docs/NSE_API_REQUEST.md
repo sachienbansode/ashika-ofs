@@ -65,15 +65,20 @@ Ask in the same breath:
 **2. UAT and mock**
 
 - Credentials for **`https://www.eofsuat.com/api/`**.
-- The **mock session calendar** for OFS, and whether a mock OFS is scheduled we can
-  test against end to end.
+- NSE's FAQ (v3.0, Q7) says mock sessions run *"only when a new functionality is
+  released"* — so rather than asking for a calendar: **can a test OFS be made
+  available on UAT** for us to run end to end, and will we be told when the next mock
+  is scheduled?
 
 **3. Documents**
 
 - **Circular NSE/CMTR/72975 (24 Feb 2026)** — the current revised OFS operating
   guidelines.
 - Confirmation that **"Offer for Sale System WEB API Protocol v1.3.0 (Feb 2024)"** is
-  the current version, or the later one if it is not.
+  the current version, or the later one if it is not. *(NSE's FAQ points to
+  `www1.nseindia.com/technology/content/trading_protocols.htm` → Protocol documents
+  for WEB based interfaces → eOFS as the canonical location — worth checking there
+  before asking.)*
 - The **bulk-upload CSV specification** for `POST /order/batch`: the exact **column
   order**, and whether a **header row** is expected. *(The protocol gives the field
   set and the allowed values, but not the file's column order. We need this whether
@@ -134,3 +139,40 @@ The NSE **circulars RSS feed** is public and licensed, and the module already po
 it — every OFS gets a circular, and a new one now creates a provisional issue with
 the circular attached. That covers *knowing an OFS exists*. What it cannot do is give
 structured floor prices and windows, which is exactly what `activeSecurities` is for.
+
+
+---
+
+## Confirmed by NSE's own FAQ (v3.0, March 2026)
+
+Ashika supplied "FAQs on e-OFS" v3.0. It settles several points, and none of them
+require asking:
+
+* **The enablement path is exactly as above** — request e-OFS access on ENIT, receive
+  Admin credentials by email, verify with an OTP, then the Admin creates branches and
+  users. API users are enabled at **Membership → Enablement → eOFS** (Q5, Q9, Q10).
+* **NNF APIs are discontinued; only the Web API remains** (Q8). Anything built on the
+  old non-NEAT front end is dead.
+* **NSE/CMTR/72975 (24 Feb 2026)** is confirmed as the current OFS circular (Q15) —
+  it remains the one document we still need.
+* **Only trading members reach the OFS module**; investors bid through their member
+  (Q3). Our model is correct.
+* Contact is **msm@nse.co.in / 1800 266 0050 option 1** (Q16).
+
+### And one thing it changed in the build
+
+**Q12: the floor price is not necessarily published.**
+
+> "Floor price is the minimum price at which seller wants to sell his shares.
+> However, this information is not declared to the market & is informed to the
+> designated exchange one day prior to the day of OFS after the closure of the
+> trading hours."
+
+Our schema had `floor_price NOT NULL CHECK (> 0)`, so an OFS without a published
+floor could not be stored at all — the desk would have had to invent a number, and
+every price check downstream would then have been enforcing a fiction. Fixed in
+migration 014; see the commit for what changed in the bidding rules.
+
+**Still not answered anywhere in the FAQ**, so it stays at the top of the request:
+whether API access must originate from the member's trading network, and what
+IP whitelisting or certificates are required.

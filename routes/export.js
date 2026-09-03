@@ -38,12 +38,37 @@ async function collect(q) {
  */
 const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
 
-function assertExportable(bids) {
+function assertExportable(bids, exchange) {
   const bad = [];
   for (const b of bids) {
     const i = b.issue || {};
     if (!ISIN_RE.test(String(i.isin || '').toUpperCase())) {
       if (bad.indexOf(i.symbol) < 0) bad.push(i.symbol);
+    }
+  }
+
+  /* BSE writes the FLOOR PRICE into a cut-off (RIC) row — "Please mention floor
+     price when category is RIC" (Notice 20150122-30, Annexure 1). If the seller has
+     not published a floor, that cell cannot be filled and the row would be rejected
+     at the exchange. Refuse the file and say which bids, rather than upload
+     something that comes back as an error report.
+     NSE is unaffected: a cut-off there is a market order with a blank price. */
+  if (String(exchange).toUpperCase() === 'BSE') {
+    const noFloor = [];
+    for (const b of bids) {
+      const i = b.issue || {};
+      if (b.is_cutoff && (i.floor_price == null || !(Number(i.floor_price) > 0))) {
+        if (noFloor.indexOf(i.symbol) < 0) noFloor.push(i.symbol);
+      }
+    }
+    if (noFloor.length) {
+      const e = new Error('BSE requires the floor price on a cut-off (RIC) bid, and it is not '
+        + 'published for: ' + noFloor.join(', ') + '. Enter the floor price under Masters → Issues '
+        + 'once the exchange announces it, or export the price bids only.');
+      e.status = 422;
+      e.code = 'floor_unknown';
+      e.symbols = noFloor;
+      throw e;
     }
   }
   if (bad.length) {
@@ -60,7 +85,7 @@ async function buildFile(exchange, q) {
   const s = await settings.all();
   const adapter = adapterFor(exchange);
   const bids = await collect(q);
-  assertExportable(bids);
+  assertExportable(bids, exchange);
   let symbol = null;
   if (q.issue_id && q.issue_id !== 'all') {
     const i = await one(`SELECT symbol FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [q.issue_id]);
