@@ -354,15 +354,146 @@ function issueCard(i) {
         inr(mine.qty, 0) + ' shares at ' + (mine.is_cutoff ? 'cut-off' : rupee(mine.price)) +
         ' · ' + rupee(mine.value, 0) + ' (' + esc(mine.status) + ')</div>'
       : '') +
+    bidBox(i, mine, retOpen, hniOpen) +
     '<div class="cdn" data-close="' + close.toISOString() + '">—</div>' +
   '</div>';
 }
+
+/* -------------------------------------------------------------- bidding UI --
+ * The form only appears while a category is actually open. Every number typed
+ * here is checked again on the server against the same rules the desk runs, so
+ * this is for telling the client early — not for deciding anything.
+ */
+function bidBox(i, mine, retOpen, hniOpen) {
+  if (!retOpen && !hniOpen) {
+    return '<div class="note" style="margin-top:11px">Bidding is closed for this offer.</div>';
+  }
+  var id = i.id;
+  var cats = [];
+  if (retOpen) cats.push('Retail');
+  if (hniOpen) cats.push('HNI');
+  var sel = mine && cats.indexOf(mine.category) >= 0 ? mine.category : cats[0];
+
+  return '<div class="bidbox" data-bid-issue="' + id + '">' +
+    (mine
+      ? '<div class="bb-head">Change your bid <span class="bb-sub">allowed until the cut-off</span></div>'
+      : '<div class="bb-head">Place a bid</div>') +
+    '<div class="bb-row">' +
+      (cats.length > 1
+        ? '<label class="bb-f"><span>Category</span><select data-bf="cat">' +
+          cats.map(function (c) {
+            return '<option value="' + c + '"' + (c === sel ? ' selected' : '') + '>' + c + '</option>';
+          }).join('') + '</select></label>'
+        : '<label class="bb-f"><span>Category</span><input type="text" value="' + esc(sel) +
+          '" data-bf="cat" readonly></label>') +
+      '<label class="bb-f"><span>Quantity</span>' +
+        '<input type="number" min="' + (Number(i.lot) || 1) + '" step="' + (Number(i.lot) || 1) +
+        '" data-bf="qty" value="' + (mine ? Number(mine.qty) : '') + '" placeholder="Shares"></label>' +
+      '<label class="bb-f"><span>Bid type</span><select data-bf="type">' +
+        '<option value="cutoff"' + (mine && mine.is_cutoff ? ' selected' : '') + '>Cut-off price</option>' +
+        '<option value="limit"' + (mine && !mine.is_cutoff ? ' selected' : '') + '>My own price</option>' +
+      '</select></label>' +
+      '<label class="bb-f"><span>Price</span>' +
+        '<input type="number" step="' + (Number(i.tick) || 0.05) + '" data-bf="price" ' +
+        (mine && !mine.is_cutoff ? 'value="' + Number(mine.price) + '" ' : '') +
+        (mine && !mine.is_cutoff ? '' : 'disabled ') + 'placeholder="At or above floor"></label>' +
+    '</div>' +
+    '<div class="bb-verdict" data-bf="verdict"></div>' +
+    '<div class="bb-actions">' +
+      '<button class="btn btn-o btn-sm" data-bf="check">Check</button>' +
+      '<button class="btn btn-p btn-sm" data-bf="submit">' + (mine ? 'Update bid' : 'Place bid') + '</button>' +
+      (mine ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
+    '</div>' +
+  '</div>';
+}
+
+/** Read one card's form. `mine` decides place vs modify. */
+function readBidBox(box) {
+  var g = function (k) { return box.querySelector('[data-bf="' + k + '"]'); };
+  var cutoff = g('type').value === 'cutoff';
+  return {
+    issue_id: box.getAttribute('data-bid-issue'),
+    category: g('cat').value,
+    qty: Number(g('qty').value) || 0,
+    is_cutoff: cutoff,
+    price: cutoff ? null : Number(g('price').value) || 0
+  };
+}
+
+function showVerdict(box, kind, lines) {
+  var v = box.querySelector('[data-bf="verdict"]');
+  v.className = 'bb-verdict ' + (kind || '');
+  v.innerHTML = (lines || []).map(function (l) { return '<div>' + esc(l) + '</div>'; }).join('');
+}
+
+async function checkBid(box, quiet) {
+  var body = readBidBox(box);
+  var editing = BIDS_BY_ISSUE[body.issue_id];
+  if (editing) body.editingId = editing.id;
+  try {
+    var r = await api('/client/api/bids/validate', { method: 'POST', body: body });
+    if (r.ok) {
+      showVerdict(box, 'ok', [
+        'Order value ' + rupee(r.value, 0) + '.',
+        'Free margin ' + rupee(r.free_margin, 0) + '.'
+      ]);
+    } else {
+      showVerdict(box, 'bad', r.errors);
+    }
+    return r.ok;
+  } catch (e) {
+    if (e.status === 401) { sessionLost(); return false; }
+    if (!quiet) showVerdict(box, 'bad', [e.message]);
+    return false;
+  }
+}
+
+async function submitBid(box) {
+  var body = readBidBox(box);
+  var editing = BIDS_BY_ISSUE[body.issue_id];
+  var btn = box.querySelector('[data-bf="submit"]');
+  btn.disabled = true;
+  try {
+    if (editing) {
+      await api('/client/api/bids/' + editing.id, { method: 'PUT', body: body });
+      toast('Bid updated', 'Your bid has been changed.', 'ok');
+    } else {
+      await api('/client/api/bids', { method: 'POST', body: body });
+      toast('Bid placed', 'Your bid is with the desk.', 'ok');
+    }
+    await loadIssues();
+  } catch (e) {
+    if (e.status === 401) return sessionLost();
+    var errs = (e.body && e.body.errors) || [e.message];
+    showVerdict(box, 'bad', errs);
+    toast(editing ? 'Bid not updated' : 'Bid not placed', errs[0], 'bad');
+  } finally { btn.disabled = false; }
+}
+
+async function withdrawBid(box) {
+  var issueId = box.getAttribute('data-bid-issue');
+  var editing = BIDS_BY_ISSUE[issueId];
+  if (!editing) return;
+  if (!window.confirm('Withdraw bid ' + editing.ref + '? This cannot be undone.')) return;
+  try {
+    await api('/client/api/bids/' + editing.id, { method: 'DELETE' });
+    toast('Bid withdrawn', editing.ref + ' has been cancelled.', 'ok');
+    await loadIssues();
+  } catch (e) {
+    if (e.status === 401) return sessionLost();
+    showVerdict(box, 'bad', [e.message]);
+  }
+}
+
+var BIDS_BY_ISSUE = {};
 
 async function loadIssues(quiet) {
   try {
     var d = await api('/client/api/issues');
     if (d.settings && d.settings.daily_cutoff) $('#cutTime').textContent = d.settings.daily_cutoff;
     var list = d.issues || [];
+    BIDS_BY_ISSUE = {};
+    list.forEach(function (i) { if (i.my_bid) BIDS_BY_ISSUE[String(i.id)] = i.my_bid; });
     $('#clientIssues').innerHTML = list.length
       ? list.map(issueCard).join('')
       : '<div class="tbl-empty">There is no open Offer for Sale right now. ' +
@@ -468,6 +599,27 @@ async function boot() {
   $('#signOutBtn').addEventListener('click', signOut);
   $$('#cTabs button').forEach(function (b) {
     b.addEventListener('click', function () { showCTab(b.dataset.ctab); });
+  });
+
+  // Bid forms are rebuilt on every refresh of the issue list, so delegate from the
+  // container rather than re-binding after each render.
+  $('#clientIssues').addEventListener('click', function (e) {
+    var box = e.target.closest('.bidbox');
+    if (!box) return;
+    if (e.target.closest('[data-bf="check"]'))  { e.preventDefault(); checkBid(box); return; }
+    if (e.target.closest('[data-bf="submit"]')) { e.preventDefault(); submitBid(box); return; }
+    if (e.target.closest('[data-bf="cancel"]')) { e.preventDefault(); withdrawBid(box); }
+  });
+  $('#clientIssues').addEventListener('change', function (e) {
+    var box = e.target.closest('.bidbox');
+    if (!box) return;
+    // A cut-off bid has no price of its own; leaving the field live would invite a
+    // number that is then silently discarded.
+    if (e.target.matches('[data-bf="type"]')) {
+      var price = box.querySelector('[data-bf="price"]');
+      price.disabled = e.target.value === 'cutoff';
+      if (price.disabled) price.value = '';
+    }
   });
 
   setInterval(tickClocks, 1000);

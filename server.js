@@ -95,7 +95,11 @@ app.use('/client/auth', apiLimiter, require('./routes/clientAuth'));   // client
 
 /* ---- the client's own view: gated by requireClient inside the router, NOT by
    requirePage. A client is not a platform user and holds no page grants. ---- */
-app.use('/client/api', apiLimiter, require('./routes/clientPortal'));
+app.use('/client/api', apiLimiter,
+  // Clients now write here (place / modify / withdraw), so the same write throttle
+  // the desk gets applies — a bidding window is exactly when someone would hammer it.
+  (req, res, next) => (req.method === 'GET' ? next() : writeLimiter(req, res, next)),
+  require('./routes/clientPortal'));
 
 /* ---- API: authenticated, and every mount gated with requirePage ---- */
 const api = express.Router();

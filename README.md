@@ -62,6 +62,8 @@ server-side). Exchange files: preview, then download the NSE or BSE file and upl
 |---|---|---|
 | GET | `/api/dashboard` | ofs-desk |
 | GET/POST/PUT/DELETE | `/api/issues` | ofs-masters (read: +ofs-desk) |
+| GET | `/client/api/issues`, `/me/bids`, `/me/allotments` | client session |
+| POST/PUT/DELETE | `/client/api/bids`, `/bids/validate`, `/bids/:id` | client session, own UCC only |
 | GET/POST/PUT/DELETE | `/api/bids`, `POST /api/bids/validate` | ofs-desk |
 | GET | `/api/clients`, `/api/clients/:ucc` | ofs-desk (PII masked) |
 | GET/PUT/POST | `/api/margin`, `/api/margin/bulk` | ofs-masters |

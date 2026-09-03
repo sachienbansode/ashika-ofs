@@ -5,8 +5,8 @@ const { SCHEMA, rows, one } = require('../db/ofsAdapter');
 const ld = require('../db/ldAdapter');
 const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAccess');
 const { maskRows } = require('../lib/pii');
-const settings = require('../lib/settings');
-const { validateBid, bidValue, minPrice, makeRef, marketState, closedMessage } = require('../lib/domain');
+const { validateBid, bidValue, minPrice } = require('../lib/domain');
+const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
 
 const router = express.Router();
@@ -49,69 +49,20 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-async function loadContext(issueId, ucc, editingId) {
-  const s = await settings.all();
-  const el = await ld.eligibility(ucc);
-  const issue = await one(`SELECT * FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [issueId]);
-  const margin = await one(`SELECT available FROM ${SCHEMA}.ofs_margin WHERE client_ucc = $1`, [ucc]);
-  const used = await one(
-    `SELECT COALESCE(sum(value),0) AS v FROM ${SCHEMA}.ofs_bid
-      WHERE client_ucc = $1 AND status = 'Live' ${editingId ? 'AND id <> $2' : ''}`,
-    editingId ? [ucc, editingId] : [ucc]);
-  const usedIssue = await one(
-    `SELECT COALESCE(sum(value),0) AS v FROM ${SCHEMA}.ofs_bid
-      WHERE client_ucc = $1 AND issue_id = $2 AND status = 'Live' ${editingId ? 'AND id <> $3' : ''}`,
-    editingId ? [ucc, issueId, editingId] : [ucc, issueId]);
-  const live = await one(
-    `SELECT id FROM ${SCHEMA}.ofs_bid WHERE client_ucc = $1 AND issue_id = $2 AND status = 'Live'
-      ${editingId ? 'AND id <> $3' : ''}`,
-    editingId ? [ucc, issueId, editingId] : [ucc, issueId]);
-  return {
-    settings: s, issue,
-    client: { found: el.found, active: el.active, status: el.client && el.client.client_status },
-    availableMargin: Number(margin && margin.available) || 0,
-    marginUsed: Number(used && used.v) || 0,
-    usedValueThisIssue: Number(usedIssue && usedIssue.v) || 0,
-    hasLiveBid: !!live
-  };
-}
-
-function normalise(body) {
-  return {
-    issue_id: body.issue_id,
-    client_ucc: String(body.client_ucc || '').trim().toUpperCase(),
-    category: body.category,
-    qty: Number(body.qty) || 0,
-    is_cutoff: !!body.is_cutoff,
-    price: body.is_cutoff ? null : Number(body.price) || 0,
-    cp_code: body.cp_code || null,
-    custody_code: body.custody_code || null,
-    exch_order_no: body.exch_order_no || null
-  };
-}
-
 /** POST /api/bids - place on behalf of a client. */
 router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
-    const b = normalise(req.body || {});
+    const b = bids.normalise(req.body || {});
     if (!b.issue_id || !b.client_ucc) return res.status(400).json({ error: 'missing_field' });
 
-    const ctx = await loadContext(b.issue_id, b.client_ucc, null);
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, null);
     if (!ctx.client.found) return res.status(404).json({ error: 'unknown_client', ucc: b.client_ucc });
     if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });
 
     const errs = validateBid(ctx.issue, b, ctx);
     if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
 
-    const value = bidValue(ctx.issue, b.category, b.qty, b.price, b.is_cutoff);
-    const r = await one(
-      `INSERT INTO ${SCHEMA}.ofs_bid
-         (ref, issue_id, client_ucc, cp_code, custody_code, category, placed_by, placed_by_id,
-          qty, price, is_cutoff, value, status, exch_order_no)
-       VALUES ($1,$2,$3,$4,$5,$6,'desk',$7,$8,$9,$10,$11,'Live',$12)
-       RETURNING *`,
-      [makeRef('OFS'), b.issue_id, b.client_ucc, b.cp_code, b.custody_code, b.category,
-       String(req.user.email || req.user.id), b.qty, b.price, b.is_cutoff, value, b.exch_order_no]);
+    const r = await bids.insertBid(b, ctx, 'desk', req.user.email || req.user.id);
 
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
     res.status(201).json({ bid: r });
@@ -128,28 +79,12 @@ router.put('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) 
     if (!before) return res.status(404).json({ error: 'not_found' });
     if (before.status === 'Cancelled') return res.status(409).json({ error: 'already_cancelled' });
 
-    const b = {
-      issue_id: before.issue_id,
-      client_ucc: before.client_ucc,
-      category: req.body.category || before.category,
-      qty: Number(req.body.qty != null ? req.body.qty : before.qty) || 0,
-      is_cutoff: req.body.is_cutoff != null ? !!req.body.is_cutoff : before.is_cutoff,
-      price: null,
-      editingId: before.id
-    };
-    b.price = b.is_cutoff ? null : Number(req.body.price != null ? req.body.price : before.price) || 0;
-
-    const ctx = await loadContext(b.issue_id, b.client_ucc, before.id);
+    const b = bids.mergeForModify(before, req.body || {});
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, before.id);
     const errs = validateBid(ctx.issue, b, ctx);
     if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
 
-    const value = bidValue(ctx.issue, b.category, b.qty, b.price, b.is_cutoff);
-    const r = await one(
-      `UPDATE ${SCHEMA}.ofs_bid
-          SET qty = $1, price = $2, is_cutoff = $3, value = $4, category = $5,
-              status = 'Live', exch_order_no = COALESCE($6, exch_order_no)
-        WHERE id = $7 RETURNING *`,
-      [b.qty, b.price, b.is_cutoff, value, b.category, req.body.exch_order_no || null, before.id]);
+    const r = await bids.updateBid(before, b, ctx, req.body.exch_order_no);
 
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
     res.json({ bid: r });
@@ -163,17 +98,14 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
     if (!before) return res.status(404).json({ error: 'not_found' });
     if (before.status === 'Cancelled') return res.status(409).json({ error: 'already_cancelled' });
 
-    // A cancellation is a bid change like any other: allowed until the cut-off, not
-    // after it. Modify was already gated through validateBid; this was not, so a bid
-    // could be withdrawn after the desk had generated and uploaded the file.
-    const mkt = marketState(await settings.all(), new Date());
-    if (!mkt.open && String(req.body && req.body.force) !== 'true') {
-      return res.status(422).json({ error: 'window_closed', message: closedMessage(mkt) });
+    // Modify was already gated through validateBid; cancel was not, so a bid could
+    // be withdrawn after the desk had generated and uploaded the file.
+    const blocked = await bids.cancelBlockedMessage();
+    if (blocked && String(req.body && req.body.force) !== 'true') {
+      return res.status(422).json({ error: 'window_closed', message: blocked });
     }
 
-    const r = await one(
-      `UPDATE ${SCHEMA}.ofs_bid SET status = 'Cancelled', reject_reason = $2 WHERE id = $1 RETURNING *`,
-      [before.id, req.body && req.body.reason ? String(req.body.reason).slice(0, 300) : null]);
+    const r = await bids.cancelBid(before, req.body && req.body.reason);
     await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
     res.json({ bid: r });
   } catch (e) { next(e); }
@@ -182,8 +114,8 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
 /** POST /api/bids/validate - dry-run for the UI, no write. */
 router.post('/validate', requirePage(PAGE), async (req, res, next) => {
   try {
-    const b = normalise(req.body || {});
-    const ctx = await loadContext(b.issue_id, b.client_ucc, req.body.editingId || null);
+    const b = bids.normalise(req.body || {});
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, req.body.editingId || null);
     if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });
     if (req.body.editingId) b.editingId = req.body.editingId;
     const errs = validateBid(ctx.issue, b, ctx);

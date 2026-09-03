@@ -6,8 +6,10 @@
 const express = require('express');
 const { SCHEMA, rows, one } = require('../db/ofsAdapter');
 const { requireClient } = require('../middleware/clientAuth');
-const { issueStatus, catStatus, minPrice } = require('../lib/domain');
+const { issueStatus, catStatus, minPrice, validateBid } = require('../lib/domain');
 const settings = require('../lib/settings');
+const bids = require('../lib/bidService');
+const audit = require('../lib/audit');
 const ld = require('../db/ldAdapter');
 
 const router = express.Router();
@@ -94,6 +96,127 @@ router.get('/me/allotments', async (req, res, next) => {
         WHERE a.client_ucc = $1
         ORDER BY a.allotted_at DESC LIMIT 50`, [req.client.ucc]);
     res.json({ allotments: a });
+  } catch (e) { next(e); }
+});
+
+/* ----------------------------------------------------------------- bidding --
+ * A client places, modifies and cancels their OWN bid. Three things make this
+ * safe to expose, and all three are enforced here rather than trusted:
+ *
+ *   the UCC is taken from the session, never from the body — a client cannot bid
+ *   on another account by editing a request;
+ *   every rule runs through lib/bidService, the same code the desk uses, so the
+ *   margin gate, the SEBI retail cap, the floor and the cut-off cannot differ by
+ *   which screen the bid came from;
+ *   ownership is re-checked on the row itself before a modify or a cancel.
+ *
+ * placed_by records which of the two it was — the client themselves, or their AP
+ * acting for them — because the bid book, the audit trail and the exchange file
+ * all need to tell those apart.
+ */
+function placedBy(req) {
+  return req.client.actorType === 'ap' ? 'ap' : 'client';
+}
+function placedById(req) {
+  return req.client.actorType === 'ap' ? req.client.apId : req.client.ucc;
+}
+
+/** The body a client may send. Their UCC is not in it — the session decides that. */
+function clientBid(req) {
+  return bids.normalise(Object.assign({}, req.body, {
+    client_ucc: req.client.ucc,
+    cp_code: null, custody_code: null, exch_order_no: null   // desk-only fields
+  }));
+}
+
+/** POST /client/api/bids/validate — dry run, so the screen can show the verdict. */
+router.post('/bids/validate', async (req, res, next) => {
+  try {
+    const b = clientBid(req);
+    if (!b.issue_id) return res.status(400).json({ error: 'missing_field', field: 'issue_id' });
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, req.body.editingId || null);
+    if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });
+    if (req.body.editingId) b.editingId = req.body.editingId;
+    const errs = validateBid(ctx.issue, b, ctx);
+    res.json({
+      ok: errs.length === 0,
+      errors: errs,
+      value: bids.bidValue(ctx.issue, b.category, b.qty, b.price, b.is_cutoff),
+      min_price: minPrice(ctx.issue, b.category),
+      available_margin: ctx.availableMargin,
+      free_margin: ctx.availableMargin - ctx.marginUsed
+    });
+  } catch (e) { next(e); }
+});
+
+/** POST /client/api/bids — place. */
+router.post('/bids', async (req, res, next) => {
+  try {
+    const b = clientBid(req);
+    if (!b.issue_id) return res.status(400).json({ error: 'missing_field', field: 'issue_id' });
+
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, null);
+    if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });
+    // A client may only bid on an issue they can see: the same filter as /issues.
+    if (ctx.issue.archived_at || ctx.issue.status !== 'Auto' || ctx.issue.needs_review) {
+      return res.status(409).json({ error: 'issue_not_open',
+        message: 'This offer is not open for bidding.' });
+    }
+
+    const errs = validateBid(ctx.issue, b, ctx);
+    if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
+
+    const r = await bids.insertBid(b, ctx, placedBy(req), placedById(req));
+    await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
+    res.status(201).json({ bid: r });
+  } catch (e) {
+    if (e && e.code === '23505') {
+      return res.status(409).json({ error: 'duplicate_live_bid',
+        message: 'You already have a live bid on this offer. Modify it instead of placing another.' });
+    }
+    next(e);
+  }
+});
+
+/** The client's own bid, or 404 — never another account's, and never "403". */
+async function ownBid(req) {
+  return one(`SELECT * FROM ${SCHEMA}.ofs_bid WHERE id = $1 AND client_ucc = $2`,
+    [req.params.id, req.client.ucc]);
+}
+
+/** PUT /client/api/bids/:id — modify, allowed until the cut-off. */
+router.put('/bids/:id(\\d+)', async (req, res, next) => {
+  try {
+    const before = await ownBid(req);
+    if (!before) return res.status(404).json({ error: 'not_found' });
+    if (before.status === 'Cancelled') return res.status(409).json({ error: 'already_cancelled' });
+
+    const b = bids.mergeForModify(before, req.body || {});
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, before.id);
+    const errs = validateBid(ctx.issue, b, ctx);
+    if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
+
+    const r = await bids.updateBid(before, b, ctx, null);
+    await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
+    res.json({ bid: r });
+  } catch (e) { next(e); }
+});
+
+/** DELETE /client/api/bids/:id — cancel. Never a hard delete: the row is the record. */
+router.delete('/bids/:id(\\d+)', async (req, res, next) => {
+  try {
+    const before = await ownBid(req);
+    if (!before) return res.status(404).json({ error: 'not_found' });
+    if (before.status === 'Cancelled') return res.status(409).json({ error: 'already_cancelled' });
+
+    // No force flag here. The desk may cancel after the cut-off with a reason on
+    // record; a client may not.
+    const blocked = await bids.cancelBlockedMessage();
+    if (blocked) return res.status(422).json({ error: 'window_closed', message: blocked });
+
+    const r = await bids.cancelBid(before, req.body && req.body.reason);
+    await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
+    res.json({ bid: r });
   } catch (e) { next(e); }
 });
 
