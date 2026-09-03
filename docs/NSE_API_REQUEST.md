@@ -26,26 +26,44 @@ entirely. Worth asking for in the same request even if bidding stays manual at f
 
 ---
 
-## The one question that changes the architecture
+## Where our server sits, and what NSE has to whitelist
 
-**Ask this first, because the answer decides where the software runs.**
+**Ashika's position, as stated by Ashika:** the server that will call the e-OFS API
+is inside NSE's trading network. That has to be confirmed by whoever owns the
+connectivity before this request goes out, because the module today runs on an Azure
+VM with the public IP **20.244.33.142**, reached over the public internet on
+`ofs-bids.ashikagroup.com`. Those are two different network positions and only one of
+them can be true of the machine that makes the call:
 
-> Does e-OFS Web API access have to originate from the member's trading network
-> (leased line / co-location), or is access from the public internet over HTTPS
-> acceptable for an API user?
+| If the calling host is… | Then | Work implied |
+|---|---|---|
+| On the trading network (leased line / co-lo) | NSE whitelists that host's **trading-network** IP; the Azure VM is not that host | A small relay inside Ashika's network, called by the Azure app |
+| The Azure VM itself | NSE must accept a **public-internet** source, and whitelist `20.244.33.142` | Nothing — `lib/issueSource/eofs.js` calls NSE directly |
 
-The OFS module runs on a cloud server. If NSE requires the request to come from the
-trading network, the module cannot call the API directly and we would need a small
-connector inside Ashika's own network to relay it. That is a different piece of work,
-and it is far cheaper to know now than after enablement.
+Confirming which one it is costs one email inside Ashika and decides whether a relay
+gets built. Ask NSE either way:
 
-Ask in the same breath:
+> Which source IP addresses do you whitelist for an e-OFS Web API user, and what is
+> the process and lead time to add or change one?
 
-- Which **source IP addresses** must be whitelisted, and what is the process and lead
-  time to add or change one?
+> Is API access from the public internet over HTTPS acceptable for an API user, or
+> must the request originate from the member's trading network (leased line /
+> co-location)?
+
+> If we already reach e-OFS from our trading network, does the API user inherit that
+> entitlement, or is API access whitelisted separately from the web front end?
+
+And in the same breath:
+
 - Is a **client certificate (mTLS)** required, or is the Bearer token from
   `POST /auth/token` sufficient? *(The public protocol document does not mention
   certificates; absence from a public PDF is not proof of absence in practice.)*
+- Does the whitelist accept a **cloud provider IP**, and does a **static outbound
+  IP** satisfy it, or must it be a member-network address?
+
+Nothing in the build depends on the answer. `lib/issueSource/eofs.js` reads its base
+URL from `OFS_EOFS_BASE`, so pointing it at a relay inside Ashika's network is a
+one-line environment change, not a rewrite.
 
 ---
 
@@ -174,5 +192,7 @@ every price check downstream would then have been enforcing a fiction. Fixed in
 migration 014; see the commit for what changed in the bidding rules.
 
 **Still not answered anywhere in the FAQ**, so it stays at the top of the request:
-whether API access must originate from the member's trading network, and what
-IP whitelisting or certificates are required.
+what source IP NSE whitelists for an API user, the process and lead time to change
+it, and whether a client certificate is required. Ashika's own answer to the matching
+internal question — which machine actually makes the call — is what decides whether a
+relay is needed; see the table above.

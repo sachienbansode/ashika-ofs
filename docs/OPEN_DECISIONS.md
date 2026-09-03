@@ -60,7 +60,7 @@ under Markets → Offer for Sale.
 | E | **AP → client mapping** | User indicated `stg.branchho`; the logic itself is still to be shared. | The whole AP journey | Ashika (logic promised) |
 | F | **Client authorisation model** | Consent/POA for bidding on a client's behalf, whether OTP is required per bid as well as at sign-in, and whether the client must see the live indicative price before confirming. | Desk bidding on behalf; per-bid OTP | Ashika compliance |
 | G | **BSE scrip code master** | `ofs_issue.bse_scrip_code` has no feed; it is typed in per issue today. | BSE file completeness | Ashika's desk |
-| H | **Exchange IP whitelisting** | Only matters when we talk to an exchange directly, i.e. Phase 3. | STP | Ashika IT |
+| H | **Which host calls NSE, and what gets whitelisted** | Ashika states the server is inside NSE's trading network; the module today runs on the Azure VM `20.244.33.142` over the public internet. Both cannot be true of the calling host. If it is the trading network, a relay inside Ashika's network is needed and `OFS_EOFS_BASE` points at it. Whitelisting process and lead time are unknown either way. | Automated OFS fetch via e-OFS (Phase 1), and all of Phase 3 STP | Ashika IT, then msm@nse.co.in — see `docs/NSE_API_REQUEST.md` |
 
 ## Why the blocked ones cannot be closed from here
 
