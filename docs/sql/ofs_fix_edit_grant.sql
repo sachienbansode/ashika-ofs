@@ -4,10 +4,15 @@
 -- RUN ON: uat_ananta_staging  (the platform's users/roles live here, not ofs_bids)
 -- RUN AS: a role that can write to the "admin-staging-api" schema.
 --
--- Cause: pages are granted at a level — view < edit < pii. A bare 'ofs-masters'
--- entry means VIEW ONLY, so every POST/PUT is refused with {"error":"read_only"}.
--- Only 'ofs-masters:edit' (or '*') may write. The Admin role in the original
--- setup script was granted the bare form, which is exactly this symptom.
+-- Cause: pages used to be graded view < edit < pii, and a bare 'ofs-masters' entry
+-- meant VIEW ONLY — so every POST/PUT came back {"error":"read_only"}. The Admin
+-- role in the original setup script was granted exactly that bare form.
+--
+-- The rule has since changed to match how Ashika runs the desk: whoever has OFS
+-- access has FULL OFS access, so any OFS entry at any level now writes, and sees
+-- unmasked client PII. On an app carrying that change this script is no longer
+-- needed — it is kept because it also normalises the stored grants, and because a
+-- database is often older than the code pointed at it.
 -- ============================================================================
 
 -- ------------------------------------------------------- 1. WHO AM I SIGNED IN AS

@@ -184,8 +184,10 @@ HTTPS is confirmed, uncomment the HSTS line in the config and reload.
 The app self-registers `ofs-desk` and `ofs-masters` into the platform's
 `page_registry` on first boot. A staff user still needs the grant on their role in
 the Admin console before the dashboard loads — until then the UI shows
-"ofs-desk grant required". Full access is `'*'` only; add `ofs-desk:pii` for the
-handful of users allowed to unmask client PII.
+"ofs-desk grant required".
+
+The grant is all-or-nothing: `ofs-desk` on its own gives that role the whole OFS
+module, unmasked client PII included. Give it only to people who should have that.
 
 ## 7a. Single sign-on
 

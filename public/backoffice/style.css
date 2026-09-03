@@ -453,7 +453,7 @@ label.inline select{min-width:92px}
 
 /* A control the signed-in role may see but not use. Disabled, not hidden: a
    read-only user should be able to see the function exists and ask for the grant. */
-[data-edit]:disabled,
-button[data-edit]:disabled,
+[data-grant]:disabled,
+button[data-grant]:disabled,
 .no-grant{opacity:.45;cursor:not-allowed;filter:grayscale(.4)}
 button.no-grant:hover{transform:none}

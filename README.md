@@ -215,12 +215,23 @@ are in [`docs/platform-patch/`](docs/platform-patch/). Until it is deployed and
 
 ### Roles
 
-| Role | Reaches the desk | PII unmasked |
+**OFS is granted whole.** Whoever has access to OFS has full access to OFS: any
+grant on `ofs-desk` or `ofs-masters`, at any level, confers the desk, masters,
+margins, settings, exchange files *and* unmasked client PII. There is no read-only
+OFS user. So the control is **who holds the grant at all**, not what level it
+carries — grant it only to people who should see client PAN and mobile.
+
+| Role | Reaches OFS | What they get |
 |---|---|---|
-| `SuperAdmin` (`{"pages":["*"]}`) | yes, nothing to grant | yes |
-| `Admin` | yes, `ofs-desk` granted on first app start | no |
-| `OFS-Backoffice` | yes | yes (`ofs-desk:pii`) |
-| anything else | only if granted `ofs-desk` | only with `:pii` |
+| `SuperAdmin` (`{"pages":["*"]}`) | yes, nothing to grant | everything |
+| `Admin` | yes, granted on first app start | full OFS |
+| `OFS-Backoffice` | yes | full OFS |
+| anything else | only if granted `ofs-desk` or `ofs-masters` | full OFS, once granted |
+
+The `:view` / `:edit` / `:pii` levels still exist and still govern every non-OFS
+page; they are simply not consulted for OFS. `middleware/pageAccess.js` holds the
+rule (`MODULE_PAGES`) and `tests/pageAccess.test.js` pins it, so narrowing it later
+is one constant and a test file, not a hunt.
 
 Create the role and its first user with
 [`docs/sql/ofs_backoffice_role.sql`](docs/sql/ofs_backoffice_role.sql), run in

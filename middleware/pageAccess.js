@@ -9,6 +9,21 @@
  */
 const LEVELS = { view: 1, edit: 2, pii: 3 };
 
+/**
+ * The OFS module is granted whole, not page by page.
+ *
+ * Ashika's rule: whoever has access to OFS has FULL access to OFS. So any grant on
+ * any OFS page — at any level, including a bare key — confers edit and PII on every
+ * OFS page. There is no read-only OFS user and no half-open OFS user; the levels
+ * below still apply to every non-OFS page, where the platform sets them.
+ *
+ * Worth being explicit about what this includes: PII. An account with `ofs-desk`
+ * sees unmasked PAN and mobile in the bid book. The control is therefore who holds
+ * the OFS grant at all, not what level it carries — the Admin console is where that
+ * decision is made, and `docs/sql/ofs_backoffice_role.sql` is where it is applied.
+ */
+const MODULE_PAGES = ['ofs-desk', 'ofs-masters'];
+
 function entries(req) {
   const p = (req.user && req.user.permissions && req.user.permissions.pages) || [];
   return Array.isArray(p) ? p.map(String) : [];
@@ -18,8 +33,15 @@ function isFullAccess(req) {
   return entries(req).some((e) => e === '*');
 }
 
+/** Does this account hold any OFS grant at all? */
+function hasModuleAccess(req) {
+  return entries(req).some((e) => MODULE_PAGES.indexOf(e.split(':')[0]) >= 0);
+}
+
 function levelFor(req, key) {
   if (isFullAccess(req)) return LEVELS.pii;
+  // Whoever is in the module is all the way in. See MODULE_PAGES above.
+  if (MODULE_PAGES.indexOf(key) >= 0 && hasModuleAccess(req)) return LEVELS.pii;
   let best = 0;
   for (const e of entries(req)) {
     const [k, lv] = e.split(':');
@@ -59,4 +81,7 @@ function requirePII(key) {
   };
 }
 
-module.exports = { LEVELS, requirePage, requireEdit, isFullAccess, levelFor, canViewPII, requirePII };
+module.exports = {
+  LEVELS, MODULE_PAGES, requirePage, requireEdit, isFullAccess, hasModuleAccess,
+  levelFor, canViewPII, requirePII
+};

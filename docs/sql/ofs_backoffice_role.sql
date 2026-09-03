@@ -11,6 +11,8 @@
 --
 -- SuperAdmin needs nothing from this file: its permissions are {"pages":["*"]},
 -- and '*' is full access everywhere, including the OFS desk and PII unmasking.
+--
+-- Ashika's rule, applied throughout: whoever has OFS access has FULL OFS access.
 -- ============================================================================
 
 -- ---------------------------------------------------------------- 1. the pages
@@ -24,9 +26,13 @@ ON CONFLICT (key) DO UPDATE
       sort_order = EXCLUDED.sort_order, is_active = true;
 
 -- ----------------------------------------------------------------- 2. the role
--- Levels: view < edit < pii. 'ofs-desk:pii' is what lets a user see an unmasked
--- PAN/mobile in the bid book; drop it to ':edit' for a role that should not.
--- requires_mfa = true forces a one-time code at sign-in, portal and desk alike.
+-- OFS is granted whole: a role that holds ANY OFS page — 'ofs-desk' on its own is
+-- enough — has full access to the whole module, editing and unmasked PAN/mobile
+-- included. There is no read-only OFS role. The control is WHO gets the grant, not
+-- what level it carries, so grant it only to people who should see client PII.
+-- (middleware/pageAccess.js, MODULE_PAGES; tests/pageAccess.test.js pins it.)
+-- The levels below are written out anyway, so the intent survives if that rule is
+-- ever narrowed. requires_mfa = true forces a one-time code at sign-in.
 INSERT INTO "admin-staging-api".roles (name, description, is_system, requires_mfa, use_m365, permissions)
 VALUES (
   'OFS-Backoffice',
@@ -39,9 +45,8 @@ ON CONFLICT (name) DO UPDATE
       description = EXCLUDED.description,
       updated_at  = NOW();
 
--- The built-in Admin role gets the desk too (read/write, PII still masked).
--- NOTE the ':edit'. A bare 'ofs-masters' is VIEW ONLY, and every save then fails
--- with {"error":"read_only"} — this block used to grant the bare form.
+-- The built-in Admin role gets the desk too. Same rule: this is full OFS access,
+-- PII included. Do not add it to a role that should not see client PII.
 UPDATE "admin-staging-api".roles r
    SET permissions = jsonb_set(
          COALESCE(r.permissions, '{}'::jsonb), '{pages}',

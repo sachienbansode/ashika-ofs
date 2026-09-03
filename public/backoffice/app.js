@@ -9,20 +9,29 @@ var ME = null;                         // /api/me — the signed-in account and 
 
 /**
  * Page grants, read exactly the way middleware/pageAccess.js reads them, so the
- * screen and the server never disagree about what this account may do. A permission
- * entry is '*', a bare page key (= view), or 'key:view|edit|pii'.
+ * screen and the server never disagree about what this account may do.
  *
- * This is a courtesy, not a control: the server checks every write regardless. What
- * it buys is that a read-only user is not shown a button that can only fail.
+ * The OFS module is granted whole: any grant on any OFS page, at any level, confers
+ * full access to all of OFS. So in practice this returns full for anyone who reached
+ * this screen at all — the sweep below only ever fires for an account that holds no
+ * OFS grant, which is already stopped at the gate. It stays because the server-side
+ * rule can change without this file, and a disabled button beats a 403 either way.
+ *
+ * This is a courtesy, not a control: the server checks every write regardless.
  */
 var GRANT_LEVELS = { view: 1, edit: 2, pii: 3 };
+var MODULE_PAGES = ['ofs-desk', 'ofs-masters'];
+function grantPages() { return (ME && ME.permissions && ME.permissions.pages) || []; }
+function hasModuleAccess() {
+  return grantPages().some(function (e) { return MODULE_PAGES.indexOf(String(e).split(':')[0]) >= 0; });
+}
 function grantLevel(page) {
-  var pages = (ME && ME.permissions && ME.permissions.pages) || [];
+  var pages = grantPages();
+  if (pages.indexOf('*') >= 0) return GRANT_LEVELS.pii;
+  if (MODULE_PAGES.indexOf(page) >= 0 && hasModuleAccess()) return GRANT_LEVELS.pii;
   var best = 0;
   for (var i = 0; i < pages.length; i++) {
-    var e = String(pages[i]);
-    if (e === '*') return GRANT_LEVELS.pii;
-    var bits = e.split(':');
+    var bits = String(pages[i]).split(':');
     if (bits[0] !== page) continue;
     best = Math.max(best, GRANT_LEVELS[String(bits[1] || 'view').toLowerCase()] || GRANT_LEVELS.view);
   }
@@ -183,15 +192,12 @@ async function api(path, opts) {
     var err = new Error((json && json.error) || res.statusText);
     err.status = res.status; err.body = json || {};
     // A 403 used to surface as the literal string "read_only", which tells a user
-    // nothing about what to do next. Name the missing grant instead.
-    if (err.body.error === 'read_only') {
-      err.body.message = 'Your role can view ' + pageLabel(err.body.page) +
-        ' but not change it. An administrator grants "' + (err.body.page || 'this page') +
-        ':edit" to your role in the Admin console.';
-    } else if (err.body.error === 'forbidden') {
-      err.body.message = 'Your role does not include ' + pageLabel(err.body.page) + '.';
-    } else if (err.body.error === 'pii_forbidden') {
-      err.body.message = 'Your role cannot see unmasked client details on ' + pageLabel(err.body.page) + '.';
+    // nothing about what to do next. OFS access is all or nothing, so all three of
+    // these mean the same thing: the role holds no OFS grant.
+    if (['read_only', 'forbidden', 'pii_forbidden'].indexOf(err.body.error) >= 0) {
+      err.body.message = 'Your role does not hold the OFS grant, so it cannot use ' +
+        pageLabel(err.body.page) + '. An administrator adds "' + (err.body.page || 'ofs-masters') +
+        '" to the role in the Admin console — that one grant is the whole module.';
     }
     throw err;
   }
@@ -205,15 +211,18 @@ function pageLabel(key) {
 }
 
 /**
- * Disable every control marked data-edit="<page>" when the account has view only.
+ * Disable every control marked data-grant="<page>" when the account cannot write it.
+ * The attribute is data-GRANT, not data-edit: data-edit already carries a bid id on
+ * the Modify button in the bid book, and a sweep over that would read the bid id as
+ * a page key and disable the button.
  * Disabled rather than hidden: a read-only user should still be able to see that the
  * function exists and ask for the grant, rather than wonder where it went.
  */
 function applyGrants() {
   if (!ME) return;          // grants unknown yet — never disable on a guess
   var blocked = {};
-  $$('[data-edit]').forEach(function (el) {
-    var page = el.getAttribute('data-edit');
+  $$('[data-grant]').forEach(function (el) {
+    var page = el.getAttribute('data-grant');
     if (canEdit(page)) return;
     blocked[page] = true;
     el.disabled = true;
@@ -224,9 +233,10 @@ function applyGrants() {
   if (box) {
     if (blocked['ofs-masters']) {
       box.innerHTML = '<b>Read-only.</b> Your role (' + esc((ME && ME.user && ME.user.role) || '—') +
-        ') can view Masters &amp; Margins but not change them, so issues, margins, ' +
-        'exchange pulls and settings are disabled. An administrator grants ' +
-        '<code>ofs-masters:edit</code> to the role in the Admin console.';
+        ') does not hold the OFS grant, so issues, margins, exchange pulls and ' +
+        'settings are disabled. An administrator adds <code>ofs-masters</code> to ' +
+        'the role in the Admin console — OFS access is all-or-nothing, so that one ' +
+        'grant is the whole module.';
       box.classList.remove('hide');
     } else {
       box.classList.add('hide');
@@ -1445,15 +1455,15 @@ async function loadSettings() {
       rows.map(function (r) {
         var input;
         if (r.choices && r.choices.length > 1) {
-          input = '<select data-edit="ofs-masters" data-set="' + esc(r.key) + '">' + r.choices.map(function (c) {
+          input = '<select data-grant="ofs-masters" data-set="' + esc(r.key) + '">' + r.choices.map(function (c) {
             return '<option' + (String(r.value) === c ? ' selected' : '') + '>' + esc(c) + '</option>';
           }).join('') + '</select>';
         } else if (r.kind === 'bool') {
-          input = '<select data-edit="ofs-masters" data-set="' + esc(r.key) + '">' +
+          input = '<select data-grant="ofs-masters" data-set="' + esc(r.key) + '">' +
             '<option value="1"' + (String(r.value) === '1' ? ' selected' : '') + '>Yes</option>' +
             '<option value="0"' + (String(r.value) === '0' ? ' selected' : '') + '>No</option></select>';
         } else {
-          input = '<input type="' + (r.kind === 'number' ? 'number' : 'text') + '" data-edit="ofs-masters" ' +
+          input = '<input type="' + (r.kind === 'number' ? 'number' : 'text') + '" data-grant="ofs-masters" ' +
             'data-set="' + esc(r.key) + '" value="' + esc(r.value == null ? '' : r.value) + '"' +
             (r.kind === 'time' ? ' placeholder="15:15"' : '') + ' style="width:100%">';
         }
@@ -1461,7 +1471,7 @@ async function loadSettings() {
           '<td><b>' + esc(r.label) + '</b><br><span class="m" style="font-size:11px;color:var(--muted)">' +
             esc(r.key) + '</span></td>' +
           '<td>' + input + '</td>' +
-          '<td><button class="mini" data-edit="ofs-masters" data-save="' + esc(r.key) + '">Save</button></td>' +
+          '<td><button class="mini" data-grant="ofs-masters" data-save="' + esc(r.key) + '">Save</button></td>' +
           '<td style="white-space:normal;font-size:11.5px;color:var(--muted);max-width:380px">' +
             esc(r.hint) + '</td>' +
         '</tr>';
@@ -1646,7 +1656,7 @@ function archiveRow(i) {
     '<td class="n">' + inr(i.files_generated, 0) + '</td>' +
     '<td class="m">' + (i.archived_at ? dt(i.archived_at) : '—') + '</td>' +
     '<td><button class="mini" data-detail="' + i.id + '">Open</button> ' +
-        '<button class="mini" data-edit="ofs-masters" data-unarch="' + i.id + '">Restore</button></td></tr>';
+        '<button class="mini" data-grant="ofs-masters" data-unarch="' + i.id + '">Restore</button></td></tr>';
 }
 
 async function loadArchive() {
