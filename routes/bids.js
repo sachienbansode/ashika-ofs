@@ -8,6 +8,7 @@ const { maskRows } = require('../lib/pii');
 const { validateBid, bidValue, minPrice } = require('../lib/domain');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
+const dbErr = require('../lib/dbErrors');
 
 const router = express.Router();
 const PAGE = 'ofs-desk';
@@ -66,10 +67,7 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
 
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
     res.status(201).json({ bid: r });
-  } catch (e) {
-    if (e && e.code === '23505') return res.status(409).json({ error: 'duplicate_live_bid' });
-    next(e);
-  }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 /** PUT /api/bids/:id - modify qty / price within the window. */
@@ -88,7 +86,7 @@ router.put('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) 
 
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
     res.json({ bid: r });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 /** DELETE /api/bids/:id - cancel (never a hard delete; the row is the audit trail). */

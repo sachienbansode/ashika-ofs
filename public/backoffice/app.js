@@ -204,6 +204,75 @@ async function api(path, opts) {
   return json;
 }
 
+/**
+ * What went wrong, in a sentence.
+ *
+ * The desk used to get the raw field name — a toast reading "Save failed / symbol"
+ * — which names a column, not a problem, and says nothing about what to do. Order
+ * matters here: the server's own `message` is always the most specific thing
+ * available, so it wins; the codes below are the fallback for anything that
+ * predates it.
+ */
+var FIELD_LABELS = {
+  symbol: 'Symbol', company: 'Company', isin: 'ISIN', series: 'Series', exchange: 'Exchange',
+  bse_scrip_code: 'BSE scrip code', floor_price: 'Floor price', cut_price_min: 'Retail cut-off min',
+  tick: 'Tick', lot: 'Lot', issue_qty: 'Issue qty', retail_qty: 'Retail reserved qty',
+  discount_pct: 'Retail discount %', cutoff_flag: 'Cut-off bidding',
+  hni_open: 'HNI open', hni_close: 'HNI close', ret_open: 'Retail open', ret_close: 'Retail close',
+  issue_date: 'Trading day', status: 'Status', client_ucc: 'Client UCC', qty: 'Quantity',
+  price: 'Price', category: 'Category'
+};
+function fieldLabel(f) { return FIELD_LABELS[f] || f; }
+
+function apiMessage(e) {
+  var b = (e && e.body) || {};
+  if (b.message) return b.message;
+  if (b.errors && b.errors.length) return b.errors.join(' ');
+
+  switch (b.error) {
+    case 'missing_field':
+      return (b.fields && b.fields.length ? 'These are required: ' + b.fields.map(fieldLabel).join(', ')
+                                          : fieldLabel(b.field) + ' is required') + '.';
+    case 'validation_failed': return 'Some values were refused — check the highlighted fields.';
+    case 'duplicate':         return 'A record with these details already exists.';
+    case 'not_found':         return 'That record no longer exists. Refresh and try again.';
+    case 'has_bids':          return 'This issue has ' + b.bids + ' bid(s), so it cannot be deleted. Archive it instead.';
+    case 'unknown_client':    return 'No client found for ' + (b.ucc || 'that UCC') + '.';
+    case 'unknown_issue':     return 'That issue no longer exists. Refresh the list.';
+    case 'window_closed':     return 'Bidding is closed.';
+    case 'server_error':      return 'The server hit an unexpected error. It has been logged — try again, and tell IT if it repeats.';
+  }
+  if (e && e.status === 401) return 'Your session has ended. Reload the page and sign in again.';
+  if (e && e.status === 429) return 'Too many requests in a row. Wait a few seconds and try again.';
+  if (e && /failed to fetch|networkerror|load failed/i.test(e.message || '')) {
+    return 'The server did not respond — it may have just restarted. Reload the page and try again.';
+  }
+  return (e && e.message) || 'Something went wrong.';
+}
+
+/**
+ * Ring the field(s) the server refused, so a long form does not have to be re-read
+ * top to bottom. Cleared on the next attempt.
+ */
+function markFields(fields) {
+  $$('.f .bad-field').forEach(function (el) { el.classList.remove('bad-field'); });
+  (fields || []).forEach(function (f) {
+    var el = document.getElementById(FIELD_INPUT_IDS[f] || '');
+    if (el) el.classList.add('bad-field');
+  });
+  var first = $('.bad-field');
+  if (first) { first.focus(); first.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+}
+
+/** Column name -> the input that carries it on the issue form. */
+var FIELD_INPUT_IDS = {
+  symbol: 'fSymbol', company: 'fCompany', isin: 'fIsin', exchange: 'fExch', series: 'fSeries',
+  bse_scrip_code: 'fBseCode', floor_price: 'fFloor', cut_price_min: 'fCut', tick: 'fTick', lot: 'fLot',
+  issue_qty: 'fIssueQty', retail_qty: 'fRetQty', discount_pct: 'fDiscount', cutoff_flag: 'fCutoffFlag',
+  hni_open: 'fHniOpen', hni_close: 'fHniClose', ret_open: 'fRetOpen', ret_close: 'fRetClose',
+  status: 'fStatus'
+};
+
 function pageLabel(key) {
   if (key === 'ofs-masters') return 'Masters & Margins';
   if (key === 'ofs-desk') return 'the Bidding Desk';
@@ -435,7 +504,7 @@ async function cancelBid(id) {
     await api('/bids/' + id, { method: 'DELETE', body: { reason: 'desk cancel' } });
     toast('Bid cancelled', 'The client may bid again for this scrip.', 'ok');
     loadBook(); loadDash();
-  } catch (e) { toast('Cancel failed', (e.body && e.body.error) || e.message, 'bad'); }
+  } catch (e) { toast('Cancel failed', apiMessage(e), 'bad'); }
 }
 
 /* ---------------- place bid ---------------- */
@@ -554,7 +623,7 @@ async function placeBid() {
     if (editing) { endModify(); showTab('book'); }
     loadDash();
   } catch (e) {
-    var msg = e.body && e.body.errors ? e.body.errors.join(' ') : (e.body && e.body.error) || e.message;
+    var msg = e.body && e.body.errors ? e.body.errors.join(' ') : apiMessage(e);
     toast(editing ? 'Modify rejected' : 'Bid rejected', msg, 'bad');
   }
 }
@@ -654,7 +723,7 @@ function exportError(e) {
   if (/failed to fetch|networkerror|load failed/i.test(e.message || '')) {
     return 'The server did not respond — it may have just restarted. Reload the page and try again.';
   }
-  return (e.body && e.body.message) || e.message || 'Something went wrong.';
+  return apiMessage(e) || 'Something went wrong.';
 }
 
 async function downloadExport(part) {
@@ -834,10 +903,11 @@ async function editIssue(id) {
     var d = await api('/issues/' + id);
     showMTab('issues');
     issueForm(d.issue);
-  } catch (e) { toast('Could not open', (e.body && e.body.message) || e.message, 'bad'); }
+  } catch (e) { toast('Could not open', apiMessage(e), 'bad'); }
 }
 
 async function saveIssue(editingId) {
+  markFields([]);                       // clear whatever the last attempt flagged
   var num = function (sel) { return $(sel).value === '' ? null : Number($(sel).value); };
   var body = {
     symbol: $('#fSymbol').value.trim().toUpperCase(),
@@ -891,7 +961,11 @@ async function saveIssue(editingId) {
     toast('Issue added', body.symbol + ' is now in the master.', 'ok');
     $('#miForm').classList.add('hide');
     loadIssues(); loadDash();
-  } catch (e) { toast('Save failed', (e.body && e.body.field) || (e.body && e.body.error) || e.message, 'bad'); }
+  } catch (e) {
+    var b = e.body || {};
+    markFields(b.fields || (b.field ? [b.field] : []));
+    toast(editingId ? 'Not saved' : 'Issue not added', apiMessage(e), 'bad');
+  }
 }
 
 /* ================================================================= exchange pull
@@ -1006,7 +1080,7 @@ async function startSync(exchanges) {
   } catch (e) {
     $('#syRun').disabled = false; $('#syRun').textContent = 'Pull now';
     $('#miSync').disabled = false;
-    toast('Could not start the pull', (e.body && e.body.message) || e.message, 'bad');
+    toast('Could not start the pull', apiMessage(e), 'bad');
   }
 }
 
@@ -1064,7 +1138,7 @@ async function saveSchedule() {
     toast('Schedule saved', $('#scEnabled').value === '1'
       ? 'Pulling every ' + $('#scEvery').value + ' minutes.' : 'Auto-pull is off.', 'ok');
     loadSyncStatus();
-  } catch (e) { toast('Could not save', (e.body && e.body.message) || e.message, 'bad'); }
+  } catch (e) { toast('Could not save', apiMessage(e), 'bad'); }
 }
 
 async function loadSyncRuns() {
@@ -1243,7 +1317,7 @@ async function saveCircularSetting(key, value, what) {
     await api('/settings', { method: 'PUT', body: { key: key, value: String(value) } });
     toast('Saved', what, 'ok');
     loadCirculars();
-  } catch (e) { toast('Could not save', (e.body && e.body.message) || e.message, 'bad'); }
+  } catch (e) { toast('Could not save', apiMessage(e), 'bad'); }
 }
 
 /**
@@ -1520,7 +1594,7 @@ async function setMargin() {
     await api('/margin/' + encodeURIComponent(ucc), { method: 'PUT', body: { available: amt, source: 'manual' } });
     toast('Margin set', ucc + ' → ' + rupee(amt, 0), 'ok');
     $('#mgAmt').value = ''; loadMargins();
-  } catch (e) { toast('Failed', (e.body && e.body.error) || e.message, 'bad'); }
+  } catch (e) { toast('Failed', apiMessage(e), 'bad'); }
 }
 
 /**
@@ -1574,7 +1648,7 @@ async function saveSetting(key) {
     toast('Saved', key + ': ' + r.previous + ' → ' + r.value, 'ok');
     loadDash();                       // the cut-off shows on the dashboard
   } catch (e) {
-    toast('Not saved', (e.body && e.body.message) || e.message, 'bad');
+    toast('Not saved', apiMessage(e), 'bad');
     loadSettings();                   // put the rejected value back
   }
 }
@@ -1679,7 +1753,7 @@ function importIssues() {
         for (var i = 0; i < valid.length; i++) {
           var row = Object.assign({}, valid[i]); delete row.__error;
           try { await api('/issues', { method: 'POST', body: row }); ok++; }
-          catch (e) { failed.push(row.symbol + ': ' + ((e.body && (e.body.field || e.body.error)) || e.message)); }
+          catch (e) { failed.push(row.symbol + ': ' + (apiMessage(e))); }
         }
         closeImport();
         toast('Issues imported', ok + ' added' + (failed.length ? ', ' + failed.length + ' failed' : ''),
@@ -1717,7 +1791,7 @@ function importMargins() {
           closeImport();
           toast('Margins imported', r.updated + ' client(s) updated.', 'ok');
           loadMargins();
-        } catch (e) { toast('Import failed', (e.body && e.body.error) || e.message, 'bad'); }
+        } catch (e) { toast('Import failed', apiMessage(e), 'bad'); }
       });
   });
 }
@@ -1952,7 +2026,7 @@ async function docAddLink(id, url, title) {
       body: { url: url, title: title || 'Announcement', kind: 'circular' } });
     toast('Attached', 'The link is now on this issue.', 'ok');
     refreshOpenDetail(id);
-  } catch (e) { toast('Could not attach', (e.body && e.body.message) || e.message, 'bad'); }
+  } catch (e) { toast('Could not attach', apiMessage(e), 'bad'); }
 }
 
 function docUpload(id) {
@@ -2025,7 +2099,7 @@ async function runArchive() {
     var r = await api('/issues/archive/run', { method: 'POST', body: {} });
     toast('Archived', r.archived + ' issue(s) moved to the archive.', 'ok');
     loadArchive(); loadIssues(); loadDash();
-  } catch (e) { toast('Archive failed', (e.body && e.body.message) || e.message, 'bad'); }
+  } catch (e) { toast('Archive failed', apiMessage(e), 'bad'); }
 }
 
 async function unarchive(id) {

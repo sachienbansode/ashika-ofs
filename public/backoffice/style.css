@@ -473,3 +473,8 @@ button.no-grant:hover{transform:none}
   .tabs::-webkit-scrollbar{display:none}
   .tabs button{flex:0 0 auto}
 }
+
+/* A field the server refused. Rung rather than recoloured: the input's own text
+   must stay readable while you fix it. */
+.bad-field{border-color:var(--red) !important;box-shadow:0 0 0 3px rgba(214,69,80,.12) !important}
+.bad-field:focus{outline:none}

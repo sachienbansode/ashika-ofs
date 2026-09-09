@@ -7,6 +7,7 @@ const { maskRows } = require('../lib/pii');
 const settings = require('../lib/settings');
 const { issueStatus, catStatus } = require('../lib/domain');
 const audit = require('../lib/audit');
+const dbErr = require('../lib/dbErrors');
 const { sourceFor, capability } = require('../lib/issueSource');
 const runner = require('../lib/syncRunner');
 const scheduler = require('../lib/syncScheduler');
@@ -70,8 +71,19 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
     // not publish a floor before the offer opens, and migration 014 made the column
     // nullable to match. Demanding one here would have forced the desk to invent a
     // number that every price check downstream then enforced as though it were real.
-    for (const req_f of ['symbol','company','isin','hni_open','hni_close','ret_open','ret_close']) {
-      if (!v[req_f]) return res.status(400).json({ error: 'missing_field', field: req_f });
+    //
+    // All the missing fields are reported at once. Returning the first one turns
+    // filling in a form into a guessing game, one round trip per blank.
+    const missing = ['symbol','company','isin','hni_open','hni_close','ret_open','ret_close']
+      .filter((f) => !v[f]);
+    if (missing.length) {
+      return res.status(400).json({
+        error: 'missing_field',
+        field: missing[0],
+        fields: missing,
+        message: (missing.length === 1 ? 'This is required: ' : 'These are required: ') +
+          missing.map(dbErr.label).join(', ') + '.'
+      });
     }
     if (v.cut_price_min == null) v.cut_price_min = v.floor_price == null ? null : v.floor_price;
     const keys = Object.keys(v);
@@ -83,7 +95,7 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
     );
     await audit.log(req, 'create', 'ofs_issue', r.id, null, r);
     res.status(201).json({ issue: decorate(r) });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 router.put('/:id(\\d+)', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
@@ -100,7 +112,7 @@ router.put('/:id(\\d+)', requirePage(PAGE), requireEdit(PAGE), async (req, res, 
     );
     await audit.log(req, 'update', 'ofs_issue', r.id, before, r);
     res.json({ issue: decorate(r) });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 router.delete('/:id(\\d+)', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {

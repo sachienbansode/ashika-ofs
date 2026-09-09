@@ -8,6 +8,7 @@ const express = require('express');
 const { SCHEMA, rows, one, query, tx } = require('../db/ofsAdapter');
 const { requirePage, requireEdit } = require('../middleware/pageAccess');
 const audit = require('../lib/audit');
+const dbErr = require('../lib/dbErrors');
 
 const router = express.Router();
 const PAGE = 'ofs-masters';
@@ -22,7 +23,7 @@ router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
                      WHERE status = 'Live' GROUP BY client_ucc) u ON u.client_ucc = m.client_ucc
         ORDER BY m.client_ucc`);
     res.json({ margins: r });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 async function upsert(ucc, amount, source, note, actor) {
@@ -52,7 +53,7 @@ router.put('/:ucc', requirePage(PAGE), requireEdit(PAGE), async (req, res, next)
       String(req.user.email || req.user.id));
     await audit.log(req, 'set_margin', 'ofs_margin', ucc, null, r);
     res.json({ margin: r });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 /** POST /api/margin/bulk  { rows: [{ucc, available}], source } */
@@ -71,7 +72,7 @@ router.post('/bulk', requirePage(PAGE), requireEdit(PAGE), async (req, res, next
     }
     await audit.log(req, 'bulk_margin', 'ofs_margin', null, null, { count: n });
     res.json({ updated: n });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 router.get('/:ucc/log', requirePage('ofs-desk', PAGE), async (req, res, next) => {
@@ -80,7 +81,7 @@ router.get('/:ucc/log', requirePage('ofs-desk', PAGE), async (req, res, next) =>
       `SELECT * FROM ${SCHEMA}.ofs_margin_log WHERE client_ucc = $1 ORDER BY at DESC LIMIT 100`,
       [String(req.params.ucc).trim().toUpperCase()]);
     res.json({ log: r });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 module.exports = router;

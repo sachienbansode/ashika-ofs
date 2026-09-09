@@ -10,6 +10,7 @@ const { issueStatus, catStatus, minPrice, validateBid } = require('../lib/domain
 const settings = require('../lib/settings');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
+const dbErr = require('../lib/dbErrors');
 const ld = require('../db/ldAdapter');
 
 const router = express.Router();
@@ -172,9 +173,9 @@ router.post('/bids', async (req, res, next) => {
   } catch (e) {
     if (e && e.code === '23505') {
       return res.status(409).json({ error: 'duplicate_live_bid',
-        message: 'You already have a live bid on this offer. Modify it instead of placing another.' });
+        message: 'You already have a live bid on this offer. Change that bid instead of placing another.' });
     }
-    next(e);
+    dbErr.send(res, next, e);
   }
 });
 
@@ -199,7 +200,7 @@ router.put('/bids/:id(\\d+)', async (req, res, next) => {
     const r = await bids.updateBid(before, b, ctx, null);
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
     res.json({ bid: r });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 /** DELETE /client/api/bids/:id — cancel. Never a hard delete: the row is the record. */
