@@ -66,10 +66,14 @@ function pick(body) {
 router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const v = pick(req.body || {});
-    for (const req_f of ['symbol','company','isin','floor_price','hni_open','hni_close','ret_open','ret_close']) {
+    // floor_price is NOT required. NSE's e-OFS FAQ (v3.0, Q12) says the seller need
+    // not publish a floor before the offer opens, and migration 014 made the column
+    // nullable to match. Demanding one here would have forced the desk to invent a
+    // number that every price check downstream then enforced as though it were real.
+    for (const req_f of ['symbol','company','isin','hni_open','hni_close','ret_open','ret_close']) {
       if (!v[req_f]) return res.status(400).json({ error: 'missing_field', field: req_f });
     }
-    if (v.cut_price_min == null) v.cut_price_min = v.floor_price;
+    if (v.cut_price_min == null) v.cut_price_min = v.floor_price == null ? null : v.floor_price;
     const keys = Object.keys(v);
     const r = await one(
       `INSERT INTO ${SCHEMA}.ofs_issue (${keys.join(',')}, created_by)

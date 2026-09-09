@@ -725,68 +725,151 @@ async function loadIssues() {
     var r = d.issues || [];
     pagedTable('issues', $('#issueTbl'), r, function (page) {
       return '<thead><tr><th>Symbol</th><th>Company</th><th>ISIN</th><th>Exch</th>' +
-      '<th class="n">Floor</th><th class="n">Cut-off min</th><th class="n">Tick</th><th class="n">Lot</th>' +
-      '<th>HNI window</th><th>Retail window</th><th>Status</th></tr></thead><tbody>' +
+      '<th class="n">Floor</th><th class="n">Cut-off min</th><th class="n">Disc %</th>' +
+      '<th class="n">Tick</th><th class="n">Lot</th>' +
+      '<th>HNI window</th><th>Retail window</th><th>Status</th><th></th></tr></thead><tbody>' +
       page.map(function (i) {
         return '<tr><td><b>' + esc(i.symbol) + '</b></td><td>' + esc(i.company) + '</td>' +
           '<td class="m">' + esc(i.isin) + '</td><td>' + esc(i.exchange) + '</td>' +
-          '<td class="n">' + inr(i.floor_price) + '</td><td class="n">' + inr(i.cut_price_min) + '</td>' +
+          // An undisclosed floor is a blank, not a zero — see migration 014.
+          '<td class="n">' + (i.floor_price == null ? '—' : inr(i.floor_price)) + '</td>' +
+          '<td class="n">' + (i.cut_price_min == null ? '—' : inr(i.cut_price_min)) + '</td>' +
+          '<td class="n">' + inr(i.discount_pct, 2) + '</td>' +
           '<td class="n">' + inr(i.tick) + '</td><td class="n">' + inr(i.lot, 0) + '</td>' +
           '<td class="m">' + dt(i.hni_open) + ' → ' + dt(i.hni_close) + '</td>' +
           '<td class="m">' + dt(i.ret_open) + ' → ' + dt(i.ret_close) + '</td>' +
           '<td><span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span>' +
             (i.needs_review
               ? ' <span class="chip soon" title="' + esc(i.review_note || '') +
-                '">needs review</span>' : '') + '</td></tr>';
+                '">needs review</span>' : '') + '</td>' +
+          '<td><button class="mini" data-grant="ofs-masters" data-issedit="' + i.id + '">Edit</button></td></tr>';
       }).join('') + '</tbody>';
     }, 'issues', loadIssues, 'No issue in the master yet.');
   } catch (e) { toast('Issues failed', e.message, 'bad'); }
 }
 
-function fld(id, label, type, val) {
+function fld(id, label, type, val, hint) {
   return '<label class="f"><span class="k">' + esc(label) + '</span>' +
-    '<input id="' + id + '" type="' + type + '" step="any" style="width:100%" value="' + (val || '') + '"></label>';
+    '<input id="' + id + '" type="' + type + '" step="any" style="width:100%" value="' +
+    esc(val == null ? '' : val) + '">' +
+    (hint ? '<span class="fh">' + esc(hint) + '</span>' : '') + '</label>';
 }
-function fldSel(id, label, opts) {
+/** opts is a list of strings, or of [value, label] pairs when the two differ. */
+function fldSel(id, label, opts, val, hint) {
   return '<label class="f"><span class="k">' + esc(label) + '</span><select id="' + id + '" style="width:100%">' +
-    opts.map(function (o) { return '<option>' + o + '</option>'; }).join('') + '</select></label>';
+    opts.map(function (o) {
+      var v = Array.isArray(o) ? o[0] : o, t = Array.isArray(o) ? o[1] : o;
+      return '<option value="' + esc(v) + '"' + (String(val) === String(v) ? ' selected' : '') + '>' +
+        esc(t) + '</option>';
+    }).join('') + '</select>' +
+    (hint ? '<span class="fh">' + esc(hint) + '</span>' : '') + '</label>';
 }
 
-function issueForm() {
+/**
+ * A timestamptz from the API into what <input type="datetime-local"> accepts.
+ * Local (IST) wall-clock, no timezone suffix — the same convention the form uses
+ * when it sends a value back, so a saved window does not shift by 5.5 hours.
+ */
+function dtLocal(v) {
+  if (!v) return '';
+  var d = new Date(v);
+  if (isNaN(d)) return '';
+  var p = function (x) { return String(x).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+/**
+ * Add or edit one issue. Every column the API accepts is on this form — the CSV
+ * template carried discount_pct, cutoff_flag, series and bse_scrip_code while the
+ * manual form did not, so an issue typed in by hand silently took the defaults and
+ * the BSE scrip code had no way in at all.
+ *
+ * Pass an issue to edit it; omit for a new one.
+ */
+function issueForm(issue) {
+  var i = issue || {};
+  var editing = !!i.id;
   var f = $('#miForm');
   f.classList.remove('hide');
   f.innerHTML =
-    '<div class="card"><div class="grid2">' +
-      fld('fSymbol', 'Symbol', 'text') + fld('fCompany', 'Company', 'text') +
-      fld('fIsin', 'ISIN', 'text') + fldSel('fExch', 'Exchange', ['NSE', 'BSE', 'BOTH']) +
-      fld('fFloor', 'Floor price', 'number') + fld('fCut', 'Retail cut-off min', 'number') +
-      fld('fTick', 'Tick', 'number', '0.05') + fld('fLot', 'Lot', 'number', '1') +
-      fld('fIssueQty', 'Issue qty (for subscription)', 'number') + fld('fRetQty', 'Retail reserved qty', 'number') +
-      fld('fHniOpen', 'HNI open', 'datetime-local') + fld('fHniClose', 'HNI close', 'datetime-local') +
-      fld('fRetOpen', 'Retail open', 'datetime-local') + fld('fRetClose', 'Retail close', 'datetime-local') +
+    '<div class="card">' +
+    (editing ? '<div class="bar"><b>Editing ' + esc(i.symbol) + '</b>' +
+       '<span class="tag">#' + esc(i.id) + '</span></div>' : '') +
+    '<div class="grid2">' +
+      fld('fSymbol', 'Symbol', 'text', i.symbol) + fld('fCompany', 'Company', 'text', i.company) +
+      fld('fIsin', 'ISIN', 'text', i.isin) +
+      fldSel('fExch', 'Exchange', ['NSE', 'BSE', 'BOTH'], i.exchange || 'NSE') +
+      fld('fSeries', 'Series', 'text', i.series || 'EQ') +
+      fld('fBseCode', 'BSE scrip code', 'text', i.bse_scrip_code,
+          'Needed for the BSE file. No feed exists for it.') +
+      fld('fFloor', 'Floor price', 'number', i.floor_price,
+          'Leave blank if the seller has not published one.') +
+      fld('fCut', 'Retail cut-off min', 'number', i.cut_price_min) +
+      fld('fTick', 'Tick', 'number', i.tick == null ? '0.05' : i.tick) +
+      fld('fLot', 'Lot', 'number', i.lot == null ? '1' : i.lot) +
+      fld('fIssueQty', 'Issue qty (for subscription)', 'number', i.issue_qty) +
+      fld('fRetQty', 'Retail reserved qty', 'number', i.retail_qty) +
+      fld('fDiscount', 'Retail discount %', 'number', i.discount_pct == null ? '0' : i.discount_pct,
+          'Discount to retail on the cut-off price.') +
+      fldSel('fCutoffFlag', 'Cut-off bidding', [['1', 'Allowed for Retail'], ['0', 'Not allowed']],
+          i.cutoff_flag === false ? '0' : '1') +
+      fld('fHniOpen', 'HNI open', 'datetime-local', dtLocal(i.hni_open)) +
+      fld('fHniClose', 'HNI close', 'datetime-local', dtLocal(i.hni_close)) +
+      fld('fRetOpen', 'Retail open', 'datetime-local', dtLocal(i.ret_open)) +
+      fld('fRetClose', 'Retail close', 'datetime-local', dtLocal(i.ret_close)) +
+      (editing ? fldSel('fStatus', 'Status', ['Auto', 'Suspended', 'Closed'], i.status || 'Auto',
+          'Suspended and Closed both hide it from clients.') : '') +
     '</div><div class="bar" style="margin-top:12px">' +
-      '<button class="btn" id="miSave">Save issue</button>' +
+      '<button class="btn" id="miSave">' + (editing ? 'Save changes' : 'Save issue') + '</button>' +
       '<button class="btn ghost" id="miCancel">Cancel</button></div></div>';
-  $('#miSave').addEventListener('click', saveIssue);
-  $('#miCancel').addEventListener('click', function () { f.classList.add('hide'); });
+  $('#miSave').addEventListener('click', function () { saveIssue(i.id || null); });
+  $('#miCancel').addEventListener('click', function () { f.classList.add('hide'); f.innerHTML = ''; });
+  f.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-async function saveIssue() {
+/** Open the form on an existing issue, loaded fresh so it is never a stale row. */
+async function editIssue(id) {
+  try {
+    var d = await api('/issues/' + id);
+    showMTab('issues');
+    issueForm(d.issue);
+  } catch (e) { toast('Could not open', (e.body && e.body.message) || e.message, 'bad'); }
+}
+
+async function saveIssue(editingId) {
+  var num = function (sel) { return $(sel).value === '' ? null : Number($(sel).value); };
   var body = {
     symbol: $('#fSymbol').value.trim().toUpperCase(),
     company: $('#fCompany').value.trim(),
     isin: $('#fIsin').value.trim().toUpperCase(),
     exchange: $('#fExch').value,
-    floor_price: Number($('#fFloor').value),
-    cut_price_min: $('#fCut').value ? Number($('#fCut').value) : null,
-    tick: Number($('#fTick').value) || 0.05,
-    lot: Number($('#fLot').value) || 1,
-    issue_qty: $('#fIssueQty').value ? Number($('#fIssueQty').value) : null,
-    retail_qty: $('#fRetQty').value ? Number($('#fRetQty').value) : null,
+    series: $('#fSeries').value.trim().toUpperCase() || 'EQ',
+    bse_scrip_code: $('#fBseCode').value.trim() || null,
+    // Blank floor is legitimate: NSE's own FAQ (Q12) says the seller need not
+    // publish one. Sending 0 instead would be inventing a price.
+    floor_price: num('#fFloor'),
+    cut_price_min: num('#fCut'),
+    tick: num('#fTick') || 0.05,
+    lot: num('#fLot') || 1,
+    issue_qty: num('#fIssueQty'),
+    retail_qty: num('#fRetQty'),
+    discount_pct: num('#fDiscount') || 0,
+    cutoff_flag: $('#fCutoffFlag').value === '1',
     hni_open: $('#fHniOpen').value, hni_close: $('#fHniClose').value,
     ret_open: $('#fRetOpen').value, ret_close: $('#fRetClose').value
   };
+  if ($('#fStatus')) body.status = $('#fStatus').value;
+
   try {
+    if (editingId) {
+      await api('/issues/' + editingId, { method: 'PUT', body: body });
+      toast('Issue updated', body.symbol + ' has been changed.', 'ok');
+      $('#miForm').classList.add('hide');
+      $('#miForm').innerHTML = '';
+      loadIssues(); loadDash();
+      return;
+    }
     var r = await api('/issues', { method: 'POST', body: body });
     var id = r && r.issue && r.issue.id;
 
@@ -2051,7 +2134,11 @@ async function boot() {
     var b = e.target.closest('[data-part]');
     if (b) downloadExport(b.dataset.part);
   });
-  $('#miNew').addEventListener('click', issueForm);
+  $('#miNew').addEventListener('click', function () { issueForm(); });
+  $('#issueTbl').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-issedit]');
+    if (b) editIssue(b.dataset.issedit);
+  });
   $('#miSync').addEventListener('click', syncIssues);
   $('#syRun').addEventListener('click', function () { startSync(); });
   $('#scSave').addEventListener('click', saveSchedule);
