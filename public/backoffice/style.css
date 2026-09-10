@@ -478,3 +478,7 @@ button.no-grant:hover{transform:none}
    must stay readable while you fix it. */
 .bad-field{border-color:var(--red) !important;box-shadow:0 0 0 3px rgba(214,69,80,.12) !important}
 .bad-field:focus{outline:none}
+
+/* An empty cell in an exchange-file preview. Optional fields are legitimately blank
+   in these files, and a run of empty cells is impossible to count across. */
+.dash{color:var(--line-s,#c9d3dd)}

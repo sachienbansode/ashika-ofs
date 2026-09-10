@@ -208,3 +208,64 @@ test('an empty book produces a header-only file with zero rows', () => {
   assert.equal(out.totalQty, 0);
   assert.equal(out.text.trim(), nse.HEADER.join(','));
 });
+
+/* ---------------------------------------------------------------- header rows --
+ * The desk's preview reads hasHeaderRow to decide whether line 1 of the file is a
+ * bid or a column list. It used to assume line 1 was always a header, so on BSE —
+ * which documents no header row — the first bid was drawn as the table head and
+ * never shown as a row: two bids exported, one bid displayed. These pin the
+ * contract that fix depends on.
+ */
+const nseAd = require('../lib/exchange/nse');
+const bseAd = require('../lib/exchange/bse');
+
+function twoBids() {
+  const issue = { symbol: 'COALINDIA', isin: 'INE522F01014', floor_price: 400, tick: 0.05, lot: 1 };
+  return [
+    { client_ucc: 'S247674', category: 'Retail', qty: 1, price: 400, is_cutoff: false, status: 'Live', issue },
+    { client_ucc: 'A136386', category: 'Retail', qty: 2, price: 1000, is_cutoff: false, status: 'Live', issue }
+  ];
+}
+const BASE = { margin_type: '2', cat_retail: 'RI', cat_retail_cutoff: 'RIC', cat_hni: 'NII',
+               nse_series_retail: 'RS', nse_series_hni: 'IS' };
+const lines = (t) => t.split(/\r?\n/).filter(Boolean);
+
+test('BSE writes no header row, so every line is a bid', () => {
+  const out = bseAd.build(twoBids(), BASE, {});
+  assert.equal(out.hasHeaderRow, false);
+  assert.equal(lines(out.text).length, out.rowCount);
+  assert.match(lines(out.text)[0], /^COALINDIA,RI,/);
+  assert.ok(out.header.length, 'column names are still published for the preview');
+});
+
+test('NSE writes a header row by default, and the count reflects it', () => {
+  const out = nseAd.build(twoBids(), BASE, {});
+  assert.equal(out.hasHeaderRow, true);
+  assert.equal(lines(out.text).length, out.rowCount + 1);
+  assert.equal(lines(out.text)[0], out.header.join(','));
+});
+
+test('nse_header_row = 0 drops it, and says so', () => {
+  const out = nseAd.build(twoBids(), Object.assign({}, BASE, { nse_header_row: '0' }), {});
+  assert.equal(out.hasHeaderRow, false);
+  assert.equal(lines(out.text).length, out.rowCount);
+  assert.match(lines(out.text)[0], /^COALINDIA,RS,CLI,/);
+});
+
+test('an explicit noHeader option still wins over the setting', () => {
+  const on = nseAd.build(twoBids(), Object.assign({}, BASE, { nse_header_row: '0' }), { noHeader: false });
+  assert.equal(on.hasHeaderRow, true);
+  const off = nseAd.build(twoBids(), Object.assign({}, BASE, { nse_header_row: '1' }), { noHeader: true });
+  assert.equal(off.hasHeaderRow, false);
+});
+
+test('every column name has a cell, on both exchanges', () => {
+  for (const [name, out] of [['NSE', nseAd.build(twoBids(), BASE, {})],
+                             ['BSE', bseAd.build(twoBids(), BASE, {})]]) {
+    const body = out.hasHeaderRow ? lines(out.text).slice(1) : lines(out.text);
+    for (const l of body) {
+      assert.equal(l.split(',').length, out.header.length,
+        name + ' row has ' + l.split(',').length + ' cells for ' + out.header.length + ' columns: ' + l);
+    }
+  }
+});

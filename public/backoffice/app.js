@@ -685,7 +685,9 @@ async function previewExport() {
       '<span class="tag">' + inr(d.total_qty, 0) + ' shares</span>' +
       '<span class="tag">' + crore(d.total_value) + '</span>' +
       '<span class="tag">sha256 ' + esc(String(d.checksum).slice(0, 12)) + '…</span>' +
-      (d.has_header_row === false ? '<span class="tag">no header row</span>' : '') +
+      (d.has_header_row === false
+        ? '<span class="tag" title="The file itself carries no column names — the exchange reads line 1 as a bid. Column names below are shown for checking only.">no header row (by spec)</span>'
+        : '<span class="tag" title="Line 1 of the file is a header row.">header row included</span>') +
       '</div>' +
       (parts > 1
         ? '<div class="note">' + d.total_rows + ' bids exceed the ' + d.max_rows_per_file +
@@ -700,10 +702,29 @@ async function previewExport() {
         : '');
     var lines = d.preview || [];
     if (!lines.length) { $('#exTbl').innerHTML = '<tbody><tr><td class="empty">No bid matches this selection.</td></tr></tbody>'; return; }
-    var head = lines[0].split(',');
-    $('#exTbl').innerHTML = '<thead><tr>' + head.map(function (h) { return '<th>' + esc(h.replace(/^"|"$/g, '')) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-      lines.slice(1).map(function (l) {
-        return '<tr>' + l.split(',').map(function (v) { return '<td class="m">' + esc(v.replace(/^"|"$/g, '')) + '</td>'; }).join('') + '</tr>';
+
+    // The preview used to take line 1 as the column names. NSE's file has a header
+    // row so that looked right; BSE's has none by design, so the first BID was being
+    // drawn as the header and never shown as a row — two bids in, one bid displayed.
+    //
+    // The column names come from the adapter (d.header) either way, which is what
+    // they were always for; only the file itself decides whether line 1 is data.
+    var body = d.has_header_row === false ? lines : lines.slice(1);
+    var head = (d.header && d.header.length)
+      ? d.header
+      : csvParse(lines[0])[0] || [];
+
+    $('#exTbl').innerHTML =
+      '<thead><tr><th class="n">#</th>' +
+        head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      body.map(function (l, ix) {
+        // csvParse, not split(','), so a quoted field containing a comma stays one cell.
+        var cells = csvParse(l)[0] || [];
+        return '<tr><td class="n">' + (ix + 1) + '</td>' +
+          cells.map(function (v) {
+            return '<td class="m">' + (v === '' ? '<span class="dash">—</span>' : esc(v)) + '</td>';
+          }).join('') + '</tr>';
       }).join('') + '</tbody>';
   } catch (e) { toast('Preview failed', exportError(e), 'bad'); }
 }

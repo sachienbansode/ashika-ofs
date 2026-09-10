@@ -44,6 +44,13 @@ const EDITABLE = {
     hint: '1 = 0% margin (institutional), 2 = 100% upfront. BSE OFS guidelines, bulk-bid field 8.',
     check: (v) => ['1', '2'].includes(String(v)) || 'Use 1 or 2'
   },
+  nse_header_row: {
+    label: 'NSE file: include a header row', kind: 'bool',
+    hint: 'BSE documents NO header row and we follow that. NSE\u2019s protocol lists the fields but '
+      + 'does not say whether line 1 is a header, so this is an inference \u2014 turn it off if NSE '
+      + 'rejects the file. Confirm against circular NSE/CMTR/72975 before the first live upload.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
   cat_retail: {
     label: 'Category code — Retail', kind: 'choice', choices: ['RI'],
     hint: 'BSE valid values: RI, NII, MF, IC, OTHS.',
