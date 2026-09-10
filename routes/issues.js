@@ -35,8 +35,13 @@ function decorate(r) {
 router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
   try {
     const open = String(req.query.open || '') === '1';
+    // doc_count rides along so the list can show whether an issue has its circular
+    // attached. Without it, "does this issue have paperwork?" needs one click per
+    // row — and the answer matters most for the issues that have none.
     const r = await rows(
-      `SELECT ${COLS} FROM ${SCHEMA}.ofs_issue
+      `SELECT ${COLS},
+              (SELECT count(*) FROM ${SCHEMA}.ofs_issue_doc d WHERE d.issue_id = i.id) AS doc_count
+         FROM ${SCHEMA}.ofs_issue i
         ${open
           ? "WHERE archived_at IS NULL AND status <> 'Closed' AND greatest(hni_close, ret_close) > now() - interval '1 day'"
           : 'WHERE archived_at IS NULL'}

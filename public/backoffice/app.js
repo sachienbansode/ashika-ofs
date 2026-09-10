@@ -796,7 +796,7 @@ async function loadIssues() {
       return '<thead><tr><th>Symbol</th><th>Company</th><th>ISIN</th><th>Exch</th>' +
       '<th class="n">Floor</th><th class="n">Cut-off min</th><th class="n">Disc %</th>' +
       '<th class="n">Tick</th><th class="n">Lot</th>' +
-      '<th>HNI window</th><th>Retail window</th><th>Status</th><th></th></tr></thead><tbody>' +
+      '<th>HNI window</th><th>Retail window</th><th>Docs</th><th>Status</th><th></th></tr></thead><tbody>' +
       page.map(function (i) {
         return '<tr><td><b>' + esc(i.symbol) + '</b></td><td>' + esc(i.company) + '</td>' +
           '<td class="m">' + esc(i.isin) + '</td><td>' + esc(i.exchange) + '</td>' +
@@ -807,11 +807,21 @@ async function loadIssues() {
           '<td class="n">' + inr(i.tick) + '</td><td class="n">' + inr(i.lot, 0) + '</td>' +
           '<td class="m">' + dt(i.hni_open) + ' → ' + dt(i.hni_close) + '</td>' +
           '<td class="m">' + dt(i.ret_open) + ' → ' + dt(i.ret_close) + '</td>' +
+          // No paperwork is worth saying out loud: the circular is what justifies
+          // this issue's floor price and windows to anyone reading it later.
+          '<td>' + (Number(i.doc_count) > 0
+            ? '<span class="chip open" title="Open the row to read them">' + inr(i.doc_count, 0) + ' attached</span>'
+            : '<span class="chip soon" title="Open the row to attach the circular or notice">none</span>') + '</td>' +
           '<td><span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span>' +
             (i.needs_review
               ? ' <span class="chip soon" title="' + esc(i.review_note || '') +
                 '">needs review</span>' : '') + '</td>' +
-          '<td><button class="mini" data-grant="ofs-masters" data-issedit="' + i.id + '">Edit</button></td></tr>';
+          // Open is what reaches the documents — the circular, the member notice, the
+          // PDF. It was wired on the Archive table only, so for a LIVE issue, which
+          // is the one that actually needs its circular attached, there was no way
+          // in from this screen at all.
+          '<td><button class="mini" data-detail="' + i.id + '">Open</button> ' +
+            '<button class="mini" data-grant="ofs-masters" data-issedit="' + i.id + '">Edit</button></td></tr>';
       }).join('') + '</tbody>';
     }, 'issues', loadIssues, 'No issue in the master yet.');
   } catch (e) { toast('Issues failed', e.message, 'bad'); }
@@ -2064,6 +2074,10 @@ async function docRemove(issueId, docId) {
 
 /** Re-open whichever view is currently showing this issue. */
 function refreshOpenDetail(id) {
+  // The standalone window has no table to re-expand; it rebuilds itself.
+  if (typeof renderIssueWindow === 'function' && document.getElementById('issueBox')) {
+    return renderIssueWindow(id);
+  }
   var row = document.querySelector('[data-detail="' + id + '"]');
   if (row) { var tr = row.closest('tr'); toggleIssueRow(tr, id); toggleIssueRow(tr, id); return; }
   if ($('#arDetail') && $('#arDetail').innerHTML) openArchived(id);
@@ -2211,7 +2225,16 @@ async function boot() {
   $('#miNew').addEventListener('click', function () { issueForm(); });
   $('#issueTbl').addEventListener('click', function (e) {
     var b = e.target.closest('[data-issedit]');
-    if (b) editIssue(b.dataset.issedit);
+    if (b) { editIssue(b.dataset.issedit); return; }
+    var d = e.target.closest('[data-detail]');
+    if (d) { toggleIssueRow(d.closest('tr'), d.dataset.detail); return; }
+    // The whole row opens it too — the same behaviour as the Archive table, so the
+    // two lists do not need to be learned separately.
+    if (!e.target.closest('a,button,input,select')) {
+      var tr = e.target.closest('tr');
+      var opener = tr && tr.querySelector('[data-detail]');
+      if (opener) toggleIssueRow(tr, opener.dataset.detail);
+    }
   });
   $('#miSync').addEventListener('click', syncIssues);
   $('#syRun').addEventListener('click', function () { startSync(); });
@@ -2220,24 +2243,6 @@ async function boot() {
   initPagers();
   $('#cirPoll').addEventListener('click', pollCirculars);
 
-  // Document controls appear inside markup that is rebuilt constantly (the row
-  // expander, the archive drill-down), so delegate from the document rather than
-  // re-binding after every render.
-  document.addEventListener('click', function (e) {
-    var add = e.target.closest('[data-docadd]');
-    if (add) {
-      var id = add.dataset.docadd;
-      var scope = add.closest('.docs') || document;
-      docAddLink(id,
-        (scope.querySelector('[data-doclink]') || {}).value,
-        (scope.querySelector('[data-doctitle]') || {}).value);
-      return;
-    }
-    var up = e.target.closest('[data-docup]');
-    if (up) { docUpload(up.dataset.docup); return; }
-    var del = e.target.closest('[data-docdel]');
-    if (del) docRemove(del.dataset.docissue, del.dataset.docdel);
-  });
   $('#cirStatus').addEventListener('change', function () { resetPage('circulars'); loadCirculars(); });
   $('#cirEvery').addEventListener('change', function () {
     saveCircularSetting('circulars_poll_minutes', this.value, 'Checking every ' + this.value + ' minutes.');
@@ -2312,6 +2317,31 @@ async function boot() {
   await loadDash();
   setAutoRefresh();
 }
+
+/**
+ * Document controls appear inside markup that is rebuilt constantly — the row
+ * expander on Issues and on Archive, and the standalone issue window — so they are
+ * delegated from the document.
+ *
+ * Bound at module scope rather than inside boot(): issue.html loads this file for
+ * its builders but never boots the desk, so anything registered in boot() is absent
+ * there. That is why Attach link and Upload PDF did nothing in the standalone window.
+ */
+document.addEventListener('click', function (e) {
+  var add = e.target.closest('[data-docadd]');
+  if (add) {
+    var id = add.dataset.docadd;
+    var scope = add.closest('.docs') || document;
+    docAddLink(id,
+      (scope.querySelector('[data-doclink]') || {}).value,
+      (scope.querySelector('[data-doctitle]') || {}).value);
+    return;
+  }
+  var up = e.target.closest('[data-docup]');
+  if (up) { docUpload(up.dataset.docup); return; }
+  var del = e.target.closest('[data-docdel]');
+  if (del) docRemove(del.dataset.docissue, del.dataset.docdel);
+});
 
 // app.js is also loaded by issue.html purely for its builders and api(); booting the
 // desk there would bind handlers to elements that do not exist. The tab strip is the
