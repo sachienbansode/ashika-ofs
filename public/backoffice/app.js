@@ -714,18 +714,45 @@ async function previewExport() {
       ? d.header
       : csvParse(lines[0])[0] || [];
 
+    // Screen-only columns, marked as such. They come from d.meta, not from the file
+    // — an exchange file carries the documented fields and nothing else, and one
+    // extra column is a rejected upload. So the desk can see who placed each bid and
+    // when without any of it reaching NSE or BSE.
+    var meta = d.meta || [];
+    var extra = meta.length ? ['Ref', 'Placed by', 'Placed at (IST)', 'Last changed (IST)'] : [];
+
     $('#exTbl').innerHTML =
       '<thead><tr><th class="n">#</th>' +
         head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
+        extra.map(function (h, ix) {
+          return '<th class="off-file' + (ix === 0 ? ' off-file-first' : '') + '">' + esc(h) + '</th>';
+        }).join('') +
       '</tr></thead><tbody>' +
       body.map(function (l, ix) {
         // csvParse, not split(','), so a quoted field containing a comma stays one cell.
         var cells = csvParse(l)[0] || [];
+        var m = meta[ix] || {};
+        var who = m.placed_by === 'desk' ? (m.actor || 'back office')
+                : m.placed_by === 'ap' ? 'AP ' + (m.actor || '')
+                : m.placed_by === 'client' ? 'client'
+                : (m.placed_by || '');
+        var off = meta.length ? [m.ref, who, m.placed_at, m.changed_at] : [];
         return '<tr><td class="n">' + (ix + 1) + '</td>' +
           cells.map(function (v) {
             return '<td class="m">' + (v === '' ? '<span class="dash">—</span>' : esc(v)) + '</td>';
+          }).join('') +
+          off.map(function (v, j) {
+            return '<td class="m off-file' + (j === 0 ? ' off-file-first' : '') + '">' +
+              (v ? esc(v) : '<span class="dash">—</span>') + '</td>';
           }).join('') + '</tr>';
-      }).join('') + '</tbody>';
+      }).join('') + '</tbody>' +
+      (meta.length
+        ? '<tfoot><tr><td colspan="' + (1 + head.length + extra.length) + '" class="off-file-note">' +
+          'The four shaded columns are shown here only. They are <b>not</b> written to the ' +
+          'exchange file — NSE and BSE accept the documented fields and nothing else. ' +
+          'Use <b>Download all (audit)</b> for a file that includes them.' +
+          '</td></tr></tfoot>'
+        : '');
   } catch (e) { toast('Preview failed', exportError(e), 'bad'); }
 }
 
@@ -745,6 +772,41 @@ function exportError(e) {
     return 'The server did not respond — it may have just restarted. Reload the page and try again.';
   }
   return apiMessage(e) || 'Something went wrong.';
+}
+
+/**
+ * The desk's own extract: every field, plus who placed each bid and when. Built
+ * through the same export path as an exchange file so it is logged and audited the
+ * same way, but it is not an exchange file and never goes to one.
+ *
+ * It ignores the exchange selector on purpose — there is one book, and which
+ * exchange a file would be cut for does not change what happened.
+ */
+async function downloadFullExport() {
+  var url = '/api/export/FULL/download?' + exportQuery();
+  var headers = TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {};
+  var btn = $('#exFull');
+  btn.disabled = true;
+  try {
+    var res = await fetch(url, { headers: headers, credentials: 'same-origin' });
+    if (!res.ok) {
+      var j = await res.json().catch(function () { return {}; });
+      var err = new Error(j.message || j.error || res.statusText);
+      err.status = res.status; err.body = j;
+      throw err;
+    }
+    var blob = await res.blob();
+    var name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name ? name[1] : 'OFS_Bids_Full.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    toast('Downloaded', 'Full bid extract, including who placed each bid and when.', 'ok');
+    loadExportLog();
+  } catch (e) {
+    toast('Download failed', exportError(e), 'bad');
+  } finally { btn.disabled = false; }
 }
 
 async function downloadExport(part) {
@@ -2239,6 +2301,7 @@ async function boot() {
   ['#exExch', '#exIssue', '#exCat', '#exCanc'].forEach(function (s) { $(s).addEventListener('change', previewExport); });
   $('#exPreview').addEventListener('click', previewExport);
   $('#exDownload').addEventListener('click', function () { downloadExport(); });
+  $('#exFull').addEventListener('click', downloadFullExport);
   $('#exSummary').addEventListener('click', function (e) {
     var b = e.target.closest('[data-part]');
     if (b) downloadExport(b.dataset.part);

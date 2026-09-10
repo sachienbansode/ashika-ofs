@@ -7,8 +7,9 @@
 const express = require('express');
 const { SCHEMA, rows, one, query } = require('../db/ofsAdapter');
 const { requirePage } = require('../middleware/pageAccess');
-const { adapterFor } = require('../lib/exchange');
+const { adapterFor, isExchange } = require('../lib/exchange');
 const settings = require('../lib/settings');
+const { istStamp } = require('../lib/exchange/common');
 const audit = require('../lib/audit');
 
 const router = express.Router();
@@ -85,7 +86,11 @@ async function buildFile(exchange, q) {
   const s = await settings.all();
   const adapter = adapterFor(exchange);
   const bids = await collect(q);
-  assertExportable(bids, exchange);
+  // The exchange guards — ISIN present, floor known for a BSE cut-off — exist so we
+  // never send an exchange something it will reject. The desk's own extract goes to
+  // nobody, and refusing it because an issue has no ISIN yet would withhold exactly
+  // the rows someone is trying to look at.
+  if (isExchange(exchange)) assertExportable(bids, exchange);
   let symbol = null;
   if (q.issue_id && q.issue_id !== 'all') {
     const i = await one(`SELECT symbol FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [q.issue_id]);
@@ -104,8 +109,27 @@ router.get('/:exchange/preview', requirePage(PAGE), async (req, res, next) => {
   try {
     const out = await buildFile(req.params.exchange, req.query);
     const lines = out.text.split('\r\n').filter(Boolean);
+    // Screen-only columns. These are deliberately NOT in out.text: an exchange file
+    // carries the documented fields and nothing else, and one extra column is a
+    // rejected upload. The desk still needs to see who placed each bid and when, so
+    // it travels beside the file rather than in it — keyed by the ids the adapter
+    // says it actually wrote, which is what keeps the two aligned across a 100-row
+    // BSE part boundary.
+    const byId = new Map((await collect(req.query)).map((b) => [String(b.id), b]));
+    const meta = (out.bidIds || []).map((id) => {
+      const b = byId.get(String(id)) || {};
+      return {
+        ref: b.ref || null,
+        status: b.status || null,
+        placed_by: b.placed_by || null,
+        actor: b.placed_by_id || null,
+        placed_at: istStamp(b.created_at),
+        changed_at: istStamp(b.updated_at)
+      };
+    });
     res.json({
       exchange: out.exchange, file_name: out.fileName, header: out.header,
+      meta,
       row_count: out.rowCount, total_qty: out.totalQty, total_value: out.totalValue,
       checksum: out.checksum,
       total_rows: out.totalRows == null ? out.rowCount : out.totalRows,

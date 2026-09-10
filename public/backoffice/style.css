@@ -482,3 +482,12 @@ button.no-grant:hover{transform:none}
 /* An empty cell in an exchange-file preview. Optional fields are legitimately blank
    in these files, and a run of empty cells is impossible to count across. */
 .dash{color:var(--line-s,#c9d3dd)}
+
+/* Columns shown on screen but deliberately absent from the exchange file. Shaded
+   and fenced off with a left rule, so nobody reads the preview as a picture of what
+   NSE or BSE will receive. */
+th.off-file,td.off-file{background:rgba(18,110,130,.045);color:var(--muted)}
+th.off-file{font-style:normal}
+th.off-file-first,td.off-file-first{border-left:2px solid rgba(18,110,130,.28)}
+.off-file-note{padding:9px 12px;font-size:11.5px;line-height:1.6;color:var(--muted);
+  background:rgba(18,110,130,.035);white-space:normal}

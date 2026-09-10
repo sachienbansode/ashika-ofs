@@ -269,3 +269,93 @@ test('every column name has a cell, on both exchanges', () => {
     }
   }
 });
+
+/* ------------------------------------------------- audit fields stay off the wire --
+ * The desk asked to see when a bid was placed and by whom, and asked for that NOT to
+ * be in the exchange file. Both halves matter: an exchange accepts the documented
+ * fields and nothing else, so one extra column is a rejected upload. These tests are
+ * the guard against someone helpfully adding a timestamp to a file adapter later.
+ */
+const fullAd = require('../lib/exchange/fullExport');
+const { istStamp } = require('../lib/exchange/common');
+
+function auditedBids() {
+  const issue = { id: 5, symbol: 'COALINDIA', company: 'Coal India Ltd', isin: 'INE522F01014',
+                  exchange: 'BOTH', floor_price: 400, cut_price_min: 400, tick: 0.05, lot: 1,
+                  discount_pct: 0, issue_date: '2026-09-10' };
+  return [
+    { id: 11, ref: 'OFS260910-AAA', status: 'Live', client_ucc: 'S247674', category: 'Retail',
+      qty: 1, price: 400, is_cutoff: false, value: 400, placed_by: 'client', placed_by_id: 'S247674',
+      otp_verified: true, created_at: '2026-09-10T04:19:00Z', updated_at: '2026-09-10T04:19:00Z', issue },
+    { id: 12, ref: 'OFS260910-BBB', status: 'Live', client_ucc: 'A136386', category: 'Retail',
+      qty: 2, price: null, is_cutoff: true, value: 800, placed_by: 'desk',
+      placed_by_id: 'someone@ashikagroup.com',
+      created_at: '2026-09-10T05:01:10Z', updated_at: '2026-09-10T05:20:00Z', issue }
+  ];
+}
+const AUD = { margin_type: '2', cat_retail: 'RI', cat_retail_cutoff: 'RIC', cat_hni: 'NII',
+              nse_series_retail: 'RS', nse_series_hni: 'IS', cutoff_price_mode: 'floor' };
+
+for (const [name, adapter] of [['NSE', nseAd], ['BSE', bseAd]]) {
+  test(name + ' file carries no timestamp, no actor and no internal reference', () => {
+    const text = adapter.build(auditedBids(), AUD, {}).text;
+    assert.ok(!/OFS260910-/.test(text), 'internal bid ref leaked into the ' + name + ' file');
+    assert.ok(!/someone@ashikagroup\.com/.test(text), 'actor leaked into the ' + name + ' file');
+    assert.ok(!/2026-09-10 \d\d:/.test(text), 'a timestamp leaked into the ' + name + ' file');
+    assert.ok(!/\bdesk\b|\bclient\b/.test(text), 'placed_by leaked into the ' + name + ' file');
+  });
+}
+
+test('the full extract carries all of it, and says so in IST', () => {
+  const out = fullAd.build(auditedBids(), AUD, {});
+  assert.equal(out.rowCount, 2);
+  assert.equal(out.hasHeaderRow, true);
+  const rows = out.text.split(/\r?\n/).filter(Boolean);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0], fullAd.HEADER.join(','));
+  assert.match(rows[1], /OFS260910-AAA/);
+  assert.match(rows[1], /client,S247674,Yes/);
+  // 04:19 UTC is 09:49 IST — the server runs UTC, so this is the bug being prevented.
+  assert.match(rows[1], /2026-09-10 09:49:00/);
+  assert.match(rows[2], /someone@ashikagroup\.com/);
+});
+
+test('a cut-off row shows both the blank bid price and the price the exchange gets', () => {
+  const cells = fullAd.row(auditedBids()[1], AUD);
+  const h = fullAd.HEADER;
+  assert.equal(cells[h.indexOf('Bid Type')], 'Cut-off');
+  assert.equal(cells[h.indexOf('Bid Price')], '');
+  assert.equal(cells[h.indexOf('Price Sent to Exchange')], '400.00');
+  assert.equal(cells[h.indexOf('BSE Category')], 'RIC');
+});
+
+test('every full-extract row has one cell per column name', () => {
+  const out = fullAd.build(auditedBids(), AUD, {});
+  for (const l of out.text.split(/\r?\n/).filter(Boolean)) {
+    assert.equal((l.match(/,/g) || []).length + 1, fullAd.HEADER.length, l);
+  }
+});
+
+test('bidIds are reported in file order, so screen columns line up with rows', () => {
+  assert.deepEqual(nseAd.build(auditedBids(), AUD, {}).bidIds, [11, 12]);
+  assert.deepEqual(bseAd.build(auditedBids(), AUD, {}).bidIds, [11, 12]);
+});
+
+test('a BSE part boundary keeps ids aligned with the lines in that part', () => {
+  const many = [];
+  for (let i = 0; i < 150; i++) {
+    const b = Object.assign({}, auditedBids()[0], { id: 1000 + i, ref: 'R' + i });
+    many.push(b);
+  }
+  const p2 = bseAd.build(many, AUD, { part: 2 });
+  assert.equal(p2.rowCount, 50);
+  assert.equal(p2.bidIds.length, 50);
+  assert.equal(p2.bidIds[0], 1100);          // the 101st bid, not the first
+  assert.equal(p2.bidIds[49], 1149);
+});
+
+test('istStamp is empty for a missing timestamp rather than "Invalid Date"', () => {
+  assert.equal(istStamp(null), '');
+  assert.equal(istStamp(''), '');
+  assert.equal(istStamp('not a date'), '');
+});

@@ -118,6 +118,8 @@
       <select id="exCanc"><option value="0">Exclude cancelled</option><option value="1">Include cancelled (C rows)</option></select>
       <button class="btn ghost" id="exPreview">Preview</button>
       <button class="btn" id="exDownload">Download file</button>
+      <div class="sp"></div>
+      <button class="btn ghost" id="exFull" title="Every field including who placed each bid and when. Not an exchange file.">Download all (audit)</button>
     </div>
     <div class="note">Column order is provisional. Pin the exact layout from the NSE OFS bulk-upload spec and BSE Notice 20120727-26 (3.3.4) on the member portals before go-live — see <code>lib/exchange/nse.js</code> and <code>lib/exchange/bse.js</code>.</div>
     <div id="exSummary"></div>
