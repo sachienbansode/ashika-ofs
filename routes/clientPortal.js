@@ -13,6 +13,7 @@ const settings = require('../lib/settings');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
 const dbErr = require('../lib/dbErrors');
+const bidOtp = require('../lib/bidOtp');
 const ld = require('../db/ldAdapter');
 
 const router = express.Router();
@@ -331,6 +332,191 @@ router.delete('/bids/:id(\\d+)', requireSingleClient, async (req, res, next) => 
     await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
     res.json({ bid: r });
   } catch (e) { next(e); }
+});
+
+
+/* ------------------------------------------------- bidding on a client's behalf --
+ * An AP or a branch bids FOR a client, and the client confirms with a code sent to
+ * their own registered mobile and email. The rule Ashika chose: a client acting
+ * alone needs no code, anyone acting for them does.
+ *
+ * Two checks before a code is even sent, both against LD rather than the request:
+ * the client must currently belong to this branch, and the branch must still be
+ * allowed to sign in. A stale session must not outlive either.
+ */
+function branchActor(req) {
+  const p = req.portal || {};
+  return { kind: p.kind, code: p.branchCode, name: p.branchName };
+}
+
+async function requireOwnClient(req, res, ucc) {
+  const a = branchActor(req);
+  if (a.kind !== 'ap' && a.kind !== 'branch') {
+    res.status(403).json({ error: 'not_a_branch' });
+    return false;
+  }
+  const owned = await branches.branchHasClient(a.code, ucc);
+  if (!owned) {
+    // 404, not 403: confirming that a UCC exists but belongs to someone else tells
+    // a branch something about another branch's book.
+    res.status(404).json({ error: 'not_your_client',
+      message: 'That client is not mapped to your branch, or is not active.' });
+    return false;
+  }
+  return true;
+}
+
+/** POST /client/api/branch/bids/otp { issue_id, client_ucc, action, bid_id } */
+router.post('/branch/bids/otp', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const ucc = String(b.client_ucc || '').trim().toUpperCase();
+    if (!ucc || !b.issue_id) return res.status(400).json({ error: 'missing_field' });
+    if (!(await requireOwnClient(req, res, ucc))) return;
+
+    const issue = await one(`SELECT symbol, company FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [b.issue_id]);
+    if (!issue) return res.status(404).json({ error: 'unknown_issue' });
+
+    const a = branchActor(req);
+    const r = await bidOtp.create({
+      clientUcc: ucc, issueId: b.issue_id, action: String(b.action || 'place'), bidId: b.bid_id,
+      requestedBy: ba.actorLabel(a.kind) + ' ' + a.code + (a.name ? ' (' + a.name + ')' : ''),
+      requestedByKind: a.kind,
+      issueLabel: issue.symbol + (issue.company ? ' — ' + issue.company : ''),
+      detail: b.detail, ip: req.ip, userAgent: req.headers['user-agent']
+    });
+    if (!r.ok) return res.status(r.reason === 'unknown_client' ? 404 : 422).json({
+      error: r.reason, message: r.message || 'Could not send a confirmation code.' });
+
+    await audit.log(req, 'bid_otp_sent', 'ofs_bid', b.bid_id || null, null,
+      { ucc, issue_id: b.issue_id, action: b.action || 'place', sent_to: r.sent_to });
+    res.json(r);
+  } catch (e) { next(e); }
+});
+
+async function branchConfirm(req, res, { ucc, issueId, action, bidId }) {
+  const body = req.body || {};
+  if (!body.otp_ref || !body.otp) {
+    res.status(428).json({ error: 'otp_required', action, client_ucc: ucc, issue_id: issueId,
+      message: 'The client must confirm this. Send them a code, then enter it here.' });
+    return false;
+  }
+  const v = await bidOtp.verify({ ref: body.otp_ref, code: String(body.otp).replace(/\D/g, ''),
+    clientUcc: ucc, issueId, action, bidId });
+  if (!v.ok) {
+    res.status(401).json({ error: v.reason, message: bidOtp.message(v.reason),
+      attempts_left: v.attemptsLeft });
+    return false;
+  }
+  return true;
+}
+
+/** POST /client/api/branch/bids/validate — dry run, no code needed. */
+router.post('/branch/bids/validate', async (req, res, next) => {
+  try {
+    const b = bids.normalise(Object.assign({}, req.body,
+      { cp_code: null, custody_code: null, exch_order_no: null }));
+    if (!b.issue_id || !b.client_ucc) return res.status(400).json({ error: 'missing_field' });
+    if (!(await requireOwnClient(req, res, b.client_ucc))) return;
+
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, req.body.editingId || null);
+    if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });
+    if (req.body.editingId) b.editingId = req.body.editingId;
+    const errs = validateBid(ctx.issue, b, ctx);
+    res.json({
+      ok: errs.length === 0, errors: errs,
+      value: bids.bidValue(ctx.issue, b.category, b.qty, b.price, b.is_cutoff),
+      min_price: minPrice(ctx.issue, b.category),
+      client_name: ctx.client.name || null,
+      available_margin: ctx.availableMargin,
+      free_margin: ctx.availableMargin - ctx.marginUsed
+    });
+  } catch (e) { next(e); }
+});
+
+/** POST /client/api/branch/bids — place for one of this branch's clients. */
+router.post('/branch/bids', async (req, res, next) => {
+  try {
+    const b = bids.normalise(Object.assign({}, req.body,
+      { cp_code: null, custody_code: null, exch_order_no: null }));
+    if (!b.issue_id || !b.client_ucc) return res.status(400).json({ error: 'missing_field' });
+    if (!(await requireOwnClient(req, res, b.client_ucc))) return;
+
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, null);
+    if (!ctx.issue) return res.status(404).json({ error: 'unknown_issue' });
+    if (ctx.issue.archived_at || ctx.issue.status !== 'Auto' || ctx.issue.needs_review) {
+      return res.status(409).json({ error: 'issue_not_open', message: 'This offer is not open for bidding.' });
+    }
+    const errs = validateBid(ctx.issue, b, ctx);
+    if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
+
+    if (!(await branchConfirm(req, res, { ucc: b.client_ucc, issueId: b.issue_id, action: 'place' }))) return;
+
+    const a = branchActor(req);
+    const r = await bids.insertBid(b, ctx, ba.placedByOf(a.kind), a.code, a.code);
+    await query(`UPDATE ${SCHEMA}.ofs_bid SET otp_verified = true, otp_ref = $2 WHERE id = $1`,
+      [r.id, String(req.body.otp_ref)]).catch(() => {});
+    await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
+    res.status(201).json({ bid: r });
+  } catch (e) {
+    if (e && e.code === '23505') {
+      return res.status(409).json({ error: 'duplicate_live_bid',
+        message: 'This client already has a live bid on this offer. Change that bid instead.' });
+    }
+    dbErr.send(res, next, e);
+  }
+});
+
+/** The bid, only if it belongs to a client of this branch. */
+async function branchBid(req) {
+  const a = branchActor(req);
+  if (!a.code) return null;
+  const row = await one(`SELECT * FROM ${SCHEMA}.ofs_bid WHERE id = $1`, [req.params.id]);
+  if (!row) return null;
+  const owned = await branches.branchHasClient(a.code, row.client_ucc);
+  return owned ? row : null;
+}
+
+/** PUT /client/api/branch/bids/:id */
+router.put('/branch/bids/:id(\\d+)', async (req, res, next) => {
+  try {
+    const before = await branchBid(req);
+    if (!before) return res.status(404).json({ error: 'not_found' });
+    if (before.status === 'Cancelled') return res.status(409).json({ error: 'already_cancelled' });
+
+    const b = bids.mergeForModify(before, req.body || {});
+    const ctx = await bids.loadContext(b.issue_id, b.client_ucc, before.id);
+    const errs = validateBid(ctx.issue, b, ctx);
+    if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
+
+    if (!(await branchConfirm(req, res,
+      { ucc: before.client_ucc, issueId: before.issue_id, action: 'modify', bidId: before.id }))) return;
+
+    const r = await bids.updateBid(before, b, ctx, null);
+    await query(`UPDATE ${SCHEMA}.ofs_bid SET otp_verified = true, otp_ref = $2 WHERE id = $1`,
+      [r.id, String(req.body.otp_ref)]).catch(() => {});
+    await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
+    res.json({ bid: r });
+  } catch (e) { dbErr.send(res, next, e); }
+});
+
+/** DELETE /client/api/branch/bids/:id */
+router.delete('/branch/bids/:id(\\d+)', async (req, res, next) => {
+  try {
+    const before = await branchBid(req);
+    if (!before) return res.status(404).json({ error: 'not_found' });
+    if (before.status === 'Cancelled') return res.status(409).json({ error: 'already_cancelled' });
+
+    const blocked = await bids.cancelBlockedMessage();
+    if (blocked) return res.status(422).json({ error: 'window_closed', message: blocked });
+
+    if (!(await branchConfirm(req, res,
+      { ucc: before.client_ucc, issueId: before.issue_id, action: 'cancel', bidId: before.id }))) return;
+
+    const r = await bids.cancelBid(before, req.body && req.body.reason);
+    await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
+    res.json({ bid: r });
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 module.exports = router;

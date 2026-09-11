@@ -44,6 +44,14 @@ const EDITABLE = {
     hint: '1 = 0% margin (institutional), 2 = 100% upfront. BSE OFS guidelines, bulk-bid field 8.',
     check: (v) => ['1', '2'].includes(String(v)) || 'Use 1 or 2'
   },
+  bid_otp_required: {
+    label: 'Client confirms a bid placed for them', kind: 'bool',
+    hint: '1 sends a one-time code to the CLIENT whenever the back office, an AP or a branch '
+      + 'places, changes or withdraws a bid on their behalf. A client bidding for themselves is '
+      + 'never asked for one. Turning this off removes the only record that the client agreed — '
+      + 'which is the record that matters if they later say they did not.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
   nse_header_row: {
     label: 'NSE file: include a header row', kind: 'bool',
     hint: 'BSE documents NO header row and we follow that. NSE\u2019s protocol lists the fields but '
