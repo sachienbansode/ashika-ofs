@@ -2259,8 +2259,16 @@ async function checkSession() {
     if (e.status === 401) {
       // No session: go straight to the sign-in page rather than showing a wall
       // that only tells the user where the door is.
-      var stale = e.body && e.body.error === 'session_superseded';
-      location.replace('/backoffice/login.html' + (stale ? '?reason=superseded' : ''));
+      // Say WHY the session ended. "session_idle" after a 30-minute break is a
+      // different message from "someone signed in elsewhere", and a desk that is
+      // told the wrong one goes looking for a security problem that is not there.
+      var code = (e.body && e.body.error) || '';
+      var reason = code === 'session_superseded' || code === 'session_unknown' ? 'superseded'
+                 : code === 'session_idle' ? 'idle'
+                 : code === 'session_expired' ? 'expired'
+                 : code === 'session_revoked' ? 'revoked'
+                 : '';
+      location.replace('/backoffice/login.html' + (reason ? '?reason=' + reason : ''));
       return false;
     }
     showGate('Cannot reach the server', e.message, 'Check that the app is running and try again.');

@@ -45,8 +45,16 @@
 
   /* ---- why we are here, if the desk sent us ---- */
   var reason = new URLSearchParams(location.search).get('reason');
-  if (reason === 'superseded') {
-    fail($('#notice'), 'This account signed in somewhere else, so the previous desk session ended. Sign in again to continue.');
+  var REASONS = {
+    // "somewhere else" now means another OFS sign-in only. Signing in to the Stage
+    // API portal no longer ends this session, and vice versa.
+    superseded: 'This account signed in to the OFS BackOffice somewhere else, so the previous session ended. Sign in again to continue.',
+    idle: 'You were signed out after 30 minutes without activity. Sign in again to continue.',
+    expired: 'Your session reached its time limit. Sign in again to continue.',
+    revoked: 'This session was ended. Sign in again to continue.'
+  };
+  if (REASONS[reason]) {
+    fail($('#notice'), REASONS[reason]);
     show($('#notice'), true);
   }
 

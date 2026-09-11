@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const { T, adminOne } = require('../db/adminAdapter');
 const sso = require('../lib/sso');
 const audit = require('../lib/audit');
+const staffSession = require('../lib/staffSession');
 
 const router = express.Router();
 
@@ -31,22 +32,23 @@ const ssoLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: tr
 async function loadUser(id) {
   return adminOne(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.role_id AS "roleId",
-            u.is_active, u.mfa_enabled, u.active_sid,
+            u.is_active, u.mfa_enabled,
             r.name AS role, r.requires_mfa, r.permissions
        FROM ${T('users')} u
        JOIN ${T('roles')} r ON r.id = u.role_id
       WHERE u.id = $1`, [id]);
 }
 
-function issueSession(user, sid) {
+/** jti ties this session to a row in ofs.ofs_staff_session — OFS's own, not the portal's. */
+function issueSession(user, jti) {
   let perms = user.permissions;
   if (typeof perms === 'string') { try { perms = JSON.parse(perms); } catch (_) { perms = {}; } }
   return jwt.sign({
-    sub: user.id, email: user.email,
+    sub: user.id, id: user.id, email: user.email,
     firstName: user.first_name, lastName: user.last_name,
     roleId: user.roleId, role: user.role,
     permissions: { pages: (perms && perms.pages) || [] },
-    sid                                   // ties this session to the portal's active_sid
+    jti
   }, process.env.JWT_SECRET, {
     issuer: process.env.JWT_ISSUER || undefined,
     expiresIn: process.env.JWT_EXPIRES_IN || '8h'
@@ -68,14 +70,13 @@ async function redeemTicket(req, token) {
     const e = new Error('ticket does not assert MFA'); e.code = 'MFA_REQUIRED'; throw e;
   }
 
-  // Single active session, shared with the portal: a newer portal login rotates
-  // active_sid, which invalidates this session too.
-  if (user.active_sid && claims.sid && claims.sid !== user.active_sid) {
-    const e = new Error('session superseded'); e.code = 'SESSION_STALE'; throw e;
-  }
-
+  // The portal's own active_sid is deliberately NOT checked here any more. It is one
+  // column shared by two applications, so enforcing it meant a portal sign-in killed
+  // the OFS session and vice versa. OFS owns its session; the ticket is still
+  // single-use, the account is still re-read live, and MFA is still demanded above.
   await sso.redeem(claims, req.ip);                 // single-use; throws on replay
-  return { user, sid: claims.sid || user.active_sid || null };
+  const jti = await staffSession.open(user, req, Number(process.env.OFS_STAFF_TTL_HOURS || 8));
+  return { user, jti };
 }
 
 const FAIL_TEXT = {
@@ -94,8 +95,8 @@ router.get('/sso', ssoLimiter, async (req, res) => {
   const token = req.query.t || req.query.token;
   if (!token) return res.status(400).send(page('Missing sign-in ticket.'));
   try {
-    const { user, sid } = await redeemTicket(req, String(token));
-    res.cookie(COOKIE, issueSession(user, sid), COOKIE_OPTS);
+    const { user, jti } = await redeemTicket(req, String(token));
+    res.cookie(COOKIE, issueSession(user, jti), COOKIE_OPTS);
     await audit.log({ user: { email: user.email, id: user.id }, ip: req.ip },
       'sso_login', 'session', String(user.id), null, { role: user.role });
     // Redirect so the ticket leaves the address bar and the history entry.
@@ -112,15 +113,25 @@ router.post('/sso/exchange', ssoLimiter, express.json(), async (req, res) => {
   const token = req.body && (req.body.t || req.body.token);
   if (!token) return res.status(400).json({ error: 'missing_ticket' });
   try {
-    const { user, sid } = await redeemTicket(req, String(token));
-    res.cookie(COOKIE, issueSession(user, sid), COOKIE_OPTS);
+    const { user, jti } = await redeemTicket(req, String(token));
+    res.cookie(COOKIE, issueSession(user, jti), COOKIE_OPTS);
     res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role } });
   } catch (e) {
     res.status(401).json({ error: e.code || 'sso_failed', message: FAIL_TEXT[e.code] || 'Sign-in failed.' });
   }
 });
 
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
+  // Revoke the row as well as clearing the cookie: a cookie the browser no longer
+  // sends is not a session that cannot be used.
+  try {
+    const jwtLib = require('jsonwebtoken');
+    const tok = (req.cookies && req.cookies[COOKIE]) || null;
+    if (tok) {
+      const c = jwtLib.decode(tok);
+      if (c && c.jti) await staffSession.revoke(c.jti, 'logout');
+    }
+  } catch (e) { /* clearing the cookie still matters */ }
   res.clearCookie(COOKIE, Object.assign({}, COOKIE_OPTS, { maxAge: undefined }));
   res.json({ ok: true });
 });

@@ -21,6 +21,7 @@ const otp = require('../lib/otp');
 const mailer = require('../lib/mailer');
 const { brandedEmail } = require('../lib/emailBranding');
 const audit = require('../lib/audit');
+const staffSession = require('../lib/staffSession');
 
 const router = express.Router();
 
@@ -52,7 +53,7 @@ const DUMMY_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEe.6.qKcQjV0dQnO6dLdD/pTh0R8mVQrLu
 async function loadStaff(email) {
   return adminOne(
     `SELECT u.id, u.email, u.first_name, u.last_name, u.password_hash,
-            u.is_active, u.mfa_enabled, u.auth_provider, u.active_sid,
+            u.is_active, u.mfa_enabled, u.auth_provider,
             u.role_id AS "roleId", r.name AS role, r.requires_mfa, r.use_m365, r.permissions
        FROM ${T('users')} u
        JOIN ${T('roles')} r ON r.id = u.role_id
@@ -60,21 +61,26 @@ async function loadStaff(email) {
 }
 
 /**
- * Start a session. active_sid is rotated exactly as the portal rotates it, so the
- * single-session rule still holds across both apps: signing in here ends an older
- * session elsewhere, and a later portal sign-in ends this one.
+ * Start a session.
+ *
+ * This used to rotate users.active_sid — the platform column the Stage API portal
+ * also rotates — so signing in here ended the portal session and vice versa. The
+ * session now lives in ofs.ofs_staff_session; single-session still holds within OFS
+ * (open() revokes this user's other OFS sessions) and the portal is left alone.
+ *
+ * last_login_at is still stamped: it is a fact about the account, not a session
+ * handle, and the portal's own screens read it.
  */
 async function issueSession(res, user, req) {
-  const sid = crypto.randomUUID();
-  await adminQuery(`UPDATE ${T('users')} SET active_sid = $1, last_login_at = NOW() WHERE id = $2`,
-    [sid, user.id]);
+  await adminQuery(`UPDATE ${T('users')} SET last_login_at = NOW() WHERE id = $1`, [user.id]);
+  const jti = await staffSession.open(user, req, Number(process.env.OFS_STAFF_TTL_HOURS || 8));
 
   const token = jwt.sign({
     sub: user.id, id: user.id, email: user.email,
     firstName: user.first_name, lastName: user.last_name,
     roleId: user.roleId, role: user.role,
     permissions: { pages: sa.pagesOf(user.permissions) },
-    sid
+    jti
   }, process.env.JWT_SECRET, {
     issuer: process.env.JWT_ISSUER || undefined,
     expiresIn: process.env.JWT_EXPIRES_IN || '8h'

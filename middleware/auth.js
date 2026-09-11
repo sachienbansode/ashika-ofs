@@ -8,6 +8,7 @@
  */
 const jwt = require('jsonwebtoken');
 const { T, adminOne } = require('../db/adminAdapter');
+const staffSession = require('../lib/staffSession');
 
 const permCache = new Map();          // id -> { at, perms }
 const TTL_MS = 15 * 1000;             // short: live enough, cheap enough for a bidding window
@@ -34,7 +35,7 @@ async function loadUser(id) {
   if (hit && Date.now() - hit.at < TTL_MS) return hit.perms;
 
   const row = await adminOne(
-    `SELECT u.id, u.email, u.role_id AS "roleId", u.active_sid,
+    `SELECT u.id, u.email, u.role_id AS "roleId",
             r.name AS role, r.permissions
        FROM ${T('users')} u
        JOIN ${T('roles')} r ON r.id = u.role_id
@@ -50,7 +51,6 @@ async function loadUser(id) {
     email: row.email,
     roleId: row.roleId,
     role: row.role,
-    activeSid: row.active_sid,
     permissions: { pages: (perms && perms.pages) || [] }
   };
   permCache.set(String(id), { at: Date.now(), perms: user });
@@ -77,13 +77,26 @@ async function authMiddleware(req, res, next) {
   catch (e) { console.error('[auth] perm load failed:', e.message); return res.status(503).json({ error: 'auth_unavailable' }); }
   if (!user) return res.status(401).json({ error: 'user_inactive' });
 
-  // Single active session, shared with the portal: signing in again anywhere
-  // rotates users.active_sid and every older token — including this one — dies.
-  if (user.activeSid && claims.sid && claims.sid !== user.activeSid) {
-    return res.status(401).json({ error: 'session_superseded' });
-  }
+  /*
+   * Single active session WITHIN OFS, tracked in ofs.ofs_staff_session.
+   *
+   * It used to be users.active_sid — one column on the platform's users table that
+   * the Stage API portal rotates too, so signing in to either application ended the
+   * other. That is why people were being logged out at random. OFS now owns its own
+   * session and leaves that column to the portal.
+   *
+   * A token minted before this change carries no jti; it is refused rather than
+   * waved through, so the rule cannot be skipped by presenting an old token.
+   */
+  const reason = await staffSession.check(claims.jti).catch((e) => {
+    console.error('[auth] session check failed:', e.message);
+    return 'session_store_unavailable';
+  });
+  if (reason === 'session_store_unavailable') return res.status(503).json({ error: reason });
+  if (reason) return res.status(401).json({ error: reason === 'no_session' ? 'session_superseded' : reason });
 
-  req.user = Object.assign({ sub: claims.sub }, user);
+  staffSession.touch(claims.jti);
+  req.user = Object.assign({ sub: claims.sub, jti: claims.jti }, user);
   next();
 }
 
