@@ -24,10 +24,11 @@ const ASSETS = [
   { file: 'public/shared/theme.css',      min: 6000, markers: ['.tabs', '.btn', ':root'] },
   { file: 'public/backoffice/style.css',  min: 15000, markers: ['.pane', '.cards', '.no-grant', '.f .fh'] },
   { file: 'public/backoffice/login.css',  min: 1500, markers: ['.btn-o'] },
-  { file: 'public/client/style.css',      min: 6000, markers: ['.issue', '.bidbox', '.bb-row'] },
+  { file: 'public/client/style.css',      min: 6000, markers: ['.issue', '.bidbox', '.bb-row', '.bb-otp', '.tabs.door'] },
   { file: 'public/shared/rules.css',      min: 1000, markers: ['.rules'] },
   { file: 'public/backoffice/app.js',     min: 40000, markers: ['function boot(', 'function applyGrants('] },
-  { file: 'public/client/client.js',      min: 12000, markers: ['function boot(', 'function bidBox('] },
+  { file: 'public/client/client.js',      min: 12000, markers: ['function boot(', 'function bidBox(',
+                                                                 'function sendBranchCode(', 'function loadClients('] },
   { file: 'public/shared/rules.js',       min: 3000, markers: [] }
 ];
 

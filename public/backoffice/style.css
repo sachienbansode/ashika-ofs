@@ -499,3 +499,10 @@ th.off-file-first,td.off-file-first{border-left:2px solid rgba(18,110,130,.28)}
 /* A negative free margin is not a rounding artefact — it means live bids exceed the
    margin behind them, and it must not read as just another number. */
 td.n.neg{color:var(--red);font-weight:650}
+
+/* Issue names are long — "COALINDIA — Coal India Ltd · Retail 03 Sep 15:15" — and a
+   dropdown that clips them leaves the desk guessing which leg it picked. Let the
+   control take the width it needs, and scroll the bar rather than the text. */
+.bar select{max-width:100%;text-overflow:ellipsis}
+#pbIssue,#bkIssue,#exIssue{min-width:260px}
+@media (min-width:900px){ #pbIssue{min-width:420px} }

@@ -57,6 +57,87 @@ async function api(path, opts) {
   return json;
 }
 
+/* ---------------------------------------------------------- branch / AP sign-in --
+ * The address is matched against the branch's own LD record and the code goes THERE.
+ * One address can belong to several branch codes — a regional manager's does — so
+ * the choice is offered from the list the server resolved when it issued the code,
+ * never from anything typed here.
+ */
+var BR = { ref: null, branches: [] };
+
+function branchHint(msg, bad) {
+  var h = $('#brHint');
+  h.className = 'hint' + (bad ? ' bad' : '');
+  h.textContent = msg;
+}
+
+async function sendBranchCode() {
+  var email = $('#brEmail').value.trim().toLowerCase();
+  var btn = $('#brSendBtn');
+  btn.disabled = true;
+  branchHint('Sending…');
+  try {
+    var r = await api('/client/auth/branch/start', { method: 'POST', body: { email: email } });
+    BR.ref = r.ref;
+    BR.branches = r.branches || [];
+    S.ref = null;                       // this is the branch door, not the client one
+    S.identifier = email;
+    showIdentifier(email, 'email');
+
+    $('#otpSentTo').textContent = r.sent_to ? ('Sent to ' + r.sent_to) : 'Check your branch mailbox';
+    $('#otpHint').className = 'hint';
+    $('#otpHint').textContent = r.branches && r.branches.length > 1
+      ? 'This address is registered against ' + r.branches.length + ' branch codes — you will pick one next.'
+      : (r.message || '');
+    $('#demoOtp').innerHTML = r.test_mode
+      ? '<div class="demo-otp"><span>Test mode — nothing was sent. Code:</span><b>' +
+        esc(r.test_code) + '</b></div>' : '';
+    $('#testBanner').classList.toggle('hide', !r.test_mode);
+
+    S.resendAt = Date.now() + (r.resend_after_s || 60) * 1000;
+    buildOtpBoxes();
+    setStep(2); showPane('otp');
+    var first = $('#otpBox input'); if (first) first.focus();
+    branchHint('The address registered against your branch code in Ashika\'s records.');
+  } catch (e) {
+    // Branch addresses are business addresses already on contract notes, so naming
+    // the failure costs nothing and saves a support call. "Disabled by the desk" and
+    // "not registered" send someone to completely different places.
+    branchHint((e.body && e.body.message) || e.message || 'Could not send a code just now.', true);
+    $('#brEmail').focus();
+  } finally { btn.disabled = false; }
+}
+
+/** Verify a branch code. Called by the shared OTP box when BR.ref is set. */
+async function verifyBranchCode(code, chosen) {
+  var r = await api('/client/auth/branch/verify', { method: 'POST',
+    body: { ref: BR.ref, otp: code, branch_code: chosen || null } });
+
+  if (r.choose_branch) {
+    // More than one branch on this address: ask, now that the code is verified.
+    $('#brPick').classList.remove('hide');
+    $('#brPick').innerHTML = '<div class="fl">Which branch are you signing in as?</div>' +
+      BR.branches.filter(function (b) { return (r.branch_codes || []).indexOf(b.code) >= 0; })
+        .map(function (b) {
+          return '<button type="button" class="acct" data-br="' + esc(b.code) + '">' +
+            '<div><b>' + esc(b.code) + '</b> — ' + esc(b.name || '') + '</div>' +
+            '<div class="cd">' + esc(b.type_label || '') + '</div></button>';
+        }).join('');
+    showPane('branch');
+    $('#brPick').addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-br]');
+      if (b) verifyBranchCode(code, b.dataset.br).catch(function (e) {
+        branchHint((e.body && e.body.message) || e.message || 'Sign-in failed.', true);
+      });
+    });
+    return;
+  }
+
+  S.branch = r.branch;
+  S.client = { name: r.branch.name, ucc: r.branch.code };
+  enterApp();
+}
+
 /* ---------------- step chrome ---------------- */
 function setStep(n) {
   [1, 2, 3].forEach(function (i) {
@@ -66,10 +147,16 @@ function setStep(n) {
   });
 }
 function showPane(which) {
-  ['Details', 'Otp', 'Choose'].forEach(function (p) {
-    $('#pane' + p).classList.toggle('hide', p.toLowerCase() !== which);
+  // 'Branch' is the second door on step 1; it is hidden alongside Details whenever
+  // the flow moves on, so a half-finished branch form cannot sit under the code box.
+  ['Details', 'Branch', 'Otp', 'Choose'].forEach(function (p) {
+    var el = $('#pane' + p);
+    if (el) el.classList.toggle('hide', p.toLowerCase() !== which);
   });
 }
+
+/** Show or hide one element. */
+function show(el, on) { if (el) el.classList.toggle('hide', !on); }
 
 /* ---------------- step 1: details ---------------- */
 var EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -137,6 +224,7 @@ async function sendCode() {
   try {
     var r = await api('/client/auth/start', { method: 'POST', body: { identifier: identifier } });
     S.ref = r.ref || null;
+    BR.ref = null;                      // the client door, not the branch one
 
     // Keep what they typed on screen for the rest of the sign-in. Without it the
     // OTP step is anonymous: nothing tells them WHICH code or number the code went
@@ -240,6 +328,12 @@ async function verifyCode() {
   if (code.length !== 6) { otpError('Enter all six digits.'); return; }
   busy('#verifyBtn', true, 'Verifying…');
   try {
+    // One code box, two doors. BR.ref is set only by the branch door, and the two
+    // are never both live: sendBranchCode clears S.ref and vice versa.
+    if (BR.ref) {
+      await verifyBranchCode(code, null);
+      return;
+    }
     var r = await api('/client/auth/verify', { method: 'POST', body: { ref: S.ref, otp: code } });
     if (r.choose) { S.choose = r.choose; renderAccounts(r.accounts); return; }
     S.client = r.client;
@@ -281,14 +375,21 @@ function tickResend() {
 /* ---------------- signed in ---------------- */
 function enterApp() {
   var c = S.client || {};
+  var br = S.branch || null;
   $('#loginStage').classList.add('hide');
   $('#app').classList.remove('hide');
-  $('#clientAv').textContent = initials(c.name);
-  $('#clientName').textContent = c.name || 'Client';
-  $('#clientUcc').textContent = c.ucc || '';
+  $('#clientAv').textContent = initials(br ? br.code : c.name);
+  $('#clientName').textContent = br ? (br.name || br.code) : (c.name || 'Client');
+  $('#clientUcc').textContent = br
+    ? br.type_label + ' ' + br.code + ' · ' + br.client_count + ' client(s)'
+    : (c.ucc || '');
+  // A branch has clients; a client does not. Naming the tab "My bids" for a branch
+  // holding two hundred clients is wrong in a way that matters.
+  show($('#tabClients'), !!br);
+  $('#tabBids').textContent = br ? 'Bids' : 'My bids';
   setStep(3);
   loadIssues();
-  loadBids();
+  loadBids(0);
   if (S.timer) clearInterval(S.timer);
   S.timer = setInterval(function () { loadIssues(true); }, 15000);
 }
@@ -308,10 +409,12 @@ function showCTab(t) {
   });
 
   $$('#cTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.ctab === t); });
-  ['issues', 'bids', 'allot', 'rules'].forEach(function (k) {
-    $('#cpane-' + k).classList.toggle('hide', k !== t);
+  ['issues', 'bids', 'clients', 'allot', 'rules'].forEach(function (k) {
+    var el = $('#cpane-' + k);
+    if (el) el.classList.toggle('hide', k !== t);
   });
-  if (t === 'bids') loadBids();
+  if (t === 'bids') loadBids(0);
+  if (t === 'clients') loadClients();
   if (t === 'allot') loadAllotments();
   if (t === 'rules') renderRules($('#rulesBox'));
 }
@@ -369,15 +472,23 @@ function bidBox(i, mine, retOpen, hniOpen) {
     return '<div class="note" style="margin-top:11px">Bidding is closed for this offer.</div>';
   }
   var id = i.id;
+  var branch = !!S.branch;
   var cats = [];
   if (retOpen) cats.push('Retail');
   if (hniOpen) cats.push('HNI');
   var sel = mine && cats.indexOf(mine.category) >= 0 ? mine.category : cats[0];
 
   return '<div class="bidbox" data-bid-issue="' + id + '">' +
-    (mine
-      ? '<div class="bb-head">Change your bid <span class="bb-sub">allowed until the cut-off</span></div>'
-      : '<div class="bb-head">Place a bid</div>') +
+    (branch
+      ? '<div class="bb-head">Bid for a client ' +
+        '<span class="bb-sub">the client confirms with a code sent to them</span></div>'
+      : mine
+        ? '<div class="bb-head">Change your bid <span class="bb-sub">allowed until the cut-off</span></div>'
+        : '<div class="bb-head">Place a bid</div>') +
+    (branch
+      ? '<div class="bb-row"><label class="bb-f" style="grid-column:1/-1"><span>Client UCC</span>' +
+        '<input type="text" data-bf="ucc" placeholder="One of your clients" autocomplete="off"></label></div>'
+      : '') +
     '<div class="bb-row">' +
       (cats.length > 1
         ? '<label class="bb-f"><span>Category</span><select data-bf="cat">' +
@@ -401,8 +512,9 @@ function bidBox(i, mine, retOpen, hniOpen) {
     '<div class="bb-verdict" data-bf="verdict"></div>' +
     '<div class="bb-actions">' +
       '<button class="btn btn-o btn-sm" data-bf="check">Check</button>' +
-      '<button class="btn btn-p btn-sm" data-bf="submit">' + (mine ? 'Update bid' : 'Place bid') + '</button>' +
-      (mine ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
+      '<button class="btn btn-p btn-sm" data-bf="submit">' +
+        (branch ? 'Place bid' : mine ? 'Update bid' : 'Place bid') + '</button>' +
+      (mine && !branch ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
     '</div>' +
   '</div>';
 }
@@ -411,14 +523,20 @@ function bidBox(i, mine, retOpen, hniOpen) {
 function readBidBox(box) {
   var g = function (k) { return box.querySelector('[data-bf="' + k + '"]'); };
   var cutoff = g('type').value === 'cutoff';
-  return {
+  var body = {
     issue_id: box.getAttribute('data-bid-issue'),
     category: g('cat').value,
     qty: Number(g('qty').value) || 0,
     is_cutoff: cutoff,
     price: cutoff ? null : Number(g('price').value) || 0
   };
+  // A branch nominates the client; a client never does — their session decides.
+  if (S.branch && g('ucc')) body.client_ucc = g('ucc').value.trim().toUpperCase();
+  return body;
 }
+
+/** Which API this session bids through. */
+function bidBase() { return S.branch ? '/client/api/branch/bids' : '/client/api/bids'; }
 
 function showVerdict(box, kind, lines) {
   var v = box.querySelector('[data-bf="verdict"]');
@@ -431,7 +549,7 @@ async function checkBid(box, quiet) {
   var editing = BIDS_BY_ISSUE[body.issue_id];
   if (editing) body.editingId = editing.id;
   try {
-    var r = await api('/client/api/bids/validate', { method: 'POST', body: body });
+    var r = await api(bidBase() + '/validate', { method: 'POST', body: body });
     if (r.ok) {
       showVerdict(box, 'ok', [
         'Order value ' + rupee(r.value, 0) + '.',
@@ -448,26 +566,92 @@ async function checkBid(box, quiet) {
   }
 }
 
-async function submitBid(box) {
+async function submitBid(box, otp) {
   var body = readBidBox(box);
-  var editing = BIDS_BY_ISSUE[body.issue_id];
+  // A branch bids for a named client, so BIDS_BY_ISSUE — which is keyed by issue —
+  // is not "the bid being edited". Only a client session edits in place here.
+  var editing = S.branch ? null : BIDS_BY_ISSUE[body.issue_id];
   var btn = box.querySelector('[data-bf="submit"]');
+  if (otp) { body.otp_ref = otp.ref; body.otp = otp.code; }
   btn.disabled = true;
   try {
     if (editing) {
-      await api('/client/api/bids/' + editing.id, { method: 'PUT', body: body });
+      await api(bidBase() + '/' + editing.id, { method: 'PUT', body: body });
       toast('Bid updated', 'Your bid has been changed.', 'ok');
     } else {
-      await api('/client/api/bids', { method: 'POST', body: body });
-      toast('Bid placed', 'Your bid is with the desk.', 'ok');
+      await api(bidBase(), { method: 'POST', body: body });
+      toast('Bid placed', S.branch
+        ? 'Placed for ' + body.client_ucc + ', confirmed by the client.'
+        : 'Your bid is with the desk.', 'ok');
     }
+    hideBidOtp(box);
     await loadIssues();
+    if (S.branch) loadBids(0);
   } catch (e) {
     if (e.status === 401) return sessionLost();
-    var errs = (e.body && e.body.errors) || [e.message];
+    if (e.status === 428 && e.body && e.body.error === 'otp_required') {
+      return showBidOtp(box, body, e.body.action || 'place');
+    }
+    var errs = (e.body && e.body.errors) || [(e.body && e.body.message) || e.message];
     showVerdict(box, 'bad', errs);
     toast(editing ? 'Bid not updated' : 'Bid not placed', errs[0], 'bad');
   } finally { btn.disabled = false; }
+}
+
+/* --------------------------------------------------- the client's confirmation --
+ * A branch does not place a bid on its own say-so. The code goes to the CLIENT's
+ * registered mobile and email, and the branch types back what the client tells them.
+ */
+function hideBidOtp(box) {
+  var el = box.querySelector('.bb-otp');
+  if (el) el.remove();
+}
+
+function showBidOtp(box, body, action) {
+  hideBidOtp(box);
+  var el = document.createElement('div');
+  el.className = 'bb-otp';
+  el.innerHTML =
+    '<b>' + esc(body.client_ucc || 'The client') + ' must confirm this.</b><br>' +
+    'A one-time code goes to their registered mobile and email — not to you.' +
+    '<div class="bb-actions" style="margin-top:9px">' +
+      '<button class="btn btn-o btn-sm" data-otp="send">Send code to client</button>' +
+      '<input type="text" data-otp="code" inputmode="numeric" maxlength="6" ' +
+        'placeholder="6-digit code" style="flex:0 1 150px" disabled>' +
+      '<button class="btn btn-p btn-sm" data-otp="go" disabled>Confirm and place</button>' +
+    '</div><div class="bb-otp-note" data-otp="note"></div>';
+  box.appendChild(el);
+
+  var note = el.querySelector('[data-otp="note"]');
+  var ref = null;
+
+  el.querySelector('[data-otp="send"]').addEventListener('click', async function () {
+    var b = this;
+    b.disabled = true;
+    try {
+      var r = await api('/client/api/branch/bids/otp', { method: 'POST', body: {
+        client_ucc: body.client_ucc, issue_id: body.issue_id, action: action,
+        detail: inr(body.qty, 0) + ' shares at ' + (body.is_cutoff ? 'cut-off' : rupee(body.price)) } });
+      ref = r.ref;
+      el.querySelector('[data-otp="code"]').disabled = false;
+      el.querySelector('[data-otp="go"]').disabled = false;
+      el.querySelector('[data-otp="code"]').focus();
+      note.innerHTML = 'Sent to ' + esc(r.sent_to) + ' · valid ' + r.ttl_minutes + ' minutes.' +
+        (r.test_code ? ' <b>Test mode: ' + esc(r.test_code) + '</b>' : '');
+    } catch (e) {
+      note.textContent = (e.body && e.body.message) || e.message;
+    } finally { b.disabled = false; }
+  });
+
+  var go = function () {
+    var code = el.querySelector('[data-otp="code"]').value.replace(/\D/g, '');
+    if (!ref || code.length !== 6) { note.textContent = 'Enter the 6-digit code the client received.'; return; }
+    submitBid(box, { ref: ref, code: code });
+  };
+  el.querySelector('[data-otp="go"]').addEventListener('click', go);
+  el.querySelector('[data-otp="code"]').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') go();
+  });
 }
 
 async function withdrawBid(box) {
@@ -476,7 +660,7 @@ async function withdrawBid(box) {
   if (!editing) return;
   if (!window.confirm('Withdraw bid ' + editing.ref + '? This cannot be undone.')) return;
   try {
-    await api('/client/api/bids/' + editing.id, { method: 'DELETE' });
+    await api(bidBase() + '/' + editing.id, { method: 'DELETE' });
     toast('Bid withdrawn', editing.ref + ' has been cancelled.', 'ok');
     await loadIssues();
   } catch (e) {
@@ -504,21 +688,45 @@ async function loadIssues(quiet) {
   }
 }
 
-async function loadBids() {
+/** Ten rows a page, server-side — a branch can hold hundreds of clients. */
+var BIDS_PAGE = { offset: 0, limit: 10, total: 0 };
+
+async function loadBids(offset) {
+  BIDS_PAGE.offset = Math.max(0, offset == null ? BIDS_PAGE.offset : offset);
   try {
-    var d = await api('/client/api/me/bids');
-    var m = d.margin || {};
-    $('#marginSummary').textContent =
-      'Available ' + rupee(m.available, 0) + ' · used ' + rupee(m.used, 0) + ' · free ' + rupee(m.free, 0);
+    var d = await api('/client/api/me/bids?limit=' + BIDS_PAGE.limit + '&offset=' + BIDS_PAGE.offset);
+    var branch = d.actor && d.actor.kind !== 'client';
+    BIDS_PAGE.total = d.total || 0;
+
+    $('#bidsTitle').textContent = branch ? 'Bids — ' + (d.actor.branch_code || '') : 'My bids';
+    var m = d.margin || null;
+    $('#marginSummary').textContent = m
+      ? 'Available ' + rupee(m.available, 0) + ' · used ' + rupee(m.used, 0) + ' · free ' + rupee(m.free, 0)
+      : (branch ? 'Margin is held per client — open a client to see theirs.' : '');
 
     var b = d.bids || [];
+    var from = BIDS_PAGE.total ? BIDS_PAGE.offset + 1 : 0;
+    var to = Math.min(BIDS_PAGE.offset + BIDS_PAGE.limit, BIDS_PAGE.total);
+    $('#bidsCount').textContent = BIDS_PAGE.total
+      ? from + '–' + to + ' of ' + BIDS_PAGE.total + ' bid(s)' : 'no bids yet';
+
     $('#myBidsTbl').innerHTML = b.length ? (
-      '<thead><tr><th>Ref</th><th>Scrip</th><th>Category</th>' +
+      '<thead><tr><th>Ref</th><th>Scrip</th>' +
+      (branch ? '<th>Client</th><th>Placed by</th>' : '') +
+      '<th>Category</th>' +
       '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th>' +
       '<th>Status</th><th>Placed</th></tr></thead><tbody>' +
       b.map(function (x) {
         return '<tr><td class="m">' + esc(x.ref) + '</td>' +
           '<td><b>' + esc(x.symbol || '') + '</b></td>' +
+          (branch
+            ? '<td class="m">' + esc(x.client_ucc) +
+              (x.client_name ? '<br><span class="cd">' + esc(x.client_name) + '</span>' : '') + '</td>' +
+              // Whether the CLIENT placed it or the branch did is the distinction an
+              // AP most needs when deciding whether to act.
+              '<td><span class="chip ' + (x.placed_by === 'client' ? 'open' : 'grey') + '">' +
+                esc(placedByLabel(x.placed_by)) + '</span></td>'
+            : '') +
           '<td><span class="chip ' + (x.category === 'Retail' ? 'retail' : 'hni') + '">' +
             esc(x.category) + '</span></td>' +
           '<td class="n">' + inr(x.qty, 0) + '</td>' +
@@ -528,10 +736,90 @@ async function loadBids() {
             '">' + esc(x.status) + '</span></td>' +
           '<td class="m">' + dt(x.created_at) + '</td></tr>';
       }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="tbl-empty">You have not placed a bid yet.</td></tr></tbody>';
+    ) : '<tbody><tr><td class="tbl-empty">' +
+        (branch ? 'No bids for your clients yet.' : 'You have not placed a bid yet.') +
+        '</td></tr></tbody>';
+
+    $('#bidsPager').innerHTML = BIDS_PAGE.total > BIDS_PAGE.limit
+      ? '<button class="btn btn-o btn-sm" id="bidsPrev"' + (BIDS_PAGE.offset <= 0 ? ' disabled' : '') + '>← Newer</button>' +
+        '<button class="btn btn-o btn-sm" id="bidsNext"' + (to >= BIDS_PAGE.total ? ' disabled' : '') + '>Older →</button>'
+      : '';
+    if ($('#bidsPrev')) $('#bidsPrev').addEventListener('click', function () {
+      loadBids(BIDS_PAGE.offset - BIDS_PAGE.limit);
+    });
+    if ($('#bidsNext')) $('#bidsNext').addEventListener('click', function () {
+      loadBids(BIDS_PAGE.offset + BIDS_PAGE.limit);
+    });
   } catch (e) {
     if (e.status === 401) return sessionLost();
-    toast('Could not load your bids', e.message, 'bad');
+    toast('Could not load bids', e.message, 'bad');
+  }
+}
+
+function placedByLabel(v) {
+  return v === 'desk' ? 'Back office' : v === 'client' ? 'Client'
+       : v === 'ap' ? 'AP' : v === 'branch' ? 'Branch' : (v || '');
+}
+
+/**
+ * The list on screen as a file. Built from the API rather than from the drawn rows,
+ * so it carries every field and every page — a CSV of what happened to be visible is
+ * not a record of anything.
+ */
+async function downloadBidsCsv() {
+  var btn = $('#bidsCsv');
+  btn.disabled = true;
+  try {
+    var d = await api('/client/api/me/bids?all=1');
+    var rows = d.bids || [];
+    if (!rows.length) { toast('Nothing to download', 'There are no bids yet.', 'warn'); return; }
+    var head = ['Ref', 'Client UCC', 'Client', 'Branch', 'Placed by', 'Symbol', 'ISIN', 'Exchange',
+                'Category', 'Bid type', 'Quantity', 'Price', 'Value', 'Status', 'Reject reason',
+                'Confirmed by OTP', 'Placed at', 'Last changed'];
+    var cell = function (v) {
+      var t = v == null ? '' : String(v);
+      return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    };
+    var lines = [head.join(',')].concat(rows.map(function (x) {
+      return [x.ref, x.client_ucc, x.client_name || '', x.branch_code || '', placedByLabel(x.placed_by),
+              x.symbol || '', x.isin || '', x.exchange || '', x.category,
+              x.is_cutoff ? 'Cut-off' : 'Limit', x.qty, x.is_cutoff ? '' : x.price, x.value,
+              x.status, x.reject_reason || '', x.otp_verified ? 'Yes' : 'No',
+              x.created_at, x.updated_at].map(cell).join(',');
+    }));
+    var name = 'OFS_Bids_' + ((d.actor && (d.actor.branch_code || d.actor.ucc)) || 'me') + '_' +
+               new Date().toISOString().slice(0, 10) + '.csv';
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    toast('Downloaded', rows.length + ' bid(s), all fields.', 'ok');
+  } catch (e) {
+    if (e.status === 401) return sessionLost();
+    toast('Download failed', e.message, 'bad');
+  } finally { btn.disabled = false; }
+}
+
+/** The clients this branch may act for. */
+async function loadClients() {
+  try {
+    var q = $('#clQ').value.trim();
+    var d = await api('/client/api/me/clients' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    var list = d.clients || [];
+    $('#clCount').textContent = list.length + ' client(s)';
+    $('#clientTbl').innerHTML = list.length ? (
+      '<thead><tr><th>UCC</th><th>Name</th><th>Category</th><th>Status</th></tr></thead><tbody>' +
+      list.map(function (c) {
+        return '<tr><td class="m">' + esc(c.ucc) + '</td><td>' + esc(c.name || '') + '</td>' +
+          '<td>' + esc(c.category || '') + '</td>' +
+          '<td><span class="chip ' + (c.active ? 'open' : 'grey') + '">' +
+            (c.active ? 'Active' : 'Inactive') + '</span></td></tr>';
+      }).join('') + '</tbody>'
+    ) : '<tbody><tr><td class="tbl-empty">No clients are mapped to your branch.</td></tr></tbody>';
+  } catch (e) {
+    if (e.status === 401) return sessionLost();
+    toast('Could not load clients', e.message, 'bad');
   }
 }
 
@@ -585,6 +873,30 @@ function tickClocks() {
 /* ---------------- boot ---------------- */
 async function boot() {
   // A real <form>, so Enter and a phone's "Send" key submit like anywhere else.
+  /* --------------------------------------------------------------- the two doors --
+   * A client signs in with whatever they have; a branch with the address on its LD
+   * record. Same card, because a second URL is a second thing to get wrong.
+   */
+  $$('#doorTabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var door = b.dataset.door;
+      $$('#doorTabs button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      show($('#paneDetails'), door === 'client');
+      show($('#paneBranch'), door === 'branch');
+      $('#loginSub').textContent = door === 'branch'
+        ? 'Sign in with the email registered for your branch or AP code'
+        : 'Sign in with your client code, registered mobile or email';
+      (door === 'branch' ? $('#brEmail') : $('#idInput')).focus();
+    });
+  });
+  $('#brEmail').addEventListener('input', function () {
+    var ok = EMAIL_RE.test($('#brEmail').value.trim());
+    $('#brSendBtn').disabled = !ok;
+    // The tick is driven by a class on the FIELD, not on the tick itself (style.css).
+    $('#brEmail').parentNode.classList.toggle('valid', ok);
+  });
+  $('#paneBranch').addEventListener('submit', function (e) { e.preventDefault(); sendBranchCode(); });
+
   $('#paneDetails').addEventListener('submit', function (e) { e.preventDefault(); sendCode(); });
   $('#idInput').addEventListener('input', refreshDetails);
   $('#idInput').addEventListener('blur', refreshDetails);
@@ -597,6 +909,9 @@ async function boot() {
     if (b) chooseAccount(b.dataset.ucc);
   });
   $('#signOutBtn').addEventListener('click', signOut);
+  $('#bidsCsv').addEventListener('click', downloadBidsCsv);
+  $('#clGo').addEventListener('click', loadClients);
+  $('#clQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadClients(); });
   $$('#cTabs button').forEach(function (b) {
     b.addEventListener('click', function () { showCTab(b.dataset.ctab); });
   });
@@ -607,7 +922,7 @@ async function boot() {
     var box = e.target.closest('.bidbox');
     if (!box) return;
     if (e.target.closest('[data-bf="check"]'))  { e.preventDefault(); checkBid(box); return; }
-    if (e.target.closest('[data-bf="submit"]')) { e.preventDefault(); submitBid(box); return; }
+    if (e.target.closest('[data-bf="submit"]')) { e.preventDefault(); submitBid(box, null); return; }
     if (e.target.closest('[data-bf="cancel"]')) { e.preventDefault(); withdrawBid(box); }
   });
   $('#clientIssues').addEventListener('change', function (e) {
