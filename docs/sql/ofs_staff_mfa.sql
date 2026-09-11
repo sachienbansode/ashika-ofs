@@ -40,6 +40,23 @@ SELECT r.name AS role, r.requires_mfa, r.permissions->'pages' AS pages
  WHERE r.name IN ('OFS-Backoffice','Admin','SuperAdmin')
  ORDER BY r.name;
 
+-- ------------------------------------------------------------ 4. IF YOU ARE LOCKED OUT
+-- Symptom: the password is accepted, then "We could not send your code just now."
+-- That is mail, not the password. On the app server:
+--
+--     cd /var/apps/ashika-ofs-app && npm run check-mail
+--
+-- It names which of the four things is wrong — no SMTP row, no host, a password that
+-- will not decrypt (API_KEY_SECRET here differs from the portal's, the most common
+-- cause), or the SMTP server itself refusing. To get back in meanwhile:
+--
+--     echo 'OFS_STAFF_OTP_TEST_MODE=true' >> .env && pm2 restart ashika-ofs-app
+--
+-- ...then fix the mail and set it back to false. Or turn MFA off again:
+--
+--     UPDATE "admin-staging-api".roles SET requires_mfa = false
+--      WHERE name IN ('OFS-Backoffice','Admin','SuperAdmin');
+
 -- No restart needed: roles are read live on every request.
 --
 -- Before running this, check that mail actually works — Masters → Settings shows

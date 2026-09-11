@@ -11,6 +11,7 @@
     "check": "node -e \"require('fs').readdirSync('.',{recursive:true}).filter(f=>f.endsWith('.js')&&!f.includes('node_modules')).forEach(f=>{require('child_process').execSync('node --check '+JSON.stringify(f));console.log('ok '+f)})\"",
     "check-env": "node scripts/check-env.js",
     "check-feed": "node scripts/check-feed.js",
+    "check-mail": "node scripts/check-mail.js",
     "dev": "node --watch server.js",
     "fetch-issues": "node scripts/fetch-issues.js",
     "migrate": "node db/migrate.js",

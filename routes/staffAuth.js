@@ -142,8 +142,11 @@ async function startMfa(req, user) {
     purpose: 'ofs_staff_otp', triggeredBy: 'desk-signin', ip: ipOf(req)
   });
   if (!r.sent) {
-    // Say what actually failed. "Sign-in failed" when SMTP is down sends the desk
-    // hunting for a password problem that does not exist.
+    // The browser gets a generic sentence — an unauthenticated caller has no business
+    // learning the SMTP host or why it refused — but the SERVER LOG gets the reason,
+    // because this failure locks the desk out of the only screen that could show it.
+    console.error('[staff-auth] OTP email failed for ' + user.email + ': ' +
+      (r.error || 'unknown') + '  — run `npm run check-mail` on this server for the cause');
     const e = new Error(r.error || 'otp_send_failed');
     e.code = 'OTP_SEND_FAILED';
     throw e;
@@ -194,7 +197,9 @@ router.post('/login', loginLimiter, async (req, res) => {
   } catch (e) {
     if (e.code === 'OTP_SEND_FAILED') {
       return res.status(503).json({ error: 'otp_send_failed',
-        message: 'We could not send your code just now. Please try again shortly.' });
+        message: 'We could not send your sign-in code — email is not working from this server. '
+               + 'Your password was accepted; this is not a password problem. '
+               + 'Tell IT, or sign in from the portal instead.' });
     }
     console.error('[staff-auth] login failed:', e.message);
     return res.status(500).json({ error: 'server_error' });
