@@ -38,7 +38,8 @@ function grantLevel(page) {
   return best;
 }
 function canEdit(page) { return grantLevel(page) >= GRANT_LEVELS.edit; }
-var STATE = { dash: null, issues: [], book: [], editing: null, timer: null, tab: 'dash', mtab: 'issues' };
+var STATE = { dash: null, issues: [], book: [], editing: null, timer: null, tab: 'dash', mtab: 'issues',
+              settings: {} };
 
 /* ---------------- helpers ---------------- */
 function esc(s) {
@@ -411,8 +412,12 @@ async function loadDash() {
     var d = await api('/dashboard');
     STATE.dash = d;
     STATE.issues = d.issues || [];
+    // The caps the bid form works from — retail cap, HNI minimum, cut-off — come
+    // from the same payload rather than being hard-coded in two places.
+    STATE.settings = d.settings || STATE.settings || {};
     renderDash(d);
     fillIssueSelects();
+    refreshBidForm();
   } catch (e) {
     if (e.status === 401) {
       // The session died under us - stop polling and say so, rather than
@@ -436,8 +441,11 @@ function fillIssueSelects() {
     var el = $(sel); if (el) el.disabled = none;
   });
 
+  // Every list gets the symbol AND the company; the bid form also gets the window
+  // that is closing, because "which COALINDIA?" is a real question on a day with a
+  // T and a T+1 leg open at once.
   var opts = STATE.issues.map(function (i) {
-    return '<option value="' + i.id + '">' + esc(i.symbol) + ' — ' + esc(i.company) + '</option>';
+    return '<option value="' + i.id + '">' + esc(issueOptionLabel(i, false)) + '</option>';
   }).join('');
   ['#bkIssue', '#exIssue'].forEach(function (sel) {
     var el = $(sel); if (!el) return;
@@ -445,12 +453,95 @@ function fillIssueSelects() {
     el.innerHTML = '<option value="">All issues</option>' + opts;
     if (cur) el.value = cur;
   });
+
   var pb = $('#pbIssue');
   if (pb) {
+    // Only what can actually be bid on. Offering a closed issue and then refusing
+    // the bid wastes the one thing a desk has none of during a window.
+    var live = STATE.issues.filter(isBiddable);
     var c = STATE.editing ? String(STATE.editing.issue_id) : pb.value;
-    pb.innerHTML = opts;
+    // An issue being modified stays selectable even if its window just closed,
+    // otherwise the form silently jumps to a different issue mid-edit.
+    if (STATE.editing && !live.some(function (i) { return String(i.id) === c; })) {
+      var cur = STATE.issues.filter(function (i) { return String(i.id) === c; });
+      live = cur.concat(live);
+    }
+    pb.innerHTML = live.length
+      ? live.map(function (i) {
+          return '<option value="' + i.id + '">' + esc(issueOptionLabel(i, true)) + '</option>';
+        }).join('')
+      : '<option value="">No OFS is open for bidding</option>';
     if (c) pb.value = c;
+    renderIssueInfo();
   }
+}
+
+/** Is either window open, or about to be? Closed and suspended are not biddable. */
+function isBiddable(i) {
+  if (!i) return false;
+  if (i.status && i.status !== 'Auto') return false;
+  return i.ret_status === 'Open' || i.hni_status === 'Open'
+      || i.ret_status === 'Upcoming' || i.hni_status === 'Upcoming';
+}
+
+/** "COALINDIA — Coal India Ltd · Retail closes 03 Sep 15:15" */
+function issueOptionLabel(i, withWindow) {
+  var base = i.symbol + ' — ' + (i.company || '');
+  if (!withWindow) return base;
+  var which = i.ret_status === 'Open' ? { w: 'Retail', t: i.ret_close }
+            : i.hni_status === 'Open' ? { w: 'HNI', t: i.hni_close }
+            : i.ret_status === 'Upcoming' ? { w: 'Retail opens', t: i.ret_open }
+            : i.hni_status === 'Upcoming' ? { w: 'HNI opens', t: i.hni_open }
+            : null;
+  return which ? base + '  ·  ' + which.w + ' ' + dt(which.t) : base + '  ·  closed';
+}
+
+/** The issue currently selected on the bid form. */
+function selectedIssue() {
+  var id = $('#pbIssue') && $('#pbIssue').value;
+  if (!id) return null;
+  return (STATE.issues || []).find(function (i) { return String(i.id) === String(id); }) || null;
+}
+
+/**
+ * The read-only panel beside the form. Everything a desk would otherwise have to
+ * go and look up in Masters mid-window: the floor, the band, both windows, and
+ * whether cut-off is allowed at all.
+ */
+function renderIssueInfo() {
+  var box = $('#pbIssueInfo');
+  if (!box) return;
+  var i = selectedIssue();
+  if (!i) {
+    box.className = 'note';
+    box.textContent = 'Choose an issue to see its floor, band, windows and status.';
+    return;
+  }
+  var f = function (k, v) {
+    return '<div class="f"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
+  };
+  var money = function (v) { return v == null || v === '' ? '—' : rupee(v); };
+  box.className = '';
+  box.innerHTML =
+    '<div class="bar" style="margin-bottom:8px"><b>' + esc(i.symbol) + '</b>' +
+      '<span class="tag">' + esc(i.exchange) + '</span>' +
+      '<span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span></div>' +
+    '<div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">' +
+      f('Company', esc(i.company || '—')) +
+      f('ISIN', '<span class="m">' + esc(i.isin || '—') + '</span>') +
+      f('Floor price', money(i.floor_price)) +
+      f('Retail cut-off min', money(i.cut_price_min)) +
+      f('Tick', inr(i.tick, 2)) +
+      f('Lot', inr(i.lot, 0)) +
+      (Number(i.discount_pct) ? f('Retail discount', inr(i.discount_pct, 2) + '%') : '') +
+      f('HNI window', '<span class="m" style="font-size:11.5px">' + dt(i.hni_open) + ' → ' + dt(i.hni_close) + '</span>') +
+      f('Retail window', '<span class="m" style="font-size:11.5px">' + dt(i.ret_open) + ' → ' + dt(i.ret_close) + '</span>') +
+      f('Cut-off bids', i.cutoff_flag === false ? 'Not allowed' : 'Allowed (Retail only)') +
+    '</div>' +
+    (i.floor_price == null
+      ? '<div class="note warn" style="margin-top:9px">The seller has not published a floor price for this issue yet. ' +
+        'A cut-off bid cannot be valued against the retail cap until they do.</div>'
+      : '');
 }
 
 /* ---------------- clock + countdowns ---------------- */
@@ -508,13 +599,41 @@ async function loadBook() {
   } catch (e) { toast('Bid book failed', e.message, 'bad'); }
 }
 
+/**
+ * Withdraw a bid. Like placing one, this is done on a client's behalf, so the
+ * client confirms it — the server answers 428 until they have.
+ */
 async function cancelBid(id) {
-  if (!window.confirm('Cancel this bid? The row is kept for audit.')) return;
+  if (!window.confirm('Withdraw this bid? The row is kept for audit.')) return;
+  var body = { reason: 'desk cancel' };
   try {
-    await api('/bids/' + id, { method: 'DELETE', body: { reason: 'desk cancel' } });
-    toast('Bid cancelled', 'The client may bid again for this scrip.', 'ok');
+    await api('/bids/' + id, { method: 'DELETE', body: body });
+    toast('Bid withdrawn', 'The client may bid again for this scrip.', 'ok');
     loadBook(); loadDash();
-  } catch (e) { toast('Cancel failed', apiMessage(e), 'bad'); }
+    return;
+  } catch (e) {
+    if (!(e.status === 428 && e.body && e.body.error === 'otp_required')) {
+      return toast('Withdrawal failed', apiMessage(e), 'bad');
+    }
+  }
+
+  // The client has to agree. Send the code to THEM, then ask for it here.
+  var bid = (STATE.book || []).find(function (b) { return String(b.id) === String(id); }) || {};
+  try {
+    var sent = await api('/bids/otp', { method: 'POST', body: {
+      client_ucc: bid.client_ucc, issue_id: bid.issue_id, action: 'cancel', bid_id: id,
+      detail: bid.ref } });
+    var code = window.prompt(
+      'A confirmation code has been sent to ' + sent.sent_to + ' for ' + bid.client_ucc + '.\n\n' +
+      'Enter the code the client received:' + (sent.test_code ? '\n\nTest mode code: ' + sent.test_code : ''));
+    if (!code) return toast('Not withdrawn', 'No code entered, so the bid is unchanged.', 'warn');
+
+    body.otp_ref = sent.ref;
+    body.otp = String(code).replace(/\D/g, '');
+    await api('/bids/' + id, { method: 'DELETE', body: body });
+    toast('Bid withdrawn', bid.ref + ' — confirmed by the client.', 'ok');
+    loadBook(); loadDash();
+  } catch (e2) { toast('Withdrawal failed', apiMessage(e2), 'bad'); }
 }
 
 /* ---------------- place bid ---------------- */
@@ -600,6 +719,164 @@ async function validateBid() {
   }
 }
 
+/* ------------------------------------------------------------- bid form rules --
+ * Everything here mirrors a rule the server also enforces. The server is what
+ * decides; this exists so the desk is not told at 15:14 something it could have
+ * been told at 15:09.
+ */
+
+/** Cut-off is a RETAIL mechanism. SEBI's non-retail leg is a price bid, always. */
+function cutoffAllowed(issue, category) {
+  if (category !== 'Retail') return false;
+  return !issue || issue.cutoff_flag !== false;
+}
+
+/** The floor that applies to this category — Retail may have its own cut-off min. */
+function minPriceFor(issue, category) {
+  if (!issue) return null;
+  var floor = issue.floor_price == null || issue.floor_price === '' ? null : Number(issue.floor_price);
+  if (category === 'Retail') {
+    var cm = issue.cut_price_min == null || issue.cut_price_min === '' ? null : Number(issue.cut_price_min);
+    if (cm != null && cm > 0) return cm;
+  }
+  return floor != null && floor > 0 ? floor : null;
+}
+
+/**
+ * The smallest quantity worth submitting.
+ *
+ * Retail is bounded ABOVE by the SEBI cap, so its minimum is just one lot. HNI is
+ * bounded BELOW — a non-institutional bid must be at least hni_min in value — so
+ * its minimum quantity is whatever clears that at the price being bid, rounded UP
+ * to the lot. Rounding down would produce a number the exchange rejects.
+ */
+function minQtyFor(issue, category, price, cfg) {
+  var lot = Number(issue && issue.lot) || 1;
+  if (category !== 'HNI') return lot;
+  var p = Number(price) || minPriceFor(issue, category);
+  var floorValue = Number((cfg || {}).hni_min || 200000);
+  if (!p || !floorValue) return lot;
+  return Math.max(lot, Math.ceil(Math.ceil(floorValue / p) / lot) * lot);
+}
+
+/** The largest retail quantity that still fits under the SEBI cap at this price. */
+function maxRetailQty(issue, price, cfg) {
+  var lot = Number(issue && issue.lot) || 1;
+  var p = Number(price) || minPriceFor(issue, 'Retail');
+  var cap = Number((cfg || {}).retail_cap || 200000);
+  if (!p) return null;
+  return Math.max(0, Math.floor(Math.floor(cap / p) / lot) * lot);
+}
+
+/**
+ * A suggested bid, which is what "default" means here.
+ *
+ *   Retail  bids at the TOP of what the cap allows — the highest price improves the
+ *           chance of allotment, and the quantity is then whatever still fits.
+ *   HNI     bids at the floor, the MINIMUM price, and the smallest quantity that
+ *           clears the non-retail minimum.
+ *
+ * Both are starting points a desk is expected to change, not instructions.
+ */
+function suggestedBid(issue, category, cfg) {
+  var mp = minPriceFor(issue, category);
+  if (!issue || mp == null) return null;
+  var tick = Number(issue.tick) || 0.05;
+  if (category === 'HNI') {
+    var price = mp;
+    return { price: price, qty: minQtyFor(issue, 'HNI', price, cfg),
+             why: 'HNI: the minimum price, and the smallest quantity that clears the non-retail minimum.' };
+  }
+  // Retail: the cap is on VALUE, so a higher price buys fewer shares. Bid at the
+  // floor plus nothing — the floor IS the best price for fitting under the cap —
+  // unless an indicative price is known.
+  var rp = Math.round(mp / tick) * tick;
+  return { price: Number(rp.toFixed(2)), qty: maxRetailQty(issue, rp, cfg),
+           why: 'Retail: the lowest allowed price, and the largest quantity that still fits under the ' +
+                rupee(Number((cfg || {}).retail_cap || 200000), 0) + ' cap.' };
+}
+
+/** Recompute everything derived from the current form state. */
+function refreshBidForm() {
+  var i = selectedIssue();
+  var cat = $('#pbCat').value;
+  var cfg = STATE.settings || {};
+  var typeSel = $('#pbType');
+  var allowed = cutoffAllowed(i, cat);
+
+  // Cut-off for HNI is not a choice the desk should be able to make and then be
+  // refused for; remove it rather than reject it.
+  var wanted = typeSel.value;
+  typeSel.innerHTML = '<option value="price">Price bid</option>' +
+    (allowed ? '<option value="cutoff">Cut-off price</option>' : '');
+  typeSel.value = allowed && wanted === 'cutoff' ? 'cutoff' : 'price';
+  $('#pbTypeHint').textContent = allowed
+    ? 'A cut-off bid takes the price the offer is struck at.'
+    : (cat === 'HNI' ? 'Cut-off is a retail mechanism — a non-retail bid must carry a price.'
+                     : 'Cut-off bidding is switched off for this issue.');
+
+  var isCut = typeSel.value === 'cutoff';
+  $('#pbPrice').disabled = isCut;
+  if (isCut) $('#pbPrice').value = '';
+
+  var mp = minPriceFor(i, cat);
+  $('#pbPriceHint').textContent = i
+    ? (mp == null ? 'No floor published yet for this issue.'
+                  : 'At or above ' + rupee(mp) + ', in steps of ' + inr(i.tick, 2) + '.')
+    : '';
+
+  var price = isCut ? mp : (Number($('#pbPrice').value) || 0);
+  var minQ = i ? minQtyFor(i, cat, price, cfg) : 1;
+  $('#pbQty').min = minQ;
+  $('#pbQty').step = Number(i && i.lot) || 1;
+  $('#pbQtyHint').textContent = !i ? ''
+    : cat === 'HNI'
+      ? 'At least ' + inr(minQ, 0) + ' at this price, in multiples of ' + inr(i.lot, 0) + '.'
+      : 'Multiples of ' + inr(i.lot, 0) +
+        (maxRetailQty(i, price, cfg) ? '. Up to ' + inr(maxRetailQty(i, price, cfg), 0) + ' under the retail cap.' : '');
+
+  var sug = i ? suggestedBid(i, cat, cfg) : null;
+  $('#pbDefaultHint').textContent = sug ? sug.why : '';
+  $('#pbDefault').disabled = !sug;
+
+  // The total, before anyone presses Validate. A cut-off bid with no published
+  // floor has no value yet, and saying so is better than showing zero.
+  var qty = Number($('#pbQty').value) || 0;
+  var val = price && qty ? price * qty : null;
+  $('#pbValue').value = val == null
+    ? (isCut && mp == null ? 'Unknown until the floor is published' : '—')
+    : rupee(val, 2);
+}
+
+/** Fill the form with the suggested bid for the current category. */
+function fillSuggestedBid() {
+  var i = selectedIssue();
+  if (!i) return;
+  var sug = suggestedBid(i, $('#pbCat').value, STATE.settings || {});
+  if (!sug) { toast('No suggestion', 'This issue has no published floor to work from.', 'warn'); return; }
+  $('#pbType').value = 'price';
+  $('#pbPrice').disabled = false;
+  $('#pbPrice').value = sug.price;
+  $('#pbQty').value = sug.qty;
+  refreshBidForm();
+}
+
+/**
+ * Look the client up as soon as the UCC looks complete, rather than waiting for
+ * Validate. Debounced, because this fires on every keystroke.
+ */
+var uccTimer = null;
+function onUccTyped() {
+  var v = $('#pbUcc').value.trim().toUpperCase();
+  if (uccTimer) clearTimeout(uccTimer);
+  if (v.length < 3) {
+    $('#pbClient').className = 'note';
+    $('#pbClient').textContent = 'Enter a UCC to see client, margin and limits.';
+    return;
+  }
+  uccTimer = setTimeout(function () { loadClientPanel(v); }, 350);
+}
+
 async function loadClientPanel(ucc) {
   try {
     var d = await api('/clients/' + encodeURIComponent(ucc));
@@ -620,19 +897,100 @@ async function loadClientPanel(ucc) {
   }
 }
 
-async function placeBid() {
+/* ---------------------------------------------------- the client's confirmation --
+ * Every bid the desk places is a bid on someone else's behalf, so the client
+ * confirms it with a code sent to their own mobile and email. The server refuses
+ * with 428 until the code comes back; this turns that refusal into a step rather
+ * than an error.
+ */
+var OTP_STATE = null;     // { ref, action, sent_to }
+
+function hideBidOtp() {
+  OTP_STATE = null;
+  var box = $('#pbOtp');
+  box.classList.add('hide');
+  box.innerHTML = '';
+}
+
+function showBidOtp(action) {
+  var box = $('#pbOtp');
+  box.classList.remove('hide');
+  box.innerHTML =
+    '<div class="note warn" style="margin-top:10px">' +
+      '<b>The client must confirm this ' + esc(action === 'modify' ? 'change' : action) + '.</b><br>' +
+      'A one-time code goes to the mobile and email registered for ' +
+      esc($('#pbUcc').value.trim().toUpperCase()) + ' — not to you. Ask them for it.' +
+      '<div class="bar" style="margin-top:10px">' +
+        '<button class="btn ghost" id="pbOtpSend">Send code to client</button>' +
+        '<input type="text" id="pbOtpCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" ' +
+          'style="width:150px" disabled>' +
+        '<button class="btn" id="pbOtpGo" disabled>Confirm and ' +
+          esc(action === 'cancel' ? 'withdraw' : action) + '</button>' +
+      '</div>' +
+      '<div id="pbOtpNote" class="fh"></div>' +
+    '</div>';
+  $('#pbOtpSend').addEventListener('click', function () { sendBidOtp(action); });
+  $('#pbOtpGo').addEventListener('click', function () { placeBid(true); });
+  $('#pbOtpCode').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') placeBid(true);
+  });
+}
+
+async function sendBidOtp(action) {
+  var btn = $('#pbOtpSend');
+  btn.disabled = true;
+  try {
+    var r = await api('/bids/otp', { method: 'POST', body: {
+      client_ucc: $('#pbUcc').value.trim().toUpperCase(),
+      issue_id: $('#pbIssue').value,
+      action: action,
+      bid_id: STATE.editing ? STATE.editing.id : null,
+      detail: inr($('#pbQty').value, 0) + ' shares at ' +
+              ($('#pbType').value === 'cutoff' ? 'cut-off' : rupee($('#pbPrice').value))
+    } });
+    OTP_STATE = { ref: r.ref, action: action, sent_to: r.sent_to };
+    $('#pbOtpCode').disabled = false;
+    $('#pbOtpGo').disabled = false;
+    $('#pbOtpCode').focus();
+    $('#pbOtpNote').innerHTML = 'Sent to ' + esc(r.sent_to) + ' · valid ' + r.ttl_minutes + ' minutes.' +
+      (r.test_code ? ' <b>Test mode: ' + esc(r.test_code) + '</b>' : '');
+  } catch (e) {
+    $('#pbOtpNote').textContent = apiMessage(e);
+    toast('Could not send the code', apiMessage(e), 'bad');
+  } finally { btn.disabled = false; }
+}
+
+async function placeBid(withOtp) {
   var editing = STATE.editing;
+  var body = bidPayload();
+  if (withOtp && OTP_STATE) {
+    body.otp_ref = OTP_STATE.ref;
+    body.otp = $('#pbOtpCode').value.replace(/\D/g, '');
+    if (body.otp.length < 6) { $('#pbOtpNote').textContent = 'Enter the 6-digit code.'; return; }
+  }
   try {
     var r = editing
-      ? await api('/bids/' + editing.id, { method: 'PUT', body: bidPayload() })
-      : await api('/bids', { method: 'POST', body: bidPayload() });
+      ? await api('/bids/' + editing.id, { method: 'PUT', body: body })
+      : await api('/bids', { method: 'POST', body: body });
+    hideBidOtp();
     toast(editing ? 'Bid modified' : 'Bid placed',
       r.bid.ref + ' · ' + inr(r.bid.qty, 0) + ' shares · ' + rupee(r.bid.value, 0), 'ok');
     $('#pbPlace').disabled = true;
     $('#pbQty').value = ''; $('#pbPrice').value = '';
+    refreshBidForm();
     if (editing) { endModify(); showTab('book'); }
     loadDash();
   } catch (e) {
+    if (e.status === 428 && e.body && e.body.error === 'otp_required') {
+      showBidOtp(e.body.action || (editing ? 'modify' : 'place'));
+      return;
+    }
+    if (OTP_STATE && e.status === 401) {
+      // A wrong or stale code: keep the step open so it can be retyped.
+      $('#pbOtpNote').textContent = apiMessage(e);
+      if (e.body && e.body.error !== 'wrong') { OTP_STATE = null; $('#pbOtpGo').disabled = true; }
+      return;
+    }
     var msg = e.body && e.body.errors ? e.body.errors.join(' ') : apiMessage(e);
     toast(editing ? 'Modify rejected' : 'Bid rejected', msg, 'bad');
   }
@@ -2312,10 +2670,16 @@ async function boot() {
     if (e.target.closest('[data-endedit]')) endModify();
   });
   $('#pbCheck').addEventListener('click', validateBid);
-  $('#pbPlace').addEventListener('click', placeBid);
-  $('#pbType').addEventListener('change', function () {
-    $('#pbPrice').disabled = $('#pbType').value === 'cutoff';
+  $('#pbPlace').addEventListener('click', function () { placeBid(false); });
+  $('#pbDefault').addEventListener('click', fillSuggestedBid);
+  $('#pbUcc').addEventListener('input', onUccTyped);
+  // Everything on this form is derived from something else on it, so one handler
+  // recomputes the lot rather than six that each know about two fields.
+  ['#pbIssue', '#pbCat', '#pbType', '#pbQty', '#pbPrice'].forEach(function (sel) {
+    $(sel).addEventListener('change', refreshBidForm);
+    $(sel).addEventListener('input', refreshBidForm);
   });
+  $('#pbIssue').addEventListener('change', renderIssueInfo);
   ['#exExch', '#exIssue', '#exCat', '#exCanc'].forEach(function (s) { $(s).addEventListener('change', previewExport); });
   $('#exPreview').addEventListener('click', previewExport);
   $('#exDownload').addEventListener('click', function () { downloadExport(); });

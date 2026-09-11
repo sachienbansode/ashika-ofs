@@ -491,3 +491,7 @@ th.off-file{font-style:normal}
 th.off-file-first,td.off-file-first{border-left:2px solid rgba(18,110,130,.28)}
 .off-file-note{padding:9px 12px;font-size:11.5px;line-height:1.6;color:var(--muted);
   background:rgba(18,110,130,.035);white-space:normal}
+
+/* The read-only total on the bid form. Derived, never typed — so it must not look
+   like somewhere to type. */
+#pbValue{background:#f1f3f7;color:var(--navy);font-weight:650;cursor:default}

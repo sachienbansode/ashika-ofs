@@ -86,25 +86,46 @@
           under <b>Masters → Exchange pull</b>, or <b>Masters → Import issues CSV</b>
           from the exchange's T-2/T-1 member notice.
         </div>
+        <!-- Order is deliberate and was asked for: Category decides what price types
+             and minimums apply, so it comes before them. Total value is derived and
+             never typed. -->
         <div class="grid2">
           <label class="f"><span class="k">Issue</span><select id="pbIssue" style="width:100%"></select></label>
-          <label class="f"><span class="k">Client UCC</span><input type="text" id="pbUcc" placeholder="ASH1001" style="width:100%"></label>
+          <label class="f"><span class="k">Client UCC</span>
+            <input type="text" id="pbUcc" placeholder="ASH1001" autocomplete="off" style="width:100%">
+            <span class="fh" id="pbUccHint">Client and margin appear as soon as this matches.</span></label>
           <label class="f"><span class="k">Category</span>
             <select id="pbCat" style="width:100%"><option value="Retail">Retail</option><option value="HNI">HNI / Non-Retail</option></select></label>
-          <label class="f"><span class="k">Quantity</span><input type="number" id="pbQty" min="1" step="1" style="width:100%"></label>
           <label class="f"><span class="k">Price type</span>
-            <select id="pbType" style="width:100%"><option value="price">Price bid</option><option value="cutoff">Cut-off (Retail only)</option></select></label>
-          <label class="f"><span class="k">Price</span><input type="number" id="pbPrice" step="0.05" style="width:100%"></label>
+            <select id="pbType" style="width:100%"><option value="price">Price bid</option><option value="cutoff">Cut-off price</option></select>
+            <span class="fh" id="pbTypeHint"></span></label>
+          <label class="f"><span class="k">Quantity</span>
+            <input type="number" id="pbQty" min="1" step="1" style="width:100%">
+            <span class="fh" id="pbQtyHint"></span></label>
+          <label class="f"><span class="k">Price</span>
+            <input type="number" id="pbPrice" step="0.05" style="width:100%">
+            <span class="fh" id="pbPriceHint"></span></label>
+          <label class="f"><span class="k">Total value</span>
+            <input type="text" id="pbValue" readonly tabindex="-1" style="width:100%">
+            <span class="fh">Quantity × price. Calculated, not typed.</span></label>
+          <div class="f"><span class="k">Defaults</span>
+            <div class="bar" style="gap:6px;margin:0">
+              <button class="mini" id="pbDefault" type="button">Fill suggested bid</button>
+            </div>
+            <span class="fh" id="pbDefaultHint"></span></div>
         </div>
         <div class="bar" style="margin-top:12px">
           <button class="btn ghost" id="pbCheck">Validate</button>
           <button class="btn" id="pbPlace" disabled>Place bid</button>
         </div>
         <div id="pbResult"></div>
+        <div id="pbOtp" class="hide"></div>
       </div>
       <div class="card">
-        <h2 class="sec" style="margin-top:0">Client &amp; margin</h2>
-        <div id="pbClient" class="note">Enter a UCC and validate to see client, margin and limits.</div>
+        <h2 class="sec" style="margin-top:0">Issue details</h2>
+        <div id="pbIssueInfo" class="note">Choose an issue to see its floor, band, windows and status.</div>
+        <h2 class="sec">Client &amp; margin</h2>
+        <div id="pbClient" class="note">Enter a UCC to see client, margin and limits.</div>
       </div>
     </div>
   </section>
