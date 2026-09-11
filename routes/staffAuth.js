@@ -105,9 +105,18 @@ function otpEmail(name, code, mins) {
       If this was not you, your password may be known to someone else — change it in the portal.</p>`);
 }
 
+/**
+ * The back-office code is REAL, even while client codes are still fixed for UAT.
+ *
+ * Staff addresses are real Ashika mailboxes that exist today, and this door leads to
+ * every client's PII and to the exchange files. A fixed code here would be a shared
+ * password, not a test convenience — so staffTestMode() is off unless someone opts
+ * out explicitly, the opposite default from the client side.
+ */
 async function startMfa(req, user) {
   const ref = crypto.randomUUID();
-  const code = otp.testMode() ? otp.testOtp() : otp.generateOtp();
+  const testing = otp.staffTestMode();
+  const code = testing ? otp.testOtp() : otp.generateOtp();
   const to = otp.maskEmail(user.email);
 
   await query(
@@ -115,12 +124,12 @@ async function startMfa(req, user) {
        (ref, user_id, email, otp_hash, max_attempts, delivered_to, channel, expires_at, ip, user_agent)
      VALUES ($1,$2,$3,$4,$5,$6,$7, now() + ($8 || ' minutes')::interval, $9,$10)`,
     [ref, user.id, otp.normEmail(user.email), otp.hash(code), otp.OTP_MAX_ATTEMPTS, to,
-     otp.testMode() ? 'test' : 'email', String(otp.OTP_TTL_MIN), ipOf(req),
+     testing ? 'test' : 'email', String(otp.OTP_TTL_MIN), ipOf(req),
      (req.headers['user-agent'] || '').slice(0, 300)]);
 
   const out = { mfa_required: true, ref, sent_to: to, ttl_minutes: otp.OTP_TTL_MIN };
 
-  if (otp.testMode()) {
+  if (testing) {
     console.warn('[staff-auth] TEST MODE - fixed code, nothing sent');
     out.test_mode = true;
     out.test_code = code;
@@ -132,7 +141,13 @@ async function startMfa(req, user) {
     html: otpEmail(user.first_name, code, otp.OTP_TTL_MIN),
     purpose: 'ofs_staff_otp', triggeredBy: 'desk-signin', ip: ipOf(req)
   });
-  if (!r.sent) { const e = new Error('otp_send_failed'); e.code = 'OTP_SEND_FAILED'; throw e; }
+  if (!r.sent) {
+    // Say what actually failed. "Sign-in failed" when SMTP is down sends the desk
+    // hunting for a password problem that does not exist.
+    const e = new Error(r.error || 'otp_send_failed');
+    e.code = 'OTP_SEND_FAILED';
+    throw e;
+  }
   return out;
 }
 
