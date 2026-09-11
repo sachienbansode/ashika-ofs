@@ -89,3 +89,37 @@ test('every asset each page links actually exists', () => {
     }
   }
 });
+
+/**
+ * A control bound to an element that does not exist.
+ *
+ * $('#x') returns null when #x is absent, and $('#x').addEventListener then throws —
+ * except it is usually inside boot(), where one throw stops every binding after it.
+ * Either way the control silently does nothing, the page looks fine, and nothing in
+ * the console explains it. "Bid on this issue" shipped bound to #dashIssues, which
+ * has never existed; the cards container is #issueCards.
+ *
+ * An id is legitimate if the page declares it, OR if the script builds it — plenty
+ * of these are created and bound in the same breath.
+ */
+test('every addEventListener target exists in the page or is built by the script', () => {
+  const pairs = [
+    ['public/backoffice/app.js', 'public/backoffice/index.html'],
+    ['public/client/client.js', 'public/client/index.html']
+  ];
+  for (const [js, html] of pairs) {
+    const src = read(js);
+    const page = read(html);
+    const bound = new Set();
+    src.replace(/\$\('#([A-Za-z0-9_-]+)'\)\.addEventListener/g, (m, id) => { bound.add(id); return m; });
+    assert.ok(bound.size > 10, js + ': found suspiciously few bindings to check');
+
+    for (const id of bound) {
+      const inPage = new RegExp('id="' + id + '"').test(page);
+      const built = new RegExp('id="' + id + '"').test(src) ||
+                    new RegExp("id=\\\\'" + id + "\\\\'").test(src);
+      assert.ok(inPage || built,
+        js + ' binds #' + id + ', which neither the page declares nor the script creates');
+    }
+  }
+});

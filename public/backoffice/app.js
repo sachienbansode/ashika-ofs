@@ -3187,7 +3187,10 @@ async function boot() {
     var m = e.target.closest('[data-edit]');
     if (m) return startModify(m.dataset.edit);
   });
-  $('#dashIssues').addEventListener('click', function (e) {
+  // The cards container is #issueCards. It was bound to #dashIssues, which does not
+  // exist, so "Bid on this issue" silently did nothing — $() returns null and the
+  // listener was never attached.
+  $('#issueCards').addEventListener('click', function (e) {
     var b = e.target.closest('[data-bidon]');
     if (b) bidOnIssue(b.dataset.bidon);
   });

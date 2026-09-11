@@ -505,7 +505,7 @@ function bidBox(i, mine, retOpen, hniOpen) {
         '<option value="limit"' + (mine && !mine.is_cutoff ? ' selected' : '') + '>My own price</option>' +
       '</select></label>' +
       '<label class="bb-f"><span>Price</span>' +
-        '<input type="number" step="' + (Number(i.tick) || 0.05) + '" data-bf="price" ' +
+        '<input type="number" min="0" step="' + (Number(i.tick) || 0.05) + '" data-bf="price" ' +
         (mine && !mine.is_cutoff ? 'value="' + Number(mine.price) + '" ' : '') +
         (mine && !mine.is_cutoff ? '' : 'disabled ') + 'placeholder="At or above floor"></label>' +
     '</div>' +

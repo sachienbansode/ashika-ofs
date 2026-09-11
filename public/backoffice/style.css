@@ -503,23 +503,35 @@ td.n.neg{color:var(--red);font-weight:650}
 /* Issue names are long — "COALINDIA — Coal India Ltd · Retail 03 Sep 15:15" — and a
    dropdown that clips them leaves the desk guessing which leg it picked. Let the
    control take the width it needs, and scroll the bar rather than the text. */
+/* Let a select take the width it needs in a BAR, where there is room to spare.
+   #pbIssue is deliberately not listed: it lives in a flex band that already gives it
+   twice the share of its neighbours, and a fixed minimum there forced the whole
+   column wider than its container and pushed the control out of its own label. */
 .bar select{max-width:100%;text-overflow:ellipsis}
-#pbIssue,#bkIssue,#exIssue{min-width:260px}
-@media (min-width:900px){ #pbIssue{min-width:420px} }
+#bkIssue,#exIssue{min-width:240px}
 
 /* ------------------------------------------------------------- Place bid layout --
-   Three columns on a wide screen — form, issue + client, bids already placed — so a
-   desk reads across instead of scrolling during a window. Collapses to one column on
-   anything narrow, and the form's own fields go two-up then one-up. */
-.place-grid{display:grid;gap:14px;align-items:start;
-  grid-template-columns:minmax(340px,1.05fr) minmax(320px,1.15fr) minmax(300px,1fr)}
-@media (max-width:1500px){ .place-grid{grid-template-columns:minmax(340px,1fr) minmax(320px,1fr)} }
-@media (max-width:1000px){ .place-grid{grid-template-columns:1fr} }
-.place-grid .grid2{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+   One horizontal band of inputs across the full width, then the two reference panels
+   side by side, then the bids already placed. The desk reads left to right once
+   instead of down a narrow column and back up again.
+
+   The band is flex, not a fixed grid: the fields have honest minimum widths and wrap
+   when they no longer fit, so the same markup is a single row on a desk monitor, two
+   rows on a laptop and a stack on a phone — without a breakpoint guessing at it. */
+.pb-card{margin-bottom:14px}
+.pb-row{display:flex;flex-wrap:wrap;gap:12px 14px;align-items:flex-start}
+.pb-row .f{flex:1 1 170px;min-width:150px;display:flex;flex-direction:column;gap:5px}
+.pb-row .f.wide{flex:2 1 320px}          /* the issue name is long, and must stay readable */
+.pb-row .f.narrow{flex:0 1 130px;min-width:110px}
+.pb-row .f select,.pb-row .f input{width:100%;min-width:0;box-sizing:border-box}
+.pb-row .f .fh{margin-top:0}
+
+.place-ref{display:grid;gap:14px;align-items:start;grid-template-columns:1fr 1fr;margin-bottom:14px}
+@media (max-width:900px){ .place-ref{grid-template-columns:1fr} }
 
 /* Wrap rather than clip. A truncated window or client name is the one thing on this
    screen nobody can afford to misread. */
-.place-grid .f .v,#pbIssueInfo .f .v{white-space:normal;word-break:break-word;line-height:1.45}
+#pbIssueInfo .f .v,#pbClient .f .v{white-space:normal;word-break:break-word;line-height:1.45}
 #pbExisting table{width:100%}
 #pbExisting td,#pbExisting th{white-space:normal}
 

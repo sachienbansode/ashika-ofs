@@ -94,63 +94,74 @@
 
   <!-- ---------------- Place bid ---------------- -->
   <section class="pane hide" id="pane-place">
-    <div class="cards place-grid">
-      <div class="card">
-        <h2 class="sec" style="margin-top:0" id="pbTitle">Bid on behalf of a client</h2>
-        <div id="pbEditBar" class="note hide"></div>
-        <div id="pbNoIssues" class="note warn hide">
-          No OFS is loaded yet, so there is nothing to bid on. Load the issue master
-          under <b>Masters → Exchange pull</b>, or <b>Masters → Import issues CSV</b>
-          from the exchange's T-2/T-1 member notice.
-        </div>
-        <!-- Order is deliberate and was asked for: Category decides what price types
-             and minimums apply, so it comes before them. Total value is derived and
-             never typed. -->
-        <div class="grid2">
-          <label class="f"><span class="k">Issue</span><select id="pbIssue" style="width:100%"></select></label>
-          <label class="f"><span class="k">Client UCC</span>
-            <input type="text" id="pbUcc" placeholder="ASH1001" autocomplete="off" style="width:100%">
-            <span class="fh" id="pbUccHint">Client and margin appear as soon as this matches.</span></label>
-          <label class="f" id="pbExchWrap"><span class="k">Exchange</span>
-            <select id="pbExch" style="width:100%"></select>
-            <span class="fh" id="pbExchHint"></span></label>
-          <label class="f"><span class="k">Category</span>
-            <select id="pbCat" style="width:100%"><option value="Retail">Retail</option><option value="HNI">HNI / Non-Retail</option></select></label>
-          <label class="f"><span class="k">Price type</span>
-            <select id="pbType" style="width:100%"><option value="price">Price bid</option><option value="cutoff">Cut-off price</option></select>
-            <span class="fh" id="pbTypeHint"></span></label>
-          <label class="f"><span class="k">Quantity</span>
-            <input type="number" id="pbQty" min="1" step="1" style="width:100%">
-            <span class="fh" id="pbQtyHint"></span></label>
-          <label class="f"><span class="k">Price</span>
-            <input type="number" id="pbPrice" step="0.05" style="width:100%">
-            <span class="fh" id="pbPriceHint"></span></label>
-          <label class="f"><span class="k">Total value</span>
-            <input type="text" id="pbValue" readonly tabindex="-1" style="width:100%">
-            <span class="fh">Quantity × price. Calculated, not typed.</span></label>
-          <div class="f"><span class="k">Defaults</span>
-            <div class="bar" style="gap:6px;margin:0">
-              <button class="mini" id="pbDefault" type="button">Fill suggested bid</button>
-            </div>
-            <span class="fh" id="pbDefaultHint"></span></div>
-        </div>
-        <div class="bar" style="margin-top:12px">
-          <button class="btn ghost" id="pbCheck">Validate</button>
-          <button class="btn" id="pbPlace" disabled>Place bid</button>
-        </div>
-        <div id="pbResult"></div>
-        <div id="pbOtp" class="hide"></div>
+
+    <!-- One horizontal band of inputs across the full width, then the reference
+         panels side by side beneath it, then the existing bids. The desk reads left
+         to right once instead of down a narrow column and back up. -->
+    <div class="card pb-card">
+      <div class="bar" style="margin:0 0 12px">
+        <h2 class="sec" style="margin:0" id="pbTitle">Bid on behalf of a client</h2>
+        <div class="sp"></div>
+        <button class="mini" id="pbDefault" type="button">Fill suggested bid</button>
+        <span class="fh" id="pbDefaultHint" style="flex:1 1 100%;margin:0"></span>
       </div>
-      <div class="card" id="pbExistingCard">
-        <h2 class="sec" style="margin-top:0">Bids already placed</h2>
-        <div id="pbExisting" class="note">Pick an issue to see the bids already on it.</div>
+      <div id="pbEditBar" class="note hide"></div>
+      <div id="pbNoIssues" class="note warn hide">
+        No OFS is loaded yet, so there is nothing to bid on. Load the issue master
+        under <b>Masters → Exchange pull</b>, or <b>Masters → Import issues CSV</b>
+        from the exchange's T-2/T-1 member notice.
       </div>
+
+      <!-- Field order is deliberate and was asked for: Category decides which price
+           types and minimums apply, so it comes before them. Total value is derived
+           and never typed. -->
+      <div class="pb-row">
+        <label class="f wide"><span class="k">Issue</span>
+          <select id="pbIssue"></select></label>
+        <label class="f"><span class="k">Client UCC</span>
+          <input type="text" id="pbUcc" placeholder="ASH1001" autocomplete="off">
+          <span class="fh" id="pbUccHint">Client and margin appear as soon as this matches.</span></label>
+        <label class="f narrow" id="pbExchWrap"><span class="k">Exchange</span>
+          <select id="pbExch"></select>
+          <span class="fh" id="pbExchHint"></span></label>
+        <label class="f"><span class="k">Category</span>
+          <select id="pbCat"><option value="Retail">Retail</option><option value="HNI">HNI / Non-Retail</option></select></label>
+        <label class="f"><span class="k">Price type</span>
+          <select id="pbType"><option value="price">Price bid</option><option value="cutoff">Cut-off price</option></select>
+          <span class="fh" id="pbTypeHint"></span></label>
+        <label class="f narrow"><span class="k">Quantity</span>
+          <input type="number" id="pbQty" min="1" step="1">
+          <span class="fh" id="pbQtyHint"></span></label>
+        <label class="f narrow"><span class="k">Price</span>
+          <input type="number" id="pbPrice" step="0.05" min="0">
+          <span class="fh" id="pbPriceHint"></span></label>
+        <label class="f"><span class="k">Total value</span>
+          <input type="text" id="pbValue" readonly tabindex="-1">
+          <span class="fh">Quantity × price. Calculated, not typed.</span></label>
+      </div>
+
+      <div class="bar" style="margin-top:14px">
+        <button class="btn ghost" id="pbCheck">Validate</button>
+        <button class="btn" id="pbPlace" disabled>Place bid</button>
+      </div>
+      <div id="pbResult"></div>
+      <div id="pbOtp" class="hide"></div>
+    </div>
+
+    <div class="cards place-ref">
       <div class="card">
         <h2 class="sec" style="margin-top:0">Issue details</h2>
         <div id="pbIssueInfo" class="note">Choose an issue to see its floor, band, windows and status.</div>
-        <h2 class="sec">Client &amp; margin</h2>
+      </div>
+      <div class="card">
+        <h2 class="sec" style="margin-top:0">Client &amp; margin</h2>
         <div id="pbClient" class="note">Enter a UCC to see client, margin and limits.</div>
       </div>
+    </div>
+
+    <div class="card" id="pbExistingCard">
+      <h2 class="sec" style="margin-top:0">Bids already placed</h2>
+      <div id="pbExisting" class="note">Pick an issue to see the bids already on it.</div>
     </div>
   </section>
 
