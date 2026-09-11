@@ -8,6 +8,7 @@ const express = require('express');
 const { SCHEMA, rows, one, query, tx } = require('../db/ofsAdapter');
 const { requirePage, requireEdit } = require('../middleware/pageAccess');
 const audit = require('../lib/audit');
+const ld = require('../db/ldAdapter');
 const dbErr = require('../lib/dbErrors');
 
 const router = express.Router();
@@ -22,7 +23,9 @@ router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
          LEFT JOIN (SELECT client_ucc, sum(value) AS used FROM ${SCHEMA}.ofs_bid
                      WHERE status = 'Live' GROUP BY client_ucc) u ON u.client_ucc = m.client_ucc
         ORDER BY m.client_ucc`);
-    res.json({ margins: r });
+    // A column of bare UCCs cannot be checked by eye. The name comes from LD in one
+    // round trip, not one per row.
+    res.json({ margins: await ld.enrich(r, 'client_ucc') });
   } catch (e) { dbErr.send(res, next, e); }
 });
 

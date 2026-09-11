@@ -4,7 +4,13 @@ const assert = require('node:assert');
 const d = require('../lib/domain');
 const { ISSUE, T_DAY_11AM, T1_DAY_11AM, ctx } = require('./fixtures');
 
-const errs = (bid, over) => d.validateBid(ISSUE, bid, ctx(over));
+/*
+ * ISSUE is listed on BOTH exchanges, so a valid bid has to name one — a bid reaches
+ * exactly one exchange and nobody can choose for it. Every test below is about
+ * something else, so the exchange is defaulted here rather than repeated thirty
+ * times; the rule itself is tested explicitly further down.
+ */
+const errs = (bid, over) => d.validateBid(ISSUE, Object.assign({ exchange: 'NSE' }, bid), ctx(over));
 const has = (list, re) => list.some((e) => re.test(e));
 
 test('T-day is the Non-Retail window, T+1 is Retail', () => {
@@ -79,7 +85,7 @@ test('only one live bid per scrip per client', () => {
     { hasLiveBid: true }), /only one bid per scrip/));
   // a modify of that same bid is not a duplicate
   assert.deepEqual(d.validateBid(ISSUE,
-    { category: 'HNI', qty: 1000, price: 390, is_cutoff: false, editingId: 7 },
+    { exchange: 'NSE', category: 'HNI', qty: 1000, price: 390, is_cutoff: false, editingId: 7 },
     ctx({ hasLiveBid: true })), []);
 });
 
@@ -225,4 +231,44 @@ test('with a floor published, everything behaves as before', () => {
   const below = d.validateBid(withFloor, { category: 'Retail', qty: 10, price: 5, is_cutoff: false },
     { settings: OPEN_SETTINGS, now: NOW, availableMargin: 1e7 });
   assert.ok(below.some((m) => /Cannot bid below 400/.test(m)), below.join(' | '));
+});
+
+/* ------------------------------------------------------------- which exchange --
+ * Before ofs_bid.exchange existed, a bid had none and routes/export.js filtered on
+ * none: an issue on NSE alone had its bids written into the BSE file, and an issue
+ * on BOTH had every bid written into both — uploading both files submitted the same
+ * client twice. These pin the rule that replaced it.
+ */
+test('an issue on BOTH exchanges will not take a bid that names neither', () => {
+  const e = d.validateBid(ISSUE, { category: 'HNI', qty: 1000, price: 390, is_cutoff: false }, ctx());
+  assert.ok(has(e, /Choose the exchange/), e.join(' | '));
+});
+
+test('either exchange is accepted when the issue is on both', () => {
+  for (const x of ['NSE', 'BSE']) {
+    assert.deepEqual(
+      d.validateBid(ISSUE, { exchange: x, category: 'HNI', qty: 1000, price: 390, is_cutoff: false }, ctx()),
+      [], x + ' should be accepted on a BOTH issue');
+  }
+});
+
+test('a single-exchange issue refuses a bid aimed at the other one', () => {
+  const nseOnly = Object.assign({}, ISSUE, { exchange: 'NSE' });
+  const e = d.validateBid(nseOnly, { exchange: 'BSE', category: 'HNI', qty: 1000, price: 390, is_cutoff: false }, ctx());
+  assert.ok(has(e, /offered on NSE only/), e.join(' | '));
+});
+
+test('a single-exchange issue needs no choice, because there is none to make', () => {
+  const nseOnly = Object.assign({}, ISSUE, { exchange: 'NSE' });
+  assert.deepEqual(
+    d.validateBid(nseOnly, { category: 'HNI', qty: 1000, price: 390, is_cutoff: false }, ctx()), []);
+});
+
+test('bidExchange decides where it can, and refuses to guess where it cannot', () => {
+  assert.equal(d.bidExchange({ exchange: 'NSE' }, null), 'NSE');
+  assert.equal(d.bidExchange({ exchange: 'NSE' }, 'BSE'), 'NSE');   // the issue wins, always
+  assert.equal(d.bidExchange({ exchange: 'BSE' }, 'NSE'), 'BSE');
+  assert.equal(d.bidExchange({ exchange: 'BOTH' }, 'bse'), 'BSE');
+  assert.equal(d.bidExchange({ exchange: 'BOTH' }, null), null);
+  assert.equal(d.bidExchange({ exchange: 'BOTH' }, 'MCX'), null);
 });

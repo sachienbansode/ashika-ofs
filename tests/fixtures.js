@@ -27,4 +27,17 @@ function ctx(over) {
   }, over || {});
 }
 
-module.exports = { ISSUE, SETTINGS, T_DAY_11AM, T1_DAY_11AM, ctx };
+/**
+ * A bid that is valid in every respect, for tests that want to break exactly one
+ * thing. ISSUE is on BOTH exchanges, so a valid bid must name one — that is the
+ * rule, not an inconvenience, and building it in here keeps every test from
+ * repeating it.
+ */
+function bid(over) {
+  return Object.assign({
+    client_ucc: 'ASH1001', exchange: 'NSE', category: 'HNI',
+    qty: 1000, price: 390, is_cutoff: false
+  }, over || {});
+}
+
+module.exports = { ISSUE, SETTINGS, T_DAY_11AM, T1_DAY_11AM, ctx, bid };

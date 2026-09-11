@@ -47,11 +47,16 @@
   <!-- ---------------- Dashboard ---------------- -->
   <section class="pane" id="pane-dash">
     <div class="bar">
+      <b id="dashDate" style="font-size:13px"></b>
+      <div class="sp"></div>
       <label class="inline"><span>As on</span><input type="date" id="dashAsOn"></label>
       <button class="mini" id="dashToday">Today</button>
+      <label class="pick" title="Closed issues are history — they are hidden unless you ask">
+        <input type="checkbox" id="dashShowAll"> <span id="dashShowAllLbl">Show closed too</span></label>
       <span class="tag" id="dashAsOnNote">Today's bids</span>
     </div>
     <div class="kpis" id="kpis"></div>
+    <div class="legend sumline" id="dashSummary"></div>
     <h2 class="sec">Open issues</h2>
     <div class="cards" id="issueCards"></div>
     <h2 class="sec">Latest bid activity</h2>
@@ -88,7 +93,7 @@
 
   <!-- ---------------- Place bid ---------------- -->
   <section class="pane hide" id="pane-place">
-    <div class="cards">
+    <div class="cards place-grid">
       <div class="card">
         <h2 class="sec" style="margin-top:0" id="pbTitle">Bid on behalf of a client</h2>
         <div id="pbEditBar" class="note hide"></div>
@@ -105,6 +110,9 @@
           <label class="f"><span class="k">Client UCC</span>
             <input type="text" id="pbUcc" placeholder="ASH1001" autocomplete="off" style="width:100%">
             <span class="fh" id="pbUccHint">Client and margin appear as soon as this matches.</span></label>
+          <label class="f" id="pbExchWrap"><span class="k">Exchange</span>
+            <select id="pbExch" style="width:100%"></select>
+            <span class="fh" id="pbExchHint"></span></label>
           <label class="f"><span class="k">Category</span>
             <select id="pbCat" style="width:100%"><option value="Retail">Retail</option><option value="HNI">HNI / Non-Retail</option></select></label>
           <label class="f"><span class="k">Price type</span>
@@ -131,6 +139,10 @@
         </div>
         <div id="pbResult"></div>
         <div id="pbOtp" class="hide"></div>
+      </div>
+      <div class="card" id="pbExistingCard">
+        <h2 class="sec" style="margin-top:0">Bids already placed</h2>
+        <div id="pbExisting" class="note">Pick an issue to see the bids already on it.</div>
       </div>
       <div class="card">
         <h2 class="sec" style="margin-top:0">Issue details</h2>
@@ -188,9 +200,11 @@
         <!-- Used and Free are derived from live bids, so they are shown, never typed.
              On create and on modify alike: setting an available margin without seeing
              what is already committed against it is how a desk overcommits. -->
+        <button class="btn ghost" id="mgFetch">Fetch client</button>
+        <span class="tag" id="mgClient">No client fetched</span>
         <span class="tag" id="mgUsed">Used —</span>
         <span class="tag" id="mgFree">Free —</span>
-        <button class="btn" id="mgSet" data-grant="ofs-masters">Save margin</button>
+        <button class="btn" id="mgSet" data-grant="ofs-masters" disabled>Save margin</button>
         <button class="btn ghost" id="mgImport" data-grant="ofs-masters">Import margins CSV</button>
         <button class="mini" id="mgTemplate">Download template</button>
         <div class="sp"></div>

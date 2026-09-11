@@ -15,7 +15,28 @@ const audit = require('../lib/audit');
 const router = express.Router();
 const PAGE = 'ofs-desk';
 
-async function collect(q) {
+/**
+ * Which bids belong in THIS exchange's file.
+ *
+ * Until ofs_bid.exchange existed, none of this happened: the NSE file and the BSE
+ * file were both built from every bid. An issue listed on NSE alone had its bids
+ * written into the BSE file, and an issue listed on BOTH had every bid written into
+ * both — so uploading both files submitted the same client twice, once to each
+ * exchange.
+ *
+ * A bid with no exchange is included ONLY where its issue leaves no choice. On a
+ * BOTH issue it is left out and named, because nobody has ever chosen for it and
+ * guessing would route real money to an exchange no one picked.
+ */
+function exchangeClause(exchange, alias, params) {
+  if (!isExchange(exchange)) return '';                 // the desk's own extract takes everything
+  params.push(String(exchange).toUpperCase());
+  const n = params.length;
+  return ` AND (upper(${alias}.exchange) = $${n}
+                OR (${alias}.exchange IS NULL AND upper(i.exchange) = $${n}))`;
+}
+
+async function collect(q, exchange) {
   const w = [], p = [];
   if (q.issue_id && q.issue_id !== 'all') { p.push(q.issue_id); w.push('b.issue_id = $' + p.length); }
   if (q.category && q.category !== 'all') { p.push(q.category); w.push('b.category = $' + p.length); }
@@ -38,11 +59,13 @@ async function collect(q) {
   else if (String(q.include_cancelled || '') === '1') w.push("b.status IN ('Live','Modified','Cancelled')");
   else w.push("b.status IN ('Live','Modified')");
 
+  const exchSql = exchangeClause(exchange, 'b', p);
+
   const r = await rows(
     `SELECT b.*, row_to_json(i) AS issue
        FROM ${SCHEMA}.ofs_bid b
        JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
-      ${w.length ? 'WHERE ' + w.join(' AND ') : ''}
+      ${w.length ? 'WHERE ' + w.join(' AND ') : 'WHERE true'}${exchSql}
       ORDER BY i.symbol, b.client_ucc, b.created_at`, p);
   return r;
 }
@@ -98,10 +121,30 @@ function assertExportable(bids, exchange) {
   }
 }
 
+/**
+ * Bids that belong to neither file. Only possible on a BOTH issue, and only for a
+ * bid placed before the exchange had to be chosen. Dropping them quietly would mean
+ * a client who bid is simply not submitted, and nothing on screen would say so.
+ */
+async function unroutedBids(q) {
+  const p = [];
+  const where = [];
+  if (q.issue_id && q.issue_id !== 'all') { p.push(q.issue_id); where.push('b.issue_id = $' + p.length); }
+  return rows(
+    `SELECT b.id, b.ref, b.client_ucc, i.symbol
+       FROM ${SCHEMA}.ofs_bid b
+       JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
+      WHERE b.status IN ('Live','Modified')
+        AND b.exchange IS NULL
+        AND upper(i.exchange) = 'BOTH'
+        ${where.length ? 'AND ' + where.join(' AND ') : ''}
+      ORDER BY i.symbol, b.client_ucc`, p);
+}
+
 async function buildFile(exchange, q) {
   const s = await settings.all();
   const adapter = adapterFor(exchange);
-  const bids = await collect(q);
+  const bids = await collect(q, exchange);
   // The exchange guards — ISIN present, floor known for a BSE cut-off — exist so we
   // never send an exchange something it will reject. The desk's own extract goes to
   // nobody, and refusing it because an issue has no ISIN yet would withhold exactly
@@ -131,7 +174,7 @@ router.get('/:exchange/preview', requirePage(PAGE), async (req, res, next) => {
     // it travels beside the file rather than in it — keyed by the ids the adapter
     // says it actually wrote, which is what keeps the two aligned across a 100-row
     // BSE part boundary.
-    const byId = new Map((await collect(req.query)).map((b) => [String(b.id), b]));
+    const byId = new Map((await collect(req.query, req.params.exchange)).map((b) => [String(b.id), b]));
     const meta = (out.bidIds || []).map((id) => {
       const b = byId.get(String(id)) || {};
       return {
@@ -154,6 +197,9 @@ router.get('/:exchange/preview', requirePage(PAGE), async (req, res, next) => {
       max_rows_per_file: out.maxRowsPerFile || null,
       has_header_row: out.hasHeaderRow !== false,
       unverified: out.unverified || null,
+      // Named, not dropped. A client who bid and is in neither file is the failure
+      // nobody would notice until allotment day.
+      unrouted: isExchange(req.params.exchange) ? await unroutedBids(req.query) : [],
       preview: lines.slice(0, 51)
     });
   } catch (e) { next(e); }

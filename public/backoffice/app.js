@@ -58,11 +58,46 @@ function crore(n) {
   if (Math.abs(n) >= 1e5) return '₹' + inr(n / 1e5, 2) + ' L';
   return rupee(n, 0);
 }
+/**
+ * A timestamp for people: 11-Sep-2026 03:15 PM IST.
+ *
+ * Always IST, never the viewer's timezone. A desk in another timezone reading a
+ * bidding window in local time is a mis-read waiting to happen, and the exchange
+ * windows are defined in IST — so that is what is shown, with the zone named so
+ * nobody has to wonder.
+ */
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+var IST_PARTS = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false
+});
+function istParts(v) {
+  var d = v instanceof Date ? v : new Date(v);
+  if (isNaN(d)) return null;
+  var p = {};
+  IST_PARTS.formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+  p.hour = String(Number(p.hour) % 24).padStart(2, '0');    // en-GB gives '24' at midnight
+  return p;
+}
+function dtDate(v) {
+  var p = istParts(v);
+  return p ? p.day + '-' + MONTHS[Number(p.month) - 1] + '-' + p.year : '—';
+}
+function dtTime(v) {
+  var p = istParts(v);
+  if (!p) return '—';
+  var h = Number(p.hour);
+  var ampm = h < 12 ? 'AM' : 'PM';
+  var h12 = h % 12 === 0 ? 12 : h % 12;
+  return String(h12).padStart(2, '0') + ':' + p.minute + ' ' + ampm;
+}
 function dt(v) {
   if (!v) return '—';
-  var d = new Date(v);
-  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  var p = istParts(v);
+  return p ? dtDate(v) + ' ' + dtTime(v) : '—';
 }
+/** With the zone spelled out — for a window, where being wrong matters most. */
+function dtz(v) { return v ? dt(v) + ' IST' : '—'; }
 function hms(ms) {
   if (ms <= 0) return '00:00:00';
   var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -343,6 +378,7 @@ function kpiCard(k, v, s) {
 }
 
 function issueCard(i) {
+  var biddable = isBiddable(i);
   var total = Number(i.total_value) || 0;
   var rv = Number(i.ret_value) || 0, hv = Number(i.hni_value) || 0;
   var pr = total ? (rv / total * 100) : 0, ph = total ? (hv / total * 100) : 0;
@@ -374,22 +410,61 @@ function issueCard(i) {
       '<span><i class="dot h"></i>HNI <b>' + crore(hv) + '</b> · ' + esc(i.hni_status) + '</span>' +
     '</div>' +
     (i.our_vwap != null ? '<div class="legend"><span>Our book VWAP <b>' + rupee(i.our_vwap) + '</b></span></div>' : '') +
+    // The windows, in full. A card that only counts down says when, never until when,
+    // and the desk is the one who has to tell a client the date.
+    '<div class="legend win">' +
+      '<span>HNI <b>' + dt(i.hni_open) + '</b> → <b>' + dt(i.hni_close) + '</b></span>' +
+      '<span>Retail <b>' + dt(i.ret_open) + '</b> → <b>' + dt(i.ret_close) + '</b> IST</span>' +
+    '</div>' +
     '<div class="cdn" data-close="' + nextClose.toISOString() + '">closes in --:--:--</div>' +
+    '<div class="bar" style="margin-top:10px">' +
+      (biddable
+        ? '<button class="btn" data-bidon="' + i.id + '">Bid on this issue</button>'
+        : '<button class="btn" disabled title="' + esc(i.status_label) + '">Bidding closed</button>') +
+    '</div>' +
   '</div>';
 }
 
 function renderDash(d) {
   var t = d.totals || {};
+  var all = d.issues || [];
+  var open = all.filter(isBiddable);
+  // Default to what can be bid on. A closed issue on the dashboard is history, and
+  // history mixed in with the live book is how the wrong one gets picked.
+  var showAll = $('#dashShowAll') && $('#dashShowAll').checked;
+  var shown = showAll ? all : open;
+
   $('#kpis').innerHTML =
-    kpiCard('Open issues', String((d.issues || []).filter(function (i) { return /open/i.test(i.status_label); }).length), 'of ' + (d.issues || []).length + ' tracked') +
+    kpiCard('Open issues', String(open.length), 'of ' + all.length + ' tracked') +
     kpiCard('Live bids', inr(t.bids, 0), inr(t.clients, 0) + ' clients') +
     kpiCard('Total quantity', inr(t.qty, 0), 'shares bid') +
     kpiCard('Total value', crore(t.value), 'across all issues') +
     kpiCard('Desk cut-off', esc((d.settings && d.settings.daily_cutoff) || '15:15'), 'IST daily');
 
-  $('#issueCards').innerHTML = (d.issues || []).length
-    ? d.issues.map(issueCard).join('')
-    : '<div class="empty">No open OFS issue. Add one under Masters → Issues.</div>';
+  // The book in one line, split the way the exchange splits it.
+  var rv = all.reduce(function (a, i) { return a + (Number(i.ret_value) || 0); }, 0);
+  var hv = all.reduce(function (a, i) { return a + (Number(i.hni_value) || 0); }, 0);
+  var rq = all.reduce(function (a, i) { return a + (Number(i.ret_qty) || 0); }, 0);
+  var hq = all.reduce(function (a, i) { return a + (Number(i.hni_qty) || 0); }, 0);
+  var sum = $('#dashSummary');
+  if (sum) {
+    sum.innerHTML = t.bids
+      ? '<span><i class="dot r"></i>Retail <b>' + inr(rq, 0) + '</b> shares · <b>' + crore(rv) + '</b></span>' +
+        '<span><i class="dot h"></i>HNI <b>' + inr(hq, 0) + '</b> shares · <b>' + crore(hv) + '</b></span>' +
+        '<span>Total <b>' + inr(t.qty, 0) + '</b> shares · <b>' + crore(t.value) + '</b> from <b>' +
+          inr(t.clients, 0) + '</b> client(s)</span>'
+      : '<span>No bids ' + (d.as_on ? 'on ' + dtDate(d.as_on + 'T00:00:00+05:30') : 'today') + ' yet.</span>';
+  }
+
+  var lbl = $('#dashShowAllLbl');
+  if (lbl) lbl.textContent = 'Show closed too (' + (all.length - open.length) + ')';
+
+  $('#issueCards').innerHTML = shown.length
+    ? shown.map(issueCard).join('')
+    : '<div class="empty">' + (all.length
+        ? 'No OFS is open for bidding right now. Tick "Show closed too" to see the ' +
+          all.length + ' tracked issue(s).'
+        : 'No OFS issue. Add one under Masters → Issues.') + '</div>';
 
   var r = d.recent || [];
   $('#recentTbl').innerHTML = r.length ? (
@@ -420,11 +495,14 @@ async function loadDash() {
     fillIssueSelects();
     refreshBidForm();
     markRefreshed($('#dashAsOn') && $('#dashAsOn').value ? 'pinned' : null);
+    var dd = $('#dashDate');
+    if (dd) dd.textContent = dtDate(d.server_time) + ' · ' + dtTime(d.server_time) + ' IST';
     var note = $('#dashAsOnNote');
     if (note) {
       note.textContent = d.as_on
-        ? 'Showing the book as it stood on ' + d.as_on
+        ? 'As it stood on ' + dtDate(d.as_on + 'T00:00:00+05:30') + ' — auto-refresh is paused'
         : "Today's bids";
+      note.classList.toggle('warn-tag', !!d.as_on);
     }
   } catch (e) {
     if (e.status === 401) {
@@ -670,6 +748,7 @@ function bidPayload() {
   return {
     issue_id: $('#pbIssue').value,
     client_ucc: $('#pbUcc').value.trim().toUpperCase(),
+    exchange: $('#pbExch').value || null,
     category: $('#pbCat').value,
     qty: Number($('#pbQty').value) || 0,
     is_cutoff: cutoff,
@@ -818,6 +897,34 @@ function refreshBidForm() {
   var i = selectedIssue();
   var cat = $('#pbCat').value;
   var cfg = STATE.settings || {};
+
+  /*
+   * Which exchange this bid goes to.
+   *
+   * A bid reaches exactly ONE exchange. Where the issue is on one, there is nothing
+   * to choose and the field says so; where it is on BOTH, somebody must choose,
+   * because otherwise the NSE file and the BSE file would each carry this bid and
+   * the client would be submitted twice.
+   */
+  var ex = $('#pbExch');
+  var on = String((i && i.exchange) || '').toUpperCase();
+  var wantedEx = ex.value;
+  if (on === 'NSE' || on === 'BSE') {
+    ex.innerHTML = '<option value="' + on + '">' + on + '</option>';
+    ex.value = on;
+    ex.disabled = true;
+    $('#pbExchHint').textContent = i.symbol + ' is offered on ' + on + ' only.';
+  } else if (on === 'BOTH') {
+    ex.innerHTML = '<option value="">Choose…</option><option value="NSE">NSE</option><option value="BSE">BSE</option>';
+    ex.value = wantedEx === 'NSE' || wantedEx === 'BSE' ? wantedEx : '';
+    ex.disabled = false;
+    $('#pbExchHint').textContent = 'On both exchanges — this bid goes to one of them, and only that file will carry it.';
+  } else {
+    ex.innerHTML = '<option value="">—</option>';
+    ex.disabled = true;
+    $('#pbExchHint').textContent = '';
+  }
+
   var typeSel = $('#pbType');
   var allowed = cutoffAllowed(i, cat);
 
@@ -1036,7 +1143,108 @@ function startModify(id) {
   $('#pbPlace').disabled = true;
   $('#pbResult').innerHTML = '';
   showTab('place');
+  renderIssueInfo();
+  refreshBidForm();
+  // After refreshBidForm has rebuilt the options, or the bid's own exchange would be
+  // overwritten by whatever the list defaulted to.
+  if (bid.exchange) $('#pbExch').value = bid.exchange;
   loadClientPanel(bid.client_ucc);
+  loadExistingBids();
+}
+
+/**
+ * Open Place bid on this issue, filled in and ready.
+ *
+ * Reached from an issue card on the dashboard: the desk's actual sequence is "this
+ * one is open — bid on it", and making them change tab and find it again in a
+ * dropdown is a step that exists only because the screens were built separately.
+ */
+function bidOnIssue(id) {
+  endModify();
+  showTab('place');
+  var pb = $('#pbIssue');
+  if (pb) {
+    pb.value = String(id);
+    if (pb.value !== String(id)) {
+      // Not in the list: it is closed, suspended, or needs review. Say which rather
+      // than silently landing on a different issue.
+      var i = (STATE.issues || []).filter(function (x) { return String(x.id) === String(id); })[0];
+      toast('Not open for bidding', i
+        ? i.symbol + ' is ' + (i.status_label || 'not open') + '.'
+        : 'That issue is not in the current list.', 'warn');
+      return;
+    }
+  }
+  renderIssueInfo();
+  refreshBidForm();
+  // Retail if its window is the one open, otherwise HNI — the category that can
+  // actually be bid right now.
+  var iss = selectedIssue();
+  if (iss) $('#pbCat').value = iss.ret_status === 'Open' ? 'Retail'
+                             : iss.hni_status === 'Open' ? 'HNI' : $('#pbCat').value;
+  refreshBidForm();
+  fillSuggestedBid();
+  loadExistingBids();
+  $('#pbUcc').focus();
+}
+
+/**
+ * The bids already on the selected issue — for this client if one is named, for the
+ * whole issue otherwise.
+ *
+ * This screen used to refuse a second bid with "a live bid already exists" while
+ * showing nothing about the bid it meant, which left the desk to go and find it in
+ * the book. Now it is on the same screen, with Modify and Withdraw on it.
+ */
+async function loadExistingBids() {
+  var box = $('#pbExisting');
+  if (!box) return;
+  var id = $('#pbIssue') && $('#pbIssue').value;
+  if (!id) {
+    box.className = 'note';
+    box.textContent = 'Pick an issue to see the bids already on it.';
+    return;
+  }
+  var ucc = $('#pbUcc').value.trim().toUpperCase();
+  try {
+    var d = await api('/bids?issue_id=' + encodeURIComponent(id) +
+      (ucc.length >= 3 ? '&q=' + encodeURIComponent(ucc) : '') + '&include_cancelled=1');
+    var rows = (d.bids || []).filter(function (b) {
+      return !ucc || String(b.client_ucc).toUpperCase() === ucc;
+    });
+    box.className = '';
+    if (!rows.length) {
+      box.className = 'note';
+      box.textContent = ucc
+        ? 'No bid yet for ' + ucc + ' on this issue.'
+        : 'No bids on this issue yet.';
+      return;
+    }
+    box.innerHTML =
+      '<div class="legend">' + rows.length + ' bid(s)' + (ucc ? ' for ' + esc(ucc) : ' on this issue') + '</div>' +
+      '<div class="wrap"><table><thead><tr><th>Ref</th><th>UCC</th><th>Exch</th><th>Cat</th>' +
+      '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th><th>Status</th><th></th></tr></thead><tbody>' +
+      rows.map(function (b) {
+        return '<tr><td class="m">' + esc(b.ref) + '</td>' +
+          '<td class="m">' + esc(b.client_ucc) + '</td>' +
+          '<td>' + esc(b.exchange || '—') + '</td>' +
+          '<td><span class="tag ' + (b.category === 'Retail' ? 'ret' : 'hni') + '">' + esc(b.category) + '</span></td>' +
+          '<td class="n">' + inr(b.qty, 0) + '</td>' +
+          '<td class="n">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
+          '<td class="n">' + inr(b.value, 0) + '</td>' +
+          '<td><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
+          '<td>' + (b.status === 'Cancelled' ? '' :
+            '<button class="mini" data-edit="' + b.id + '">Modify</button> ' +
+            '<button class="mini" data-cancel="' + b.id + '">Withdraw</button>') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    // The book is what startModify reads from, so it must hold these rows too.
+    STATE.book = (STATE.book || []).filter(function (x) {
+      return !rows.some(function (r) { return String(r.id) === String(x.id); });
+    }).concat(rows);
+  } catch (e) {
+    box.className = 'note bad';
+    box.textContent = apiMessage(e);
+  }
 }
 
 function endModify() {
@@ -2053,10 +2261,11 @@ async function loadMargins() {
     var r = d.margins || [];
     STATE.margins = r;
     pagedTable('margins', $('#marginTbl'), r, function (page) {
-      return '<thead><tr><th>UCC</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
+      return '<thead><tr><th>UCC</th><th>Client</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
       '<th>Source</th><th>Updated</th><th>By</th><th></th></tr></thead><tbody>' +
       page.map(function (m) {
         return '<tr><td class="m">' + esc(m.client_ucc) + '</td>' +
+          '<td>' + esc(m.client_name || '—') + '</td>' +
           '<td class="n">' + inr(m.available, 0) + '</td><td class="n">' + inr(m.used, 0) + '</td>' +
           '<td class="n' + (Number(m.free) < 0 ? ' neg' : '') + '">' + inr(m.free, 0) + '</td>' +
           '<td>' + esc(m.source) + '</td>' +
@@ -2113,11 +2322,58 @@ function showMarginFor(ucc) {
   return m;
 }
 
+/**
+ * Confirm who the UCC belongs to BEFORE any margin can be saved.
+ *
+ * A margin typed against a mistyped UCC is not an error anyone sees: it creates a
+ * record for a client who does not exist, or worse, funds the wrong one. So Save
+ * stays disabled until the client has been fetched and named, and any edit to the
+ * UCC disables it again.
+ */
+var MG_FETCHED = null;
+
+function marginGate() {
+  var ucc = $('#mgUcc').value.trim().toUpperCase();
+  var ok = MG_FETCHED && MG_FETCHED.ucc === ucc;
+  $('#mgSet').disabled = !ok;
+  if (!ok) {
+    $('#mgClient').textContent = ucc ? 'Fetch ' + ucc + ' first' : 'No client fetched';
+    $('#mgClient').classList.remove('ok-tag');
+  }
+  showMarginFor(ucc);
+}
+
+async function fetchMarginClient() {
+  var ucc = $('#mgUcc').value.trim().toUpperCase();
+  if (!ucc) { toast('Enter a UCC', 'Type the client code first.', 'bad'); return; }
+  var btn = $('#mgFetch');
+  btn.disabled = true;
+  try {
+    var d = await api('/clients/' + encodeURIComponent(ucc));
+    var c = d.client || {};
+    MG_FETCHED = { ucc: ucc, name: c.name || '' , active: c.is_active !== false };
+    $('#mgClient').textContent = (c.name || ucc) + (c.is_active === false ? ' · INACTIVE' : '');
+    $('#mgClient').classList.toggle('ok-tag', c.is_active !== false);
+    $('#mgClient').classList.toggle('warn-tag', c.is_active === false);
+    $('#mgSet').disabled = false;
+    showMarginFor(ucc);
+    $('#mgAmt').focus();
+  } catch (e) {
+    MG_FETCHED = null;
+    $('#mgSet').disabled = true;
+    $('#mgClient').textContent = e.status === 404 ? 'No client found for ' + ucc : apiMessage(e);
+    $('#mgClient').classList.add('warn-tag');
+    $('#mgClient').classList.remove('ok-tag');
+  } finally { btn.disabled = false; }
+}
+
 function editMargin(ucc) {
-  var m = showMarginFor(ucc);
   $('#mgUcc').value = ucc;
+  var m = showMarginFor(ucc);
   $('#mgAmt').value = m ? Number(m.available) : '';
-  $('#mgAmt').focus();
+  // Modifying an existing record still confirms who it is — the name in the list is
+  // from the last fetch, and a client can be closed since.
+  fetchMarginClient();
 }
 
 async function setMargin() {
@@ -2277,11 +2533,14 @@ function importPreview(title, cols, parsed, note, onCommit) {
   $('#impGo').addEventListener('click', function () { onCommit(valid); });
 }
 
+// Every column the importer reads, in the order the sample file uses. series,
+// bse_scrip_code and cutoff_flag were missing from the template for the same reason
+// they were missing from the form — and the BSE scrip code has no other way in.
 var ISSUE_TEMPLATE =
-  'symbol,company,isin,exchange,floor_price,cut_price_min,tick,lot,issue_qty,retail_qty,discount_pct,' +
-  'hni_open,hni_close,ret_open,ret_close\r\n' +
-  'COALINDIA,Coal India Ltd,INE522F01014,BOTH,385,385,0.05,1,50000000,5000000,5,' +
-  '2026-09-02T09:15,2026-09-02T15:15,2026-09-03T09:15,2026-09-03T15:15\r\n';
+  'symbol,company,isin,exchange,bse_scrip_code,series,floor_price,cut_price_min,tick,lot,' +
+  'issue_qty,retail_qty,discount_pct,cutoff_flag,hni_open,hni_close,ret_open,ret_close\r\n' +
+  'COALINDIA,Coal India Ltd,INE522F01014,BOTH,533278,EQ,385,385,0.05,1,' +
+  '50000000,5000000,5,Y,2026-09-02T09:15,2026-09-02T15:15,2026-09-03T09:15,2026-09-03T15:15\r\n';
 
 function importIssues() {
   pickCsv(function (rows, fileName) {
@@ -2294,7 +2553,16 @@ function importIssues() {
         isin: String(r.isin || '').toUpperCase(),
         exchange: ['NSE', 'BSE', 'BOTH'].indexOf(String(r.exchange || '').toUpperCase()) >= 0
           ? String(r.exchange).toUpperCase() : 'NSE',
-        floor_price: Number(r.floor_price),
+        // These three used to be droppable only because the importer ignored them —
+        // the same gap the manual form had. The BSE scrip code has no other way in
+        // at all, and a file without it produces a BSE bid file the exchange refuses.
+        series: r.series ? String(r.series).toUpperCase() : 'EQ',
+        bse_scrip_code: r.bse_scrip_code ? String(r.bse_scrip_code).trim() : null,
+        cutoff_flag: r.cutoff_flag == null || r.cutoff_flag === ''
+          ? true : !/^(0|n|no|false)$/i.test(String(r.cutoff_flag).trim()),
+        // Blank is legitimate: NSE's FAQ (Q12) says the seller need not publish a
+        // floor before the offer opens.
+        floor_price: r.floor_price === '' || r.floor_price == null ? null : Number(r.floor_price),
         cut_price_min: r.cut_price_min ? Number(r.cut_price_min) : null,
         tick: r.tick ? Number(r.tick) : 0.05,
         lot: r.lot ? Number(r.lot) : 1,
@@ -2304,14 +2572,20 @@ function importIssues() {
         hni_open: r.hni_open, hni_close: r.hni_close, ret_open: r.ret_open, ret_close: r.ret_close
       };
       if (missing.length) o.__error = 'missing ' + missing.join(', ');
-      else if (!isFinite(o.floor_price) || o.floor_price <= 0) o.__error = 'floor_price must be a positive number';
+      else if (o.floor_price != null && (!isFinite(o.floor_price) || o.floor_price <= 0)) {
+        o.__error = 'floor_price must be a positive number, or blank if it is not published yet';
+      } else if (o.exchange !== 'NSE' && !o.bse_scrip_code) {
+        o.__error = 'bse_scrip_code is required for a BSE or BOTH issue';
+      }
       else if (new Date(o.hni_close) <= new Date(o.hni_open)) o.__error = 'hni_close must be after hni_open';
       else if (new Date(o.ret_close) <= new Date(o.ret_open)) o.__error = 'ret_close must be after ret_open';
       return o;
     });
     importPreview('Issue master — ' + fileName,
       [{ key: 'symbol', label: 'Symbol' }, { key: 'company', label: 'Company' }, { key: 'isin', label: 'ISIN' },
-       { key: 'exchange', label: 'Exch' }, { key: 'floor_price', label: 'Floor' },
+       { key: 'exchange', label: 'Exch' }, { key: 'bse_scrip_code', label: 'BSE code' },
+       { key: 'floor_price', label: 'Floor' }, { key: 'discount_pct', label: 'Disc %' },
+       { key: 'cutoff_flag', label: 'Cut-off' },
        { key: 'hni_open', label: 'HNI open' }, { key: 'hni_close', label: 'HNI close' },
        { key: 'ret_open', label: 'Retail open' }, { key: 'ret_close', label: 'Retail close' }],
       parsed,
@@ -2709,9 +2983,13 @@ function markRefreshed(mode) {
   var el = $('#refreshNote');
   if (!el) return;
   if (mode === 'pinned') {
-    el.textContent = 'as-on date — auto-refresh paused';
+    // This is what "the data is not refreshing" was: a past date pinned, and the
+    // reason whispered in a grey tag. It has to be impossible to miss.
+    el.textContent = 'PAUSED — as-on date set';
+    el.classList.add('warn-tag');
     return;
   }
+  el.classList.remove('warn-tag');
   var d = new Date();
   var p = function (x) { return String(x).padStart(2, '0'); };
   el.textContent = 'updated ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
@@ -2790,6 +3068,7 @@ async function boot() {
   $('#btnRefresh').addEventListener('click', function () { loadDash(); if (STATE.tab === 'book') loadBook(); });
   $('#autoRefresh').addEventListener('change', setAutoRefresh);
   $('#dashAsOn').addEventListener('change', function () { setAutoRefresh(); loadDash(); });
+  $('#dashShowAll').addEventListener('change', function () { if (STATE.dash) renderDash(STATE.dash); });
   $('#dashToday').addEventListener('click', function () {
     $('#dashAsOn').value = ''; setAutoRefresh(); loadDash();
   });
@@ -2817,11 +3096,22 @@ async function boot() {
   $('#pbUcc').addEventListener('input', onUccTyped);
   // Everything on this form is derived from something else on it, so one handler
   // recomputes the lot rather than six that each know about two fields.
-  ['#pbIssue', '#pbCat', '#pbType', '#pbQty', '#pbPrice'].forEach(function (sel) {
+  ['#pbIssue', '#pbExch', '#pbCat', '#pbType', '#pbQty', '#pbPrice'].forEach(function (sel) {
     $(sel).addEventListener('change', refreshBidForm);
     $(sel).addEventListener('input', refreshBidForm);
   });
-  $('#pbIssue').addEventListener('change', renderIssueInfo);
+  $('#pbIssue').addEventListener('change', function () { renderIssueInfo(); loadExistingBids(); });
+  $('#pbUcc').addEventListener('change', loadExistingBids);
+  $('#pbExisting').addEventListener('click', function (e) {
+    var c = e.target.closest('[data-cancel]');
+    if (c) return cancelBid(c.dataset.cancel);
+    var m = e.target.closest('[data-edit]');
+    if (m) return startModify(m.dataset.edit);
+  });
+  $('#dashIssues').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-bidon]');
+    if (b) bidOnIssue(b.dataset.bidon);
+  });
   ['#exExch', '#exIssue', '#exCat', '#exCanc'].forEach(function (s) { $(s).addEventListener('change', previewExport); });
   $('#exPreview').addEventListener('click', previewExport);
   $('#exDownload').addEventListener('click', function () { downloadExport(); });
@@ -2889,9 +3179,9 @@ async function boot() {
     if (dl) return deleteMargin(dl.dataset.mgdel, false);
   });
   $('#mgReset').addEventListener('click', resetMargins);
-  $('#mgUcc').addEventListener('input', function () {
-    showMarginFor($('#mgUcc').value.trim().toUpperCase());
-  });
+  $('#mgFetch').addEventListener('click', fetchMarginClient);
+  $('#mgUcc').addEventListener('input', marginGate);
+  $('#mgUcc').addEventListener('keydown', function (e) { if (e.key === 'Enter') fetchMarginClient(); });
   $('#sySchedOpen').addEventListener('click', function () { $('#sySched').classList.toggle('hide'); });
   $('#arGo').addEventListener('click', function () { resetPage('archive'); loadArchive(); });
   $('#arQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') { resetPage('archive'); loadArchive(); } });
