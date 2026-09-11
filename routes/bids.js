@@ -14,8 +14,8 @@ const router = express.Router();
 const PAGE = 'ofs-desk';
 
 const BID_COLS = `b.id, b.ref, b.issue_id, b.client_ucc, b.cp_code, b.custody_code, b.category,
-  b.placed_by, b.placed_by_id, b.qty, b.price, b.is_cutoff, b.value, b.status, b.reject_reason,
-  b.exch_order_no, b.otp_verified, b.created_at, b.updated_at`;
+  b.placed_by, b.placed_by_id, b.branch_code, b.qty, b.price, b.is_cutoff, b.value, b.status,
+  b.reject_reason, b.exch_order_no, b.otp_verified, b.created_at, b.updated_at`;
 
 const ISSUE_JOIN = `LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id`;
 const ISSUE_SEL = `i.symbol, i.company, i.isin, i.exchange, i.floor_price, i.cut_price_min, i.tick, i.lot`;
@@ -28,6 +28,16 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
     if (req.query.category) { p.push(req.query.category); w.push('b.category = $' + p.length); }
     if (req.query.status)   { p.push(req.query.status);   w.push('b.status = $' + p.length); }
     else if (String(req.query.include_cancelled || '') !== '1') w.push("b.status <> 'Cancelled'");
+    if (req.query.branch_code) {
+      p.push(String(req.query.branch_code).trim().toUpperCase());
+      w.push('upper(b.branch_code) = $' + p.length);
+    }
+    // As-on date: the bid book as it stood on a given trading day. Compared in IST,
+    // because the server runs UTC and "today" there starts at 05:30 here.
+    if (req.query.as_on) {
+      p.push(String(req.query.as_on).slice(0, 10));
+      w.push(`(b.created_at AT TIME ZONE 'Asia/Kolkata')::date = $${p.length}::date`);
+    }
     if (req.query.q) {
       p.push('%' + String(req.query.q).trim().toUpperCase() + '%');
       w.push('(upper(b.client_ucc) LIKE $' + p.length + ' OR upper(i.symbol) LIKE $' + p.length + ' OR upper(b.ref) LIKE $' + p.length + ')');
@@ -46,6 +56,12 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
 
     // client identity lives in the other database - one extra round trip, not a join
     const merged = await ld.enrich(r, 'client_ucc');
+    // A bid placed before branch stamping, or by the desk before the client's branch
+    // was known, still shows a branch: fall back to the client's current one rather
+    // than an empty column.
+    for (const row of merged) {
+      row.branch_code = row.branch_code || row.branch_id || null;
+    }
     res.json({ bids: maskRows(merged, canViewPII(req, PAGE)), pii_unmasked: canViewPII(req, PAGE) });
   } catch (e) { next(e); }
 });
@@ -63,7 +79,7 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
     const errs = validateBid(ctx.issue, b, ctx);
     if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
 
-    const r = await bids.insertBid(b, ctx, 'desk', req.user.email || req.user.id);
+    const r = await bids.insertBid(b, ctx, 'desk', req.user.email || req.user.id, ctx.client.branch);
 
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
     res.status(201).json({ bid: r });

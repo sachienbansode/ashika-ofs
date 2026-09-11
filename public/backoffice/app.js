@@ -273,6 +273,15 @@ var FIELD_INPUT_IDS = {
   status: 'fStatus'
 };
 
+/** placed_by is four values now: desk | client | ap | branch. */
+function placedByLabel(v) {
+  return v === 'desk' ? 'Back office'
+       : v === 'client' ? 'Client'
+       : v === 'ap' ? 'AP'
+       : v === 'branch' ? 'Branch'
+       : (v || '');
+}
+
 function pageLabel(key) {
   if (key === 'ofs-masters') return 'Masters & Margins';
   if (key === 'ofs-desk') return 'the Bidding Desk';
@@ -476,19 +485,20 @@ async function loadBook() {
       inr(b.reduce(function (t, x) { return t + Number(x.qty || 0); }, 0), 0) + ' shares · ' +
       crore(b.reduce(function (t, x) { return t + Number(x.value || 0); }, 0));
     pagedTable('bids', $('#bookTbl'), b, function (page) {
-      return '<thead><tr><th>Ref</th><th>Symbol</th><th>UCC</th><th>Client</th><th>PAN</th><th>Cat</th>' +
+      return '<thead><tr><th>Ref</th><th>Symbol</th><th>UCC</th><th>Client</th><th>Branch</th><th>PAN</th><th>Cat</th>' +
       '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>' +
       page.map(function (x) {
         return '<tr data-bid="' + x.id + '">' +
           '<td class="m">' + esc(x.ref) + '</td><td>' + esc(x.symbol || '') + '</td>' +
           '<td class="m">' + esc(x.client_ucc) + '</td><td>' + esc(x.client_name || '') + '</td>' +
+          '<td class="m">' + esc(x.branch_code || '—') + '</td>' +
           '<td class="m">' + esc(x.pan || '') + '</td>' +
           '<td><span class="tag ' + (x.category === 'Retail' ? 'ret' : 'hni') + '">' + esc(x.category) + '</span></td>' +
           '<td class="n">' + inr(x.qty, 0) + '</td>' +
           '<td class="n">' + (x.is_cutoff ? 'Cut-off' : inr(x.price, 2)) + '</td>' +
           '<td class="n">' + inr(x.value, 0) + '</td>' +
           '<td><span class="st ' + statusCls(x.status) + '">' + esc(x.status) + '</span></td>' +
-          '<td>' + esc(x.placed_by) + '</td>' +
+          '<td>' + esc(placedByLabel(x.placed_by)) + '</td>' +
           '<td>' + (x.status === 'Cancelled' ? '' :
             '<button class="mini" data-edit="' + x.id + '">Modify</button> ' +
             '<button class="mini" data-cancel="' + x.id + '">Cancel</button>') + '</td>' +

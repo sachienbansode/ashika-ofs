@@ -120,7 +120,12 @@ async function enrich(rows, uccField, into) {
       pan: c ? c.pan : null,
       mobile: c ? c.mobile : null,
       email: c ? c.email : null,
-      branch: c ? c.branch : null
+      // c.branch has never existed on the SELECT above — the column is branch_id —
+      // so this was quietly null on every enriched row, which is why the bid book
+      // had no branch to show.
+      branch: c ? c.branch_id : null,
+      branch_id: c ? c.branch_id : null,
+      client_active: c ? c.is_active === true : null
     });
   });
 }

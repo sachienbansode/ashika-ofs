@@ -91,7 +91,10 @@ app.get('/readyz', async (req, res) => {
 /* ---- session endpoints: deliberately BEFORE authMiddleware ---- */
 app.use('/auth/staff', require('./routes/staffAuth'));   // staff, email + password (+ OTP)
 app.use('/auth', require('./routes/auth'));                 // staff, via portal SSO
-app.use('/client/auth', apiLimiter, require('./routes/clientAuth'));   // clients, mobile + email + OTP
+// Mounted BEFORE the client router: '/branch/start' would otherwise never be
+// reached, because clientAuth owns '/start' on the same prefix.
+app.use('/client/auth/branch', apiLimiter, require('./routes/branchAuth')); // branches + APs, email + OTP
+app.use('/client/auth', apiLimiter, require('./routes/clientAuth'));        // clients, mobile + email + OTP
 
 /* ---- the client's own view: gated by requireClient inside the router, NOT by
    requirePage. A client is not a platform user and holds no page grants. ---- */

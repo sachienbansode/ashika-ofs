@@ -50,12 +50,17 @@ async function requireClient(req, res, next) {
   } catch (e) {
     return res.status(401).json({ error: 'invalid_session' });
   }
-  if (!claims.jti || !claims.ucc) return res.status(401).json({ error: 'invalid_session' });
+  // A client token carries a ucc; a branch/AP token carries a branch code. Either
+  // is a session; neither is optional. The row below is what actually decides.
+  if (!claims.jti || !(claims.ucc || claims.branch)) {
+    return res.status(401).json({ error: 'invalid_session' });
+  }
 
   let row;
   try {
     row = await one(
-      `SELECT jti, client_ucc, actor_type, ap_id, revoked_at, expires_at
+      `SELECT jti, client_ucc, actor_type, ap_id, branch_code, branch_name, login_email,
+              revoked_at, expires_at
          FROM ${SCHEMA}.ofs_client_session WHERE jti = $1`, [claims.jti]);
   } catch (e) {
     return res.status(503).json({ error: 'session_store_unavailable' });
@@ -65,12 +70,29 @@ async function requireClient(req, res, next) {
   if (row.revoked_at) return res.status(401).json({ error: 'session_revoked' });
   if (new Date(row.expires_at) <= new Date()) return res.status(401).json({ error: 'session_expired' });
 
-  req.client = {
-    ucc: row.client_ucc,
-    actorType: row.actor_type,
+  /*
+   * Two shapes of signed-in portal user, and the difference matters everywhere:
+   *
+   *   client            bound to ONE ucc
+   *   ap | branch       bound to a BRANCHCODE, standing for that branch's clients
+   *
+   * req.portal is the one every scoped query should read. req.client is kept for the
+   * routes that genuinely require a single client, and is deliberately left undefined
+   * for a branch session — a branch reading req.client.ucc should fail loudly rather
+   * than quietly act as whatever happened to be in the column.
+   */
+  req.portal = {
+    kind: row.actor_type,                       // client | ap | branch
+    ucc: row.client_ucc || null,
+    branchCode: row.branch_code || null,
+    branchName: row.branch_name || null,
+    loginEmail: row.login_email || null,
     apId: row.ap_id,
     jti: row.jti
   };
+  if (row.actor_type === 'client') {
+    req.client = { ucc: row.client_ucc, actorType: row.actor_type, apId: row.ap_id, jti: row.jti };
+  }
 
   // Best-effort liveness stamp; never block the request on it.
   query(`UPDATE ${SCHEMA}.ofs_client_session SET last_seen_at = now() WHERE jti = $1`, [row.jti])
@@ -79,4 +101,20 @@ async function requireClient(req, res, next) {
   next();
 }
 
-module.exports = { COOKIE, AUDIENCE, sign, cookieOpts, requireClient };
+/** Any signed-in portal user: a client, an AP or a branch. */
+function requirePortal(req, res, next) {
+  return requireClient(req, res, next);
+}
+
+/** A session bound to ONE client. Refuses a branch session rather than guessing. */
+function requireSingleClient(req, res, next) {
+  return requireClient(req, res, function () {
+    if (!req.client || !req.client.ucc) {
+      return res.status(400).json({ error: 'client_session_required',
+        message: 'Choose a client first — this action is for one client at a time.' });
+    }
+    next();
+  });
+}
+
+module.exports = { COOKIE, AUDIENCE, sign, cookieOpts, requireClient, requirePortal, requireSingleClient };
