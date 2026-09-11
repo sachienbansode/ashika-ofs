@@ -19,7 +19,23 @@ async function collect(q) {
   const w = [], p = [];
   if (q.issue_id && q.issue_id !== 'all') { p.push(q.issue_id); w.push('b.issue_id = $' + p.length); }
   if (q.category && q.category !== 'all') { p.push(q.category); w.push('b.category = $' + p.length); }
-  if (String(q.include_cancelled || '') === '1') w.push("b.status IN ('Live','Modified','Cancelled')");
+  if (q.branch_code) {
+    p.push(String(q.branch_code).trim().toUpperCase());
+    w.push('upper(b.branch_code) = $' + p.length);
+  }
+  if (q.q) {
+    p.push('%' + String(q.q).trim().toUpperCase() + '%');
+    w.push('(upper(b.client_ucc) LIKE $' + p.length + ' OR upper(i.symbol) LIKE $' + p.length +
+           ' OR upper(b.ref) LIKE $' + p.length + ')');
+  }
+  // The desk's own extract answers "the book as it stood on that day", so it takes
+  // the same as-on filter the bid book does, compared in IST for the same reason.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.as_on || ''))) {
+    p.push(String(q.as_on).slice(0, 10));
+    w.push(`(b.created_at AT TIME ZONE 'Asia/Kolkata')::date = $${p.length}::date`);
+  }
+  if (q.status) { p.push(q.status); w.push('b.status = $' + p.length); }
+  else if (String(q.include_cancelled || '') === '1') w.push("b.status IN ('Live','Modified','Cancelled')");
   else w.push("b.status IN ('Live','Modified')");
 
   const r = await rows(

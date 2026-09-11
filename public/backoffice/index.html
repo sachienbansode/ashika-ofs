@@ -18,13 +18,15 @@
   <div class="brand">OFS <span>BackOffice</span></div>
   <div class="clock" id="clock">--:--:--</div>
   <div class="sp"></div>
-  <button class="mini" id="btnRefresh">Refresh</button>
+  <button class="mini" id="btnRefresh" title="Refresh now">Refresh</button>
   <select id="autoRefresh" title="Auto-refresh">
-    <option value="0">Manual</option>
-    <option value="5000" selected>5s</option>
-    <option value="15000">15s</option>
-    <option value="30000">30s</option>
+    <option value="0">Manual only</option>
+    <option value="10000">Auto · 10s</option>
+    <option value="30000" selected>Auto · 30s</option>
+    <option value="60000">Auto · 1 min</option>
+    <option value="300000">Auto · 5 min</option>
   </select>
+  <span class="tag" id="refreshNote" title="When the figures on screen were last read">—</span>
   <div class="who"><b id="whoName">—</b><span id="whoRole"></span></div>
   <button class="mini hide" id="btnSignOut">Sign out</button>
 </header>
@@ -44,6 +46,11 @@
 
   <!-- ---------------- Dashboard ---------------- -->
   <section class="pane" id="pane-dash">
+    <div class="bar">
+      <label class="inline"><span>As on</span><input type="date" id="dashAsOn"></label>
+      <button class="mini" id="dashToday">Today</button>
+      <span class="tag" id="dashAsOnNote">Today's bids</span>
+    </div>
     <div class="kpis" id="kpis"></div>
     <h2 class="sec">Open issues</h2>
     <div class="cards" id="issueCards"></div>
@@ -68,7 +75,11 @@
         <option value="Rejected">Rejected</option>
       </select>
       <input type="text" id="bkQ" placeholder="UCC, symbol or bid ref">
+      <input type="text" id="bkBranch" placeholder="Branch code" style="width:120px">
+      <label class="inline"><span>As on</span><input type="date" id="bkAsOn"></label>
+      <button class="mini" id="bkToday" title="Back to today">Today</button>
       <button class="btn ghost" id="bkGo">Search</button>
+      <button class="mini" id="bkCsv" title="Every field, including who placed each bid and when">Download CSV</button>
       <div class="sp"></div>
       <span class="tag" id="bkCount"></span>
     </div>

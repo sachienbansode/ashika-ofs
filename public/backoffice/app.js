@@ -409,7 +409,8 @@ function renderDash(d) {
 
 async function loadDash() {
   try {
-    var d = await api('/dashboard');
+    var asOn = $('#dashAsOn') && $('#dashAsOn').value;
+    var d = await api('/dashboard' + (asOn ? '?as_on=' + encodeURIComponent(asOn) : ''));
     STATE.dash = d;
     STATE.issues = d.issues || [];
     // The caps the bid form works from — retail cap, HNI minimum, cut-off — come
@@ -418,6 +419,13 @@ async function loadDash() {
     renderDash(d);
     fillIssueSelects();
     refreshBidForm();
+    markRefreshed($('#dashAsOn') && $('#dashAsOn').value ? 'pinned' : null);
+    var note = $('#dashAsOnNote');
+    if (note) {
+      note.textContent = d.as_on
+        ? 'Showing the book as it stood on ' + d.as_on
+        : "Today's bids";
+    }
   } catch (e) {
     if (e.status === 401) {
       // The session died under us - stop polling and say so, rather than
@@ -561,18 +569,27 @@ function tickClock() {
 }
 
 /* ---------------- bid book ---------------- */
-async function loadBook() {
+/** The filters as a query string, shared by the table and the CSV. */
+function bookQuery() {
   var q = [];
   if ($('#bkIssue').value) q.push('issue_id=' + encodeURIComponent($('#bkIssue').value));
   if ($('#bkCat').value) q.push('category=' + encodeURIComponent($('#bkCat').value));
   if ($('#bkStatus').value) q.push('status=' + encodeURIComponent($('#bkStatus').value));
   if ($('#bkQ').value.trim()) q.push('q=' + encodeURIComponent($('#bkQ').value.trim()));
+  if ($('#bkBranch').value.trim()) q.push('branch_code=' + encodeURIComponent($('#bkBranch').value.trim()));
+  if ($('#bkAsOn').value) q.push('as_on=' + encodeURIComponent($('#bkAsOn').value));
   if ($('#bkStatus').value === 'Cancelled') q.push('include_cancelled=1');
+  return q.join('&');
+}
+
+async function loadBook() {
+  var q = bookQuery();
   try {
-    var d = await api('/bids' + (q.length ? '?' + q.join('&') : ''));
+    var d = await api('/bids' + (q ? '?' + q : ''));
     var b = d.bids || [];
     STATE.book = b;
-    $('#bkCount').textContent = b.length + ' bid(s) · ' +
+    $('#bkCount').textContent = ($('#bkAsOn').value ? 'as on ' + $('#bkAsOn').value + ' · ' : '') +
+      b.length + ' bid(s) · ' +
       inr(b.reduce(function (t, x) { return t + Number(x.qty || 0); }, 0), 0) + ' shares · ' +
       crore(b.reduce(function (t, x) { return t + Number(x.value || 0); }, 0));
     pagedTable('bids', $('#bookTbl'), b, function (page) {
@@ -1150,6 +1167,37 @@ function exportError(e) {
  * It ignores the exchange selector on purpose — there is one book, and which
  * exchange a file would be cut for does not change what happened.
  */
+/**
+ * The bid book on screen, as a file — every field, filters and all. Routed through
+ * the same FULL export the Exchange files tab uses, so it is checksummed, logged and
+ * audited rather than assembled in the browser from whatever happened to be drawn.
+ */
+async function downloadBookCsv() {
+  var q = bookQuery();
+  var url = '/api/export/FULL/download' + (q ? '?' + q : '');
+  var btn = $('#bkCsv');
+  btn.disabled = true;
+  try {
+    var res = await fetch(url, {
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}, credentials: 'same-origin' });
+    if (!res.ok) {
+      var j = await res.json().catch(function () { return {}; });
+      var err = new Error(j.message || j.error || res.statusText);
+      err.status = res.status; err.body = j; throw err;
+    }
+    var blob = await res.blob();
+    var name = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name ? name[1] : 'OFS_Bids.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    toast('Downloaded', 'The bid book with these filters, all fields included.', 'ok');
+  } catch (e) {
+    toast('Download failed', exportError(e), 'bad');
+  } finally { btn.disabled = false; }
+}
+
 async function downloadFullExport() {
   var url = '/api/export/FULL/download?' + exportQuery();
   var headers = TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {};
@@ -2576,13 +2624,38 @@ async function unarchive(id) {
 }
 
 /* ---------------- boot ---------------- */
+/**
+ * Auto-refresh. Default 30 seconds, with Manual as a real option — during a bidding
+ * window a screen that redraws under a desk mid-read is worse than a stale one, and
+ * the Refresh button is always there.
+ *
+ * Refreshing an as-on-date view is pointless (a past day does not change), so the
+ * timer stands down when one is set and says so.
+ */
 function setAutoRefresh() {
   if (STATE.timer) clearInterval(STATE.timer);
   var ms = Number($('#autoRefresh').value) || 0;
-  if (ms) STATE.timer = setInterval(function () {
-    loadDash();
-    if (STATE.tab === 'book') loadBook();
-  }, ms);
+  var pinned = !!($('#dashAsOn') && $('#dashAsOn').value);
+  if (ms && !pinned) {
+    STATE.timer = setInterval(function () {
+      loadDash();
+      if (STATE.tab === 'book') loadBook();
+    }, ms);
+  }
+  markRefreshed(pinned ? 'pinned' : null);
+}
+
+/** When the figures on screen were last read, in the desk's own timezone. */
+function markRefreshed(mode) {
+  var el = $('#refreshNote');
+  if (!el) return;
+  if (mode === 'pinned') {
+    el.textContent = 'as-on date — auto-refresh paused';
+    return;
+  }
+  var d = new Date();
+  var p = function (x) { return String(x).padStart(2, '0'); };
+  el.textContent = 'updated ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
 }
 
 /* ---------------- session ---------------- */
@@ -2657,6 +2730,16 @@ async function boot() {
   $$('[data-mtab]').forEach(function (b) { b.addEventListener('click', function () { showMTab(b.dataset.mtab); }); });
   $('#btnRefresh').addEventListener('click', function () { loadDash(); if (STATE.tab === 'book') loadBook(); });
   $('#autoRefresh').addEventListener('change', setAutoRefresh);
+  $('#dashAsOn').addEventListener('change', function () { setAutoRefresh(); loadDash(); });
+  $('#dashToday').addEventListener('click', function () {
+    $('#dashAsOn').value = ''; setAutoRefresh(); loadDash();
+  });
+  $('#bkAsOn').addEventListener('change', function () { resetPage('bids'); loadBook(); });
+  $('#bkToday').addEventListener('click', function () {
+    $('#bkAsOn').value = ''; resetPage('bids'); loadBook();
+  });
+  $('#bkBranch').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadBook(); });
+  $('#bkCsv').addEventListener('click', downloadBookCsv);
   $('#bkGo').addEventListener('click', function () { resetPage('bids'); loadBook(); });
   $('#bkQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadBook(); });
   ['#bkIssue', '#bkCat', '#bkStatus'].forEach(function (s) { $(s).addEventListener('change', loadBook); });
