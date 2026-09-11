@@ -98,6 +98,32 @@ function dt(v) {
 }
 /** With the zone spelled out — for a window, where being wrong matters most. */
 function dtz(v) { return v ? dt(v) + ' IST' : '—'; }
+
+/** Today in IST as YYYY-MM-DD — what a date input expects, and what the server compares. */
+function todayIST() {
+  var p = istParts(new Date());
+  return p.year + '-' + p.month + '-' + p.day;
+}
+
+/**
+ * The as-on value to actually send.
+ *
+ * The box always SHOWS a date, because an empty date box reads as broken. But today
+ * is not a filter — it is the normal view — so it is sent as nothing. Otherwise the
+ * bid book would quietly drop a live bid placed yesterday on the HNI leg, which is a
+ * bid that still has to reach the exchange file.
+ */
+function asOnParam(sel) {
+  var el = $(sel);
+  var v = el && el.value;
+  return v && v !== todayIST() ? v : '';
+}
+
+/** Put today in a date box that has no value yet. */
+function primeDateBox(sel) {
+  var el = $(sel);
+  if (el && !el.value) el.value = todayIST();
+}
 function hms(ms) {
   if (ms <= 0) return '00:00:00';
   var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
@@ -484,7 +510,7 @@ function renderDash(d) {
 
 async function loadDash() {
   try {
-    var asOn = $('#dashAsOn') && $('#dashAsOn').value;
+    var asOn = asOnParam('#dashAsOn');
     var d = await api('/dashboard' + (asOn ? '?as_on=' + encodeURIComponent(asOn) : ''));
     STATE.dash = d;
     STATE.issues = d.issues || [];
@@ -494,7 +520,7 @@ async function loadDash() {
     renderDash(d);
     fillIssueSelects();
     refreshBidForm();
-    markRefreshed($('#dashAsOn') && $('#dashAsOn').value ? 'pinned' : null);
+    markRefreshed(asOnParam('#dashAsOn') ? 'pinned' : null);
     var dd = $('#dashDate');
     if (dd) dd.textContent = dtDate(d.server_time) + ' · ' + dtTime(d.server_time) + ' IST';
     var note = $('#dashAsOnNote');
@@ -647,6 +673,47 @@ function tickClock() {
 }
 
 /* ---------------- bid book ---------------- */
+/**
+ * The totals under the bid book.
+ *
+ * A count and one rupee figure is not a total for this book: the exchange allots
+ * Retail and Non-Retail separately, against separate reserved quantities, so a desk
+ * that cannot see the split cannot tell whether either leg is covered. Cancelled
+ * bids are counted apart rather than folded in — a cancelled bid is not part of the
+ * book and must never be added to a figure that gets read as one.
+ */
+function renderBookTotals(rows) {
+  var live = rows.filter(function (x) { return x.status !== 'Cancelled' && x.status !== 'Rejected'; });
+  var dead = rows.length - live.length;
+  var sum = function (list, f) { return list.reduce(function (t, x) { return t + (Number(f(x)) || 0); }, 0); };
+  var byCat = function (cat) { return live.filter(function (x) { return x.category === cat; }); };
+
+  var ret = byCat('Retail'), hni = byCat('HNI');
+  var clients = new Set(live.map(function (x) { return x.client_ucc; })).size;
+
+  var asOn = asOnParam('#bkAsOn');
+  $('#bkCount').textContent = (asOn ? 'as on ' + dtDate(asOn + 'T00:00:00+05:30') + ' · ' : '') +
+    live.length + ' bid(s) · ' + clients + ' client(s)';
+
+  var cell = function (label, cls, list) {
+    return '<div class="tot ' + cls + '">' +
+      '<div class="k">' + esc(label) + '</div>' +
+      '<div class="n">' + inr(list.length, 0) + ' bid(s)</div>' +
+      '<div class="q">' + inr(sum(list, function (x) { return x.qty; }), 0) + ' shares</div>' +
+      '<div class="v">' + rupee(sum(list, function (x) { return x.value; }), 0) + '</div>' +
+    '</div>';
+  };
+
+  $('#bkTotals').innerHTML =
+    cell('Retail', 'r', ret) +
+    cell('HNI / Non-Retail', 'h', hni) +
+    cell('Total', 't', live) +
+    (dead ? '<div class="tot d"><div class="k">Cancelled / rejected</div>' +
+      '<div class="n">' + inr(dead, 0) + ' bid(s)</div>' +
+      '<div class="q">not in the book</div>' +
+      '<div class="v">—</div></div>' : '');
+}
+
 /** The filters as a query string, shared by the table and the CSV. */
 function bookQuery() {
   var q = [];
@@ -655,7 +722,7 @@ function bookQuery() {
   if ($('#bkStatus').value) q.push('status=' + encodeURIComponent($('#bkStatus').value));
   if ($('#bkQ').value.trim()) q.push('q=' + encodeURIComponent($('#bkQ').value.trim()));
   if ($('#bkBranch').value.trim()) q.push('branch_code=' + encodeURIComponent($('#bkBranch').value.trim()));
-  if ($('#bkAsOn').value) q.push('as_on=' + encodeURIComponent($('#bkAsOn').value));
+  if (asOnParam('#bkAsOn')) q.push('as_on=' + encodeURIComponent(asOnParam('#bkAsOn')));
   if ($('#bkStatus').value === 'Cancelled') q.push('include_cancelled=1');
   return q.join('&');
 }
@@ -666,10 +733,7 @@ async function loadBook() {
     var d = await api('/bids' + (q ? '?' + q : ''));
     var b = d.bids || [];
     STATE.book = b;
-    $('#bkCount').textContent = ($('#bkAsOn').value ? 'as on ' + $('#bkAsOn').value + ' · ' : '') +
-      b.length + ' bid(s) · ' +
-      inr(b.reduce(function (t, x) { return t + Number(x.qty || 0); }, 0), 0) + ' shares · ' +
-      crore(b.reduce(function (t, x) { return t + Number(x.value || 0); }, 0));
+    renderBookTotals(b);
     pagedTable('bids', $('#bookTbl'), b, function (page) {
       return '<thead><tr><th>Ref</th><th>Symbol</th><th>UCC</th><th>Client</th><th>Branch</th><th>PAN</th><th>Cat</th>' +
       '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>' +
@@ -689,7 +753,14 @@ async function loadBook() {
             '<button class="mini" data-edit="' + x.id + '">Modify</button> ' +
             '<button class="mini" data-cancel="' + x.id + '">Cancel</button>') + '</td>' +
         '</tr>';
-      }).join('') + '</tbody>';
+      }).join('') + '</tbody>' +
+      // The page's own subtotal. Ten rows at a time means the figures above are for
+      // the whole book, not for what is on screen — so say which is which.
+      '<tfoot><tr><td colspan="7">This page</td>' +
+        '<td class="n">' + inr(page.reduce(function (t, x) { return t + Number(x.qty || 0); }, 0), 0) + '</td>' +
+        '<td></td>' +
+        '<td class="n">' + inr(page.reduce(function (t, x) { return t + Number(x.value || 0); }, 0), 0) + '</td>' +
+        '<td colspan="3"></td></tr></tfoot>';
     }, 'bids', loadBook, 'No bid matches this filter.');
   } catch (e) { toast('Bid book failed', e.message, 'bad'); }
 }
@@ -2968,7 +3039,9 @@ async function unarchive(id) {
 function setAutoRefresh() {
   if (STATE.timer) clearInterval(STATE.timer);
   var ms = Number($('#autoRefresh').value) || 0;
-  var pinned = !!($('#dashAsOn') && $('#dashAsOn').value);
+  // Today is not a pin. Only a PAST date stops the refresh, because a past day
+  // cannot change and today very much can.
+  var pinned = !!asOnParam('#dashAsOn');
   if (ms && !pinned) {
     STATE.timer = setInterval(function () {
       loadDash();
@@ -3063,6 +3136,12 @@ async function boot() {
   var ready = await checkSession();
   if (ready) applyGrants();
 
+  // An empty date box reads as broken, and the first thing anyone does with it is
+  // type a date — which then silently becomes a filter. Show today instead; today is
+  // sent as no filter at all (asOnParam), so the view is unchanged.
+  primeDateBox('#dashAsOn');
+  primeDateBox('#bkAsOn');
+
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
   $$('[data-mtab]').forEach(function (b) { b.addEventListener('click', function () { showMTab(b.dataset.mtab); }); });
   $('#btnRefresh').addEventListener('click', function () { loadDash(); if (STATE.tab === 'book') loadBook(); });
@@ -3070,11 +3149,11 @@ async function boot() {
   $('#dashAsOn').addEventListener('change', function () { setAutoRefresh(); loadDash(); });
   $('#dashShowAll').addEventListener('change', function () { if (STATE.dash) renderDash(STATE.dash); });
   $('#dashToday').addEventListener('click', function () {
-    $('#dashAsOn').value = ''; setAutoRefresh(); loadDash();
+    $('#dashAsOn').value = todayIST(); setAutoRefresh(); loadDash();
   });
   $('#bkAsOn').addEventListener('change', function () { resetPage('bids'); loadBook(); });
   $('#bkToday').addEventListener('click', function () {
-    $('#bkAsOn').value = ''; resetPage('bids'); loadBook();
+    $('#bkAsOn').value = todayIST(); resetPage('bids'); loadBook();
   });
   $('#bkBranch').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadBook(); });
   $('#bkCsv').addEventListener('click', downloadBookCsv);
