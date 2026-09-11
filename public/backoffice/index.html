@@ -183,11 +183,24 @@
     </div>
     <div id="mMargins" class="hide">
       <div class="bar">
-        <input type="text" id="mgUcc" data-grant="ofs-masters" placeholder="Client UCC">
+        <input type="text" id="mgUcc" data-grant="ofs-masters" placeholder="Client UCC" autocomplete="off">
         <input type="number" id="mgAmt" data-grant="ofs-masters" placeholder="Available margin" step="1" min="0">
-        <button class="btn" id="mgSet" data-grant="ofs-masters">Set margin</button>
+        <!-- Used and Free are derived from live bids, so they are shown, never typed.
+             On create and on modify alike: setting an available margin without seeing
+             what is already committed against it is how a desk overcommits. -->
+        <span class="tag" id="mgUsed">Used —</span>
+        <span class="tag" id="mgFree">Free —</span>
+        <button class="btn" id="mgSet" data-grant="ofs-masters">Save margin</button>
         <button class="btn ghost" id="mgImport" data-grant="ofs-masters">Import margins CSV</button>
         <button class="mini" id="mgTemplate">Download template</button>
+        <div class="sp"></div>
+        <button class="btn warn" id="mgReset" data-grant="ofs-masters"
+                title="Every client's available margin to zero, with a log entry each">Zero all margins</button>
+      </div>
+      <div class="note" id="mgNote">
+        One record per client: saving replaces the current figure and writes the change to
+        the history below. Margins are zeroed at the start of each day — the schedule lives
+        in the Stage API admin module and calls this module's reset endpoint.
       </div>
       <div class="wrap"><table id="marginTbl"></table></div>
       <div id="mgHistory"></div>

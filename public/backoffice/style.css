@@ -495,3 +495,7 @@ th.off-file-first,td.off-file-first{border-left:2px solid rgba(18,110,130,.28)}
 /* The read-only total on the bid form. Derived, never typed — so it must not look
    like somewhere to type. */
 #pbValue{background:#f1f3f7;color:var(--navy);font-weight:650;cursor:default}
+
+/* A negative free margin is not a rounding artefact — it means live bids exceed the
+   margin behind them, and it must not read as just another number. */
+td.n.neg{color:var(--red);font-weight:650}

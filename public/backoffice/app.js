@@ -2051,15 +2051,19 @@ async function loadMargins() {
   try {
     var d = await api('/margin');
     var r = d.margins || [];
+    STATE.margins = r;
     pagedTable('margins', $('#marginTbl'), r, function (page) {
       return '<thead><tr><th>UCC</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
       '<th>Source</th><th>Updated</th><th>By</th><th></th></tr></thead><tbody>' +
       page.map(function (m) {
         return '<tr><td class="m">' + esc(m.client_ucc) + '</td>' +
           '<td class="n">' + inr(m.available, 0) + '</td><td class="n">' + inr(m.used, 0) + '</td>' +
-          '<td class="n">' + inr(m.free, 0) + '</td><td>' + esc(m.source) + '</td>' +
+          '<td class="n' + (Number(m.free) < 0 ? ' neg' : '') + '">' + inr(m.free, 0) + '</td>' +
+          '<td>' + esc(m.source) + '</td>' +
           '<td class="m">' + dt(m.updated_at) + '</td><td>' + esc(m.updated_by || '') + '</td>' +
-          '<td><button class="mini" data-mglog="' + esc(m.client_ucc) + '">History</button></td></tr>';
+          '<td><button class="mini" data-mgedit="' + esc(m.client_ucc) + '">Modify</button> ' +
+              '<button class="mini" data-mgdel="' + esc(m.client_ucc) + '" data-grant="ofs-masters">Delete</button> ' +
+              '<button class="mini" data-mglog="' + esc(m.client_ucc) + '">History</button></td></tr>';
       }).join('') + '</tbody>';
     }, 'clients', loadMargins, 'No margin snapshot loaded. RMS has no available-margin read API yet — set margins here or via CSV.');
   } catch (e) { toast('Margins failed', e.message, 'bad'); }
@@ -2096,14 +2100,69 @@ async function marginHistory(ucc) {
   } catch (e) { toast('History failed', e.message, 'bad'); }
 }
 
+/**
+ * Show what is already committed against a client's margin as the UCC is typed.
+ * One record per client, so this is also how "create" and "modify" differ: if a
+ * figure is already there, the form is editing it.
+ */
+function showMarginFor(ucc) {
+  var m = (STATE.margins || []).filter(function (x) { return x.client_ucc === ucc; })[0];
+  $('#mgUsed').textContent = 'Used ' + (m ? rupee(m.used, 0) : '—');
+  $('#mgFree').textContent = 'Free ' + (m ? rupee(m.free, 0) : '—');
+  $('#mgSet').textContent = m ? 'Replace margin' : 'Save margin';
+  return m;
+}
+
+function editMargin(ucc) {
+  var m = showMarginFor(ucc);
+  $('#mgUcc').value = ucc;
+  $('#mgAmt').value = m ? Number(m.available) : '';
+  $('#mgAmt').focus();
+}
+
 async function setMargin() {
   var ucc = $('#mgUcc').value.trim().toUpperCase(), amt = Number($('#mgAmt').value);
   if (!ucc || !isFinite(amt)) { toast('Missing input', 'Enter a UCC and an amount.', 'bad'); return; }
+  var existing = (STATE.margins || []).filter(function (x) { return x.client_ucc === ucc; })[0];
   try {
     await api('/margin/' + encodeURIComponent(ucc), { method: 'PUT', body: { available: amt, source: 'manual' } });
-    toast('Margin set', ucc + ' → ' + rupee(amt, 0), 'ok');
+    toast(existing ? 'Margin replaced' : 'Margin set',
+      ucc + ' → ' + rupee(amt, 0) + (existing ? ' (was ' + rupee(existing.available, 0) + ')' : ''), 'ok');
     $('#mgAmt').value = ''; loadMargins();
   } catch (e) { toast('Failed', apiMessage(e), 'bad'); }
+}
+
+async function deleteMargin(ucc, force) {
+  if (!force && !window.confirm('Remove the margin record for ' + ucc +
+      '?\n\nThe history is kept — only the current figure goes.')) return;
+  try {
+    await api('/margin/' + encodeURIComponent(ucc), { method: 'DELETE', body: force ? { force: 'true' } : {} });
+    toast('Margin removed', ucc + ' has no margin record now.', 'ok');
+    loadMargins();
+  } catch (e) {
+    if (e.status === 409 && e.body && e.body.error === 'margin_in_use') {
+      if (window.confirm(e.body.message + '\n\nRemove it anyway?')) return deleteMargin(ucc, true);
+      return;
+    }
+    toast('Could not remove', apiMessage(e), 'bad');
+  }
+}
+
+/**
+ * Zero every margin. The nightly job calls the same endpoint; this is the manual
+ * door, and it asks twice because there is no undo beyond re-uploading the file.
+ */
+async function resetMargins() {
+  var n = (STATE.margins || []).filter(function (m) { return Number(m.available) !== 0; }).length;
+  if (!n) { toast('Nothing to zero', 'Every margin is already zero.', 'warn'); return; }
+  if (!window.confirm('Set ' + n + ' client margin(s) to zero?\n\n' +
+      'Each change is written to the margin history. No bid can pass the margin check ' +
+      'until the day\'s figures are uploaded again.')) return;
+  try {
+    var r = await api('/margin/reset', { method: 'POST', body: { note: 'manual reset from Masters' } });
+    toast('Margins zeroed', r.clients + ' client(s) set to zero.', 'ok');
+    loadMargins();
+  } catch (e) { toast('Reset failed', apiMessage(e), 'bad'); }
 }
 
 /**
@@ -2822,8 +2881,16 @@ async function boot() {
   $('#auNext').addEventListener('click', function () { loadAudit(AUDIT.offset + AUDIT.limit); });
   $('#auCsv').addEventListener('click', auditCsv);
   $('#marginTbl').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-mglog]');
-    if (b) marginHistory(b.dataset.mglog);
+    var l = e.target.closest('[data-mglog]');
+    if (l) return marginHistory(l.dataset.mglog);
+    var ed = e.target.closest('[data-mgedit]');
+    if (ed) return editMargin(ed.dataset.mgedit);
+    var dl = e.target.closest('[data-mgdel]');
+    if (dl) return deleteMargin(dl.dataset.mgdel, false);
+  });
+  $('#mgReset').addEventListener('click', resetMargins);
+  $('#mgUcc').addEventListener('input', function () {
+    showMarginFor($('#mgUcc').value.trim().toUpperCase());
   });
   $('#sySchedOpen').addEventListener('click', function () { $('#sySched').classList.toggle('hide'); });
   $('#arGo').addEventListener('click', function () { resetPage('archive'); loadArchive(); });
