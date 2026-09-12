@@ -62,7 +62,17 @@ const info = (m) => console.log('    ' + m);
       info('that is what the password was sealed with. A trailing space or a quote is enough');
       info('to break it, and the login screen cannot tell you that.');
       info('');
-      info('Compare them:  grep API_KEY_SECRET .env   on this box and on the portal.');
+      // The portal is usually NOT this host — OFS has its own VM and its own PM2
+      // process, and reaches the platform over the database. Saying "on the portal"
+      // without saying "which may be another machine" sent one person hunting for
+      // a second .env on this box that was never going to be here.
+      info('The portal (omnenest-uploader-api) is a SEPARATE host — the one that');
+      info('writes smtp_settings, not this VM. Get its value there:');
+      info('');
+      info('    grep API_KEY_SECRET .env        # on the portal host');
+      info('');
+      info('then set the same value here. API_KEY_SECRET is used for this one');
+      info('purpose in OFS, so changing it breaks nothing else.');
       process.exit(2);
     }
     ok('password decrypts (' + pass.length + ' characters)');
