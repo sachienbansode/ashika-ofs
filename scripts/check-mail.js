@@ -111,7 +111,10 @@ const info = (m) => console.log('    ' + m);
   const nodemailer = require('nodemailer');
   const t = nodemailer.createTransport({
     host: s.host, port: Number(s.port) || 587, secure: !!s.secure,
-    auth: s.username ? { user: s.username, pass: mailer.decryptPass(s.password_encrypted) } : undefined,
+    // passwordOf, NOT decryptPass: on the SMTP_* path there is no sealed field, so
+    // decryptPass returns '' and the server refuses a correct password with a 535
+    // that blames the credentials.
+    auth: s.username ? { user: s.username, pass: mailer.passwordOf(s) } : undefined,
     connectionTimeout: 15000, greetingTimeout: 15000
   });
   try {
@@ -124,8 +127,14 @@ const info = (m) => console.log('    ' + m);
       info(s.host + ':' + (s.port || 587) + '. Check the outbound rule for that port.');
     }
     if (/535|Invalid login|auth/i.test(e.message)) {
-      info('The credentials were rejected. If the mailbox uses app passwords, the stored one');
-      info('may have been revoked — it has to be re-entered in the portal, not here.');
+      info('The credentials were rejected.');
+      if (s.source === 'env') {
+        info('SMTP_PASS must be a Google APP PASSWORD (16 characters, no spaces), not the');
+        info('mailbox password. Check for a stray quote or trailing space in .env too.');
+      } else {
+        info('If the mailbox uses app passwords, the stored one may have been revoked —');
+        info('it has to be re-entered in the portal, not here.');
+      }
     }
     process.exit(2);
   }
