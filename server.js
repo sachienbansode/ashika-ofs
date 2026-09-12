@@ -31,9 +31,22 @@ app.set('trust proxy', 1);
  */
 const TLS = String(process.env.FORCE_HTTPS || process.env.COOKIE_SECURE || 'false') === 'true';
 
+/* HSTS: two years, subdomains included, no preload.
+ *
+ * Reported as a finding because it was tied to TLS above, and TLS reads an env flag
+ * that nobody had set — so the app served plain HTTP headers from behind an nginx
+ * that was doing TLS perfectly well. The header only means anything over HTTPS, so
+ * it is still gated, but on the PROTOCOL the request actually arrived on rather than
+ * on a variable someone has to remember.
+ *
+ * preload is deliberately off: submitting to the preload list is a decision about
+ * every ashikagroup.com subdomain forever, and it is not this app's to make. */
+const HSTS_MAX_AGE = 63072000;                 // 2 years, in seconds
+
 /* ---- security headers (CSP on; no inline/external script) ---- */
 app.use(helmet({
-  hsts: TLS,
+  // Set per-request below, so it follows the real protocol rather than an env flag.
+  hsts: false,
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -53,6 +66,51 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   referrerPolicy: { policy: 'same-origin' }
 }));
+
+/* ---- headers the VAPT asked for, and one it did not ----
+ *
+ * Permissions-Policy turns off browser features this app has no use for. Nothing
+ * here needs a camera, a microphone or a location, so saying so costs nothing and
+ * removes a whole class of "a script on the page asked for X" from the argument.
+ *
+ * HSTS goes on only for a request that ARRIVED over TLS: req.secure is true behind
+ * nginx because trust proxy is set, and sending Strict-Transport-Security over
+ * plain HTTP is both ignored and a nuisance on a developer's laptop. */
+const PERMISSIONS_POLICY = [
+  'accelerometer=()', 'autoplay=()', 'camera=()', 'display-capture=()',
+  'encrypted-media=()', 'fullscreen=(self)', 'geolocation=()', 'gyroscope=()',
+  'magnetometer=()', 'microphone=()', 'midi=()', 'payment=()', 'usb=()',
+  'xr-spatial-tracking=()', 'interest-cohort=()'
+].join(', ');
+
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', PERMISSIONS_POLICY);
+  // Old Flash/Acrobat cross-domain policy files. We serve none; say so.
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  if (TLS || req.secure || String(req.headers['x-forwarded-proto'] || '') === 'https') {
+    res.setHeader('Strict-Transport-Security',
+      'max-age=' + HSTS_MAX_AGE + '; includeSubDomains');
+  }
+  next();
+});
+
+/* ---- RFC 9116 disclosure policy ----
+ *
+ * A researcher who finds something in a bidding system needs somewhere to send it
+ * that is not a support queue. The address is configuration, not a guess: without
+ * SECURITY_CONTACT this serves nothing, because publishing a mailbox nobody reads is
+ * worse than publishing none. */
+const SECURITY_CONTACT = String(process.env.SECURITY_CONTACT || '').trim();
+app.get('/.well-known/security.txt', (req, res) => {
+  if (!SECURITY_CONTACT) return res.status(404).type('text/plain').send('Not found');
+  const expires = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+  res.type('text/plain').send(
+    [ 'Contact: ' + SECURITY_CONTACT,
+      'Expires: ' + expires,
+      'Preferred-Languages: en',
+      'Canonical: ' + String(process.env.APP_URL || '').replace(/\/+$/, '') + '/.well-known/security.txt'
+    ].join('\n') + '\n');
+});
 
 /* ---- CORS: explicit allow-list, never reflect the request origin ---- */
 const ALLOWED = String(process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);

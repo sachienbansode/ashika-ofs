@@ -160,3 +160,33 @@ test('the issue master table is allowed to fit the screen', () => {
       `${k} moved out of the table and must appear in the expander`);
   }
 });
+
+
+/**
+ * No internal system names in anything a user reads.
+ *
+ * "No LD client found for that UCC" told a desk nothing it could act on and sent an
+ * AP looking for a system they have never heard of. The names of the upstream
+ * databases, schemas and tables are ours; the sentence on the screen has to be about
+ * what the person can do next.
+ */
+test('user-facing strings name no internal system', () => {
+  const INTERNAL = [
+    [/\bLD\b/, 'LD'], [/\bAnanta\b/i, 'Ananta'], [/branchho/i, 'branchho'],
+    [/ask_clientmast/i, 'ask_clientmast'], [/uat_ananta/i, 'uat_ananta'],
+    [/admin-staging-api/i, 'admin-staging-api'], [/\bdwh\b/i, 'dwh'],
+    [/\bstg\b/i, 'stg'], [/omnenest/i, 'omnenest']
+  ];
+  // Front-end files only: these are the strings a person actually sees. Comments
+  // are stripped first — the code is allowed to say where its data comes from.
+  for (const f of ['public/backoffice/app.js', 'public/client/client.js']) {
+    const src = read(f)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+    // Every single- or double-quoted literal that reaches the page.
+    const strings = (src.match(/'(?:[^'\\\n]|\\.)*'/g) || []).join('\n');
+    for (const [re, name] of INTERNAL) {
+      assert.ok(!re.test(strings), f + ' shows the user an internal name: ' + name);
+    }
+  }
+});

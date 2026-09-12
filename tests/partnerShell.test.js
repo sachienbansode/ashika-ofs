@@ -84,9 +84,9 @@ test('the desk is untouched by any of this', () => {
 
 test('the desk’s tabs are removed for a partner, not merely disabled', () => {
   assert.match(SRC, /var DESK_ONLY_TABS = \['export', 'masters'\];/);
-  // Disabled invites a support call asking for it to be enabled; removed does not.
+  // The TAB goes — disabled invites a support call asking for it to be enabled.
+  // The PANE only hides; see the boot() test below for why removing it was fatal.
   assert.match(SRC, /if \(b\) b\.remove\(\);/);
-  assert.match(SRC, /if \(pane\) pane\.remove\(\);/);
   // And showTab refuses them even if something else calls it directly.
   assert.match(SRC, /if \(PARTNER && DESK_ONLY_TABS\.indexOf\(t\) >= 0\) t = 'dash';/);
 });
@@ -120,4 +120,47 @@ test('logout works for a session that has no single client', () => {
   // threw for exactly the people with the most to sign out of.
   assert.ok(!/req\.client\.jti/.test(out.slice(0, 600)));
   assert.match(out, /const p = req\.portal \|\| \{\};/);
+});
+
+/**
+ * boot() must survive whatever the shell hides.
+ *
+ * This is the bug that made the partner shell useless: boot() binds listeners to
+ * dozens of controls, many of them inside the desk-only panes. Removing those panes
+ * for a partner made the first $('#exExch') return null, addEventListener threw, and
+ * boot() died BEFORE loadDash() — so the shell rendered, the tabs looked right, and
+ * every dropdown on every screen stayed empty with no error on the page.
+ *
+ * The rule that keeps it fixed: a partner may lose TABS, never PANES.
+ */
+test('the partner shell hides the desk panes, it does not delete them', () => {
+  const block = SRC.slice(SRC.indexOf('if (PARTNER) {'));
+  const body = block.slice(0, block.indexOf('document.body.classList.add'));
+  assert.match(body, /if \(b\) b\.remove\(\);/, 'the tab button goes');
+  assert.match(body, /if \(pane\) pane\.classList\.add\('hide'\);/, 'the pane is hidden');
+  assert.ok(!/pane\.remove\(\)/.test(body),
+    'removing the pane kills boot() on the first binding inside it');
+});
+
+test('every element boot() binds to exists in the page it is served from', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'public/backoffice/index.html'), 'utf8');
+  const boot = SRC.slice(SRC.indexOf('async function boot() {'));
+  const end = boot.indexOf('\n}\n');
+  const body = boot.slice(0, end > 0 ? end : boot.length);
+
+  // Every $('#id') boot() dereferences directly. A missing one is not a soft
+  // failure — it is a TypeError that stops everything after it.
+  const ids = [...new Set([...body.matchAll(/\$\('#([A-Za-z0-9_-]+)'\)\s*\.addEventListener/g)]
+    .map((m) => m[1]))];
+  assert.ok(ids.length > 20, 'expected boot to bind a lot of controls, found ' + ids.length);
+
+  const missing = ids.filter((id) => !new RegExp('id="' + id + '"').test(html));
+  assert.deepEqual(missing, [],
+    'boot() binds to elements that are not in index.html: ' + missing.join(', '));
+});
+
+test('a partner is told the UCC is not theirs, not that it does not exist', () => {
+  // "No LD client found" sends an AP to check LD for a client that is fine and
+  // simply belongs to another branch.
+  assert.match(SRC, /PARTNER \? 'That UCC is not one of your clients\.'/);
 });

@@ -1305,7 +1305,11 @@ async function loadClientPanel(ucc) {
       '</div>' + (d.pii_unmasked ? '' : '<div class="note">PII is masked. An explicit unmask grant is required to see full values.</div>');
   } catch (e) {
     $('#pbClient').className = 'note';
-    $('#pbClient').textContent = e.status === 404 ? 'No LD client found for that UCC.' : e.message;
+    // No internal system names in anything a user reads. "LD" means nothing to a
+    // desk and less to an AP; what they can act on is whether the UCC is theirs.
+    $('#pbClient').textContent = e.status === 404
+      ? (PARTNER ? 'That UCC is not one of your clients.' : 'No client found for that UCC.')
+      : e.message;
   }
 }
 
@@ -3452,13 +3456,23 @@ async function checkSession() {
       return false;
     }
     if (PARTNER) {
-      // Remove the desk's own tabs from the page rather than disabling them: a
-      // disabled Masters tab invites a support call asking to have it enabled.
+      /* Remove the desk's TABS - not the panes.
+       *
+       * Removing the panes broke everything: boot() binds listeners to dozens of
+       * controls inside #pane-export and #pane-masters, so with the panes gone the
+       * first $('#exExch') returned null, addEventListener threw, and boot() died
+       * before it ever called loadDash(). The shell rendered, the tabs looked right,
+       * and every dropdown on every screen stayed empty.
+       *
+       * The panes stay in the DOM, hidden and inert: nothing loads them, because
+       * their loaders only run from showTab, which refuses them for a partner. And
+       * the page is not the control anyway - partnerPath() has no route for those
+       * endpoints. */
       DESK_ONLY_TABS.forEach(function (k) {
         var b = document.querySelector('#tabs button[data-tab="' + k + '"]');
         if (b) b.remove();
         var pane = $('#pane-' + k);
-        if (pane) pane.remove();
+        if (pane) pane.classList.add('hide');
       });
       document.body.classList.add('partner');
     }
