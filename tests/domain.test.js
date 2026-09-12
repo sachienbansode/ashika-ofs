@@ -51,7 +51,7 @@ test('quantity must be a multiple of the lot', () => {
 });
 
 test('HNI bid below the 2 lakh minimum is rejected', () => {
-  assert.ok(has(errs({ category: 'HNI', qty: 10, price: 390, is_cutoff: false }), /at least 200000/));
+  assert.ok(has(errs({ category: 'HNI', qty: 10, price: 390, is_cutoff: false }), /at least ₹2,00,000/));
 });
 
 test('cut-off bidding is Retail-only', () => {
@@ -61,9 +61,41 @@ test('cut-off bidding is Retail-only', () => {
 test('Retail application is capped at 2 lakh, counting existing bids in the issue', () => {
   const over = { now: T1_DAY_11AM };
   assert.deepEqual(errs({ category: 'Retail', qty: 500, price: 390, is_cutoff: false }, over), []);
-  assert.ok(has(errs({ category: 'Retail', qty: 600, price: 390, is_cutoff: false }, over), /cannot exceed 200000/));
+  assert.ok(has(errs({ category: 'Retail', qty: 600, price: 390, is_cutoff: false }, over),
+    /cannot exceed ₹2,00,000/));
   assert.ok(has(errs({ category: 'Retail', qty: 500, price: 390, is_cutoff: false },
-    Object.assign({ usedValueThisIssue: 100000 }, over)), /cannot exceed 200000/));
+    Object.assign({ usedValueThisIssue: 100000 }, over)), /cannot exceed ₹2,00,000/));
+});
+
+/**
+ * The message has to survive being read next to the figure it is about.
+ *
+ * A desk placing ₹1,99,800 was told "cannot exceed 200000 ... takes it to 381400"
+ * and reported it as a miscalculation. It was not: the other ₹1,81,600 was a
+ * separate bid, already live on the same issue for the same client. The arithmetic
+ * was right and the sentence was the bug.
+ */
+test('the retail cap says where the total came from', () => {
+  const withLive = { now: T1_DAY_11AM, usedValueThisIssue: 181600 };
+  const msg = errs({ category: 'Retail', qty: 450, price: 444, is_cutoff: false }, withLive)
+    .find((x) => /cannot exceed/.test(x));
+  assert.ok(msg, 'the cap still fires');
+  assert.match(msg, /₹1,81,600 is already live on this issue/,
+    'the existing exposure is named, not left for the reader to derive');
+  assert.match(msg, /this bid of ₹1,99,800/);
+  assert.match(msg, /total to ₹3,81,400/);
+
+  // With nothing already live there is no running total, so it does not pretend
+  // there is one — a single oversized bid is a simpler fact.
+  const alone = errs({ category: 'Retail', qty: 600, price: 444, is_cutoff: false }, { now: T1_DAY_11AM })
+    .find((x) => /cannot exceed/.test(x));
+  assert.match(alone, /^A Retail bid cannot exceed ₹2,00,000\. This one is ₹2,66,400\.$/);
+  assert.ok(!/already live/.test(alone));
+
+  // Every figure in a validation message is rupees, formatted the way every other
+  // figure on the screen is. Bare digits are what made 200000 and 381400 read as
+  // unrelated to ₹1,99,800.00.
+  assert.ok(!/\b\d{6}\b/.test(msg), 'no unformatted six-digit amounts: ' + msg);
 });
 
 test('a bid outside its category window is rejected', () => {

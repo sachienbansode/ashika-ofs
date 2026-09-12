@@ -153,6 +153,17 @@ function timeLeft(ms) {
     urgency: s <= 900 ? 'urgent' : s <= 3600 ? 'soon' : 'calm'
   };
 }
+/**
+ * The exchange, as a person would say it.
+ *
+ * BOTH is how the column is stored, and it is the wrong thing to print: a desk
+ * reading "BOTH" beside a scrip has to remember which two, and the whole point of
+ * the field is which exchange the bid and the file go to. Name them.
+ */
+function exchLabel(v) {
+  return String(v || '').toUpperCase() === 'BOTH' ? 'NSE + BSE' : String(v || '');
+}
+
 function chipCls(st) {
   if (/open/i.test(st)) return 'open';
   if (/upcoming/i.test(st)) return 'soon';
@@ -456,7 +467,7 @@ function issueCard(i) {
       '<div style="flex:1">' +
         '<div class="sym">' + esc(i.symbol) + '</div>' +
         '<div class="co">' + esc(i.company) + '</div>' +
-        '<div class="isin">' + esc(i.isin) + ' · ' + esc(i.exchange) + '</div>' +
+        '<div class="isin">' + esc(i.isin) + ' · ' + esc(exchLabel(i.exchange)) + '</div>' +
       '</div>' +
       '<span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span>' +
       // On a past date the live status still shows — it is true — but what mattered
@@ -755,7 +766,7 @@ function renderIssueInfo() {
   // every field after it into a different column.
   box.innerHTML =
     '<div class="bar" style="margin-bottom:8px"><b>' + esc(i.symbol) + '</b>' +
-      '<span class="tag">' + esc(i.exchange) + '</span>' +
+      '<span class="tag">' + esc(exchLabel(i.exchange)) + '</span>' +
       '<span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span></div>' +
     '<div class="grid2 pairs">' +
       f('Company', esc(i.company || '—')) +
@@ -1741,7 +1752,7 @@ async function loadIssues() {
         return '<tr><td><b>' + esc(i.symbol) + '</b>' +
             '<div class="sub">' + esc(i.company || '—') + '</div>' +
             '<div class="sub m">' + esc(i.isin || 'ISIN pending') + '</div></td>' +
-          '<td><span class="tag">' + esc(i.exchange) + '</span></td>' +
+          '<td><span class="tag">' + esc(exchLabel(i.exchange)) + '</span></td>' +
           // An undisclosed floor is a blank, not a zero — see migration 014.
           '<td class="n">' + (i.floor_price == null ? '—' : inr(i.floor_price)) +
             '<div class="sub">cut-off ' +
@@ -2878,7 +2889,7 @@ function archiveRow(i) {
   return '<tr data-arch="' + i.id + '">' +
     '<td><b>' + esc(i.symbol) + '</b>' +
       '<div class="sub">' + esc(i.company || '') + '</div>' +
-      '<div class="sub m">' + esc(i.isin || '') + ' · ' + esc(i.exchange) + '</div></td>' +
+      '<div class="sub m">' + esc(i.isin || '') + ' · ' + esc(exchLabel(i.exchange)) + '</div></td>' +
     '<td class="m">' + (i.issue_date ? dtDate(i.issue_date + 'T00:00:00+05:30') : '—') + '</td>' +
     '<td class="n">' + inr(i.floor_price) + '</td>' +
     '<td class="n">' + inr(i.bid_count, 0) +
@@ -2960,7 +2971,7 @@ function issueTermsHtml(d) {
   return '<h2 class="sec">Terms</h2>' +
     '<div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
       f('ISIN', '<span class="m">' + esc(i.isin || '—') + '</span>') +
-      f('Exchange', esc(i.exchange || '—')) +
+      f('Exchange', esc(exchLabel(i.exchange) || '—')) +
       (m.series ? f('Series', esc(m.series)) : '') +
       (m.bse_scrip_code ? f('BSE scrip code', '<span class="m">' + esc(m.bse_scrip_code) + '</span>') : '') +
       f('Floor price', i.floor_price == null ? '—' : rupee(i.floor_price)) +
@@ -3063,7 +3074,7 @@ function issueHeadHtml(d, opts) {
   var i = d.issue;
   return '<div class="bar"><b style="font-size:15px">' + esc(i.symbol) + '</b>' +
     '<span style="color:var(--muted)">' + esc(i.company || '') + '</span>' +
-    '<span class="tag">' + esc(i.exchange) + '</span>' +
+    '<span class="tag">' + esc(exchLabel(i.exchange)) + '</span>' +
     (i.archived_at ? '<span class="chip closed">Archived ' + dt(i.archived_at) +
       (i.archived_by ? ' by ' + esc(i.archived_by) : '') + '</span>' : '') +
     '<div class="sp"></div>' +
