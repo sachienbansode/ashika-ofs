@@ -260,10 +260,19 @@ router.get('/me', cs.requireClient, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+/**
+ * Sign out, for any portal session.
+ *
+ * req.portal, not req.client: a branch or AP session has no single UCC, so reading
+ * req.client.jti here threw for exactly the people who had the most to sign out of.
+ * The session row is what is revoked, and every session has one.
+ */
 router.post('/logout', cs.requireClient, async (req, res) => {
-  await query(`UPDATE ${SCHEMA}.ofs_client_session SET revoked_at = now() WHERE jti = $1`, [req.client.jti])
+  const p = req.portal || {};
+  await query(`UPDATE ${SCHEMA}.ofs_client_session SET revoked_at = now() WHERE jti = $1`, [p.jti])
     .catch(() => {});
-  await ca.logAttempt({ event: 'logout', ucc: req.client.ucc, ip: ipOf(req), ok: true });
+  await ca.logAttempt({ event: 'logout', ucc: p.ucc || null, email: p.loginEmail || null,
+                        ip: ipOf(req), ok: true });
   res.clearCookie(cs.COOKIE, Object.assign({}, cs.cookieOpts(), { maxAge: undefined }));
   res.json({ ok: true });
 });

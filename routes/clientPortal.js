@@ -154,8 +154,35 @@ router.get('/me/bids', async (req, res, next) => {
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const all = String(req.query.all || '') === '1';         // the CSV wants everything
 
+    /* The same filters the desk's bid book has, because it is the same screen.
+     * Built as a fragment on a shared params array so the count and the page can
+     * never disagree about what is being filtered - two hand-written WHERE clauses
+     * is how a pager ends up claiming 40 rows and showing 12. */
+    const p = [scope];
+    let where = 'b.client_ucc = ANY($1)';
+    // replace ALL the placeholders, not the first: the search clause uses the same
+    // value twice, and String.replace with a string pattern only ever does one.
+    const add = (sql, val) => { p.push(val); where += sql.split('$$').join('$' + p.length); };
+
+    if (req.query.issue_id) add(' AND b.issue_id = $$::int', Number(req.query.issue_id));
+    if (req.query.category) add(' AND b.category = $$', String(req.query.category));
+    if (req.query.status) add(' AND b.status = $$', String(req.query.status));
+    else if (String(req.query.include_cancelled || '') !== '1') {
+      // Cancelled bids are not part of the book. They stay reachable, but a branch
+      // reading a total that quietly includes them is reading the wrong number.
+      where += " AND b.status <> 'Cancelled'";
+    }
+    if (req.query.placed_by) add(' AND b.placed_by = $$', String(req.query.placed_by));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.as_on || ''))) {
+      add(" AND (b.created_at AT TIME ZONE 'Asia/Kolkata')::date = $$::date", String(req.query.as_on));
+    }
+    if (String(req.query.q || '').trim()) {
+      add(" AND (upper(b.client_ucc) LIKE $$ OR upper(b.ref) LIKE $$)",
+        '%' + String(req.query.q).trim().toUpperCase() + '%');
+    }
+
     const total = await one(
-      `SELECT count(*)::int AS n FROM ${SCHEMA}.ofs_bid WHERE client_ucc = ANY($1)`, [scope]);
+      `SELECT count(*)::int AS n FROM ${SCHEMA}.ofs_bid b WHERE ${where}`, p);
 
     const b = await rows(
       `SELECT b.id, b.ref, b.issue_id, b.client_ucc, b.branch_code, b.placed_by, b.placed_by_id,
@@ -164,10 +191,10 @@ router.get('/me/bids', async (req, res, next) => {
               i.symbol, i.company, i.isin, i.exchange, i.floor_price, i.ret_close, i.hni_close
          FROM ${SCHEMA}.ofs_bid b
          LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
-        WHERE b.client_ucc = ANY($1)
+        WHERE ${where}
         ORDER BY b.created_at DESC
-        ${all ? '' : 'LIMIT $2 OFFSET $3'}`,
-      all ? [scope] : [scope, limit, offset]);
+        ${all ? '' : `LIMIT $${p.length + 1} OFFSET $${p.length + 2}`}`,
+      all ? p : p.concat([limit, offset]));
 
     // Client names for a branch list; a branch reading a column of bare UCCs cannot
     // tell which of its clients is which.
@@ -552,6 +579,93 @@ router.delete('/branch/bids/:id(\\d+)', async (req, res, next) => {
   } catch (e) { dbErr.send(res, next, e); }
 });
 
+
+/**
+ * GET /client/api/me/clients/:ucc — one client and their margin.
+ *
+ * The Client & margin panel beside the bid form, answering with the same shape the
+ * desk's /api/clients/:ucc does so the panel renders unchanged. Two differences,
+ * both enforced here because the screen is the same screen:
+ *
+ *   the UCC must be one of THIS branch's clients - checked against LD on every
+ *   call, not against a list the page sent us; and
+ *   contact details are masked, because an AP is not the desk.
+ *
+ * A UCC outside the branch answers 404, not 403: "not found" and "not yours" are
+ * the same answer to someone probing for which accounts exist.
+ */
+router.get('/me/clients/:ucc', async (req, res, next) => {
+  try {
+    const ucc = String(req.params.ucc || '').trim().toUpperCase();
+    if (!ucc) return res.status(400).json({ error: 'invalid_input' });
+
+    if (req.portal.kind === 'client') {
+      if (ucc !== String(req.portal.ucc || '').toUpperCase()) return res.status(404).json({ error: 'not_found' });
+    } else {
+      const owned = await branches.branchHasClient(req.portal.branchCode, ucc);
+      if (!owned) return res.status(404).json({ error: 'not_found' });
+    }
+
+    const el = await ld.eligibility(ucc);
+    if (!el.found) return res.status(404).json({ error: 'not_found' });
+
+    const m = await one(
+      `SELECT COALESCE(available,0) AS available FROM ${SCHEMA}.ofs_margin WHERE client_ucc = $1`, [ucc]);
+    const used = await one(
+      `SELECT COALESCE(sum(value),0) AS v FROM ${SCHEMA}.ofs_bid
+        WHERE client_ucc = $1 AND status = 'Live'`, [ucc]);
+    const available = Number(m && m.available) || 0;
+    const consumed = Number(used && used.v) || 0;
+
+    const c = el.client || {};
+    const [masked] = maskPortalRows(req, [{
+      pan: c.pan || null, mobile: c.mobile || null, email: c.email || null
+    }]);
+
+    res.json({
+      client: {
+        ucc: ucc, name: c.name || null, category: c.category || null,
+        pan: masked.pan, mobile: masked.mobile, email: masked.email,
+        branch_id: c.branch_id || null, active: el.active === true,
+        available_margin: available
+      },
+      free_margin: available - consumed,
+      // The desk's panel prints this note when PII is masked; a branch is always
+      // masked, so it always prints, and the AP is never left wondering whether a
+      // dotted PAN is a data problem.
+      pii_unmasked: false
+    });
+  } catch (e) { next(e); }
+});
+
+/**
+ * GET /client/api/me — who is signed in, and what the shell may show them.
+ *
+ * The partner shell is the BACK-OFFICE shell, so it boots the same way: it asks who
+ * it is talking to and hides what that answer does not include. Permissions are
+ * synthesised rather than read from a role, because a branch is not a platform user
+ * and holds no page grants - but the shape has to match what applyGrants() expects
+ * or the sweep silently disables everything.
+ *
+ * ofs-desk only, deliberately. There is no ofs-masters here and there never should
+ * be: masters, exchange files, settings, circulars and the audit trail are the
+ * desk's, and an AP holding the module grant would have the whole of it.
+ */
+router.get('/me', async (req, res, next) => {
+  try {
+    const who = whoAmI(req);
+    const scope = who.kind === 'client' ? [who.ucc] : await scopeUccs(req);
+    res.json({
+      actor: who,
+      client_count: scope.length,
+      user: { id: who.branch_code || who.ucc, email: req.portal.loginEmail,
+              role: who.label, name: who.branch_name || null },
+      // ofs-desk at view level: an AP places bids, and every write they make is
+      // gated by the client's own one-time code rather than by a page grant.
+      permissions: { pages: ['ofs-desk'], actions: [] }
+    });
+  } catch (e) { next(e); }
+});
 
 /* ------------------------------------------------------------ MIS: dashboard --
  * The desk's dashboard, scoped to one branch's clients.

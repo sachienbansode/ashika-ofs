@@ -168,6 +168,12 @@ const STATIC = {
 const { DESK_RE, backofficeRedirect } = require('./lib/legacyPath');
 app.get(DESK_RE, (req, res) => res.redirect(301, backofficeRedirect(req.originalUrl)));
 
+/* The partner shell IS the back-office shell: the same directory, served under a
+   second path. Not a copy - a copy is two screens that drift, and the whole point
+   is that a branch sees what the desk sees for its own clients. The page decides
+   from its own URL which API it talks to and which tabs exist; the SCOPE is decided
+   on the server, in routes/clientPortal.js, and never here. */
+app.use('/partner', express.static(path.join(__dirname, 'public', 'backoffice'), STATIC));
 app.use('/shared', express.static(path.join(__dirname, 'public', 'shared'), STATIC));
 app.use('/backoffice', express.static(path.join(__dirname, 'public', 'backoffice'), STATIC));
 app.use('/', express.static(path.join(__dirname, 'public', 'client'), STATIC));

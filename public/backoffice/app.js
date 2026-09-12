@@ -7,6 +7,63 @@ var $$ = function (s, r) { return Array.prototype.slice.call((r || document).que
 var TOKEN = null;                      // set by the host shell; falls back to the cookie session
 var ME = null;                         // /api/me — the signed-in account and its page grants
 
+/* -------------------------------------------------------------- who is this --
+ * This file serves TWO shells from one directory:
+ *
+ *   /backoffice   the desk. Staff session, /api, every tab.
+ *   /partner      a branch or an Authorised Partner. Portal session, /client/api,
+ *                 the same screens over their own clients, and none of the desk's
+ *                 administration.
+ *
+ * Not a copy of the page: a copy is two screens that drift apart, and the point is
+ * that a branch sees what the desk sees for its own book. MODE is derived from the
+ * URL and from nothing else, and it defaults to the desk - a partner shell served
+ * from the wrong path is a cosmetic fault, while a desk that thinks it is a partner
+ * would send staff writes to the portal API.
+ *
+ * The scope is NOT decided here. Every figure a partner sees is filtered on the
+ * server by the branch's own client list; this constant only decides which URL is
+ * called and which tabs exist.
+ */
+var MODE = /^\/partner(\/|$)/.test(location.pathname) ? 'partner' : 'desk';
+var PARTNER = MODE === 'partner';
+
+/**
+ * Where a desk path lives in the portal API.
+ *
+ * Reads as a table on purpose. A branch's reads are its own scoped views under
+ * /me, and its writes go to /branch/bids, where every one of them is gated by the
+ * client's own one-time code. Anything not in this table has no partner equivalent
+ * and must never be silently rewritten into one — it throws instead, because a
+ * quiet 404 on a screen that should not exist is how a missing grant looks like a
+ * bug for a week.
+ */
+/* The trailing $1 on the (\?|$) routes is load-bearing: the '?' is part of the
+   MATCH, so a replacement that does not put it back turns
+   /dashboard?as_on=2026-09-12 into /client/api/me/dashboardas_on=2026-09-12 —
+   a 404 that looks like a missing endpoint rather than a mangled URL. */
+var PARTNER_ROUTES = [
+  [/^\/me$/,                       '/client/api/me'],
+  [/^\/dashboard(\?|$)/,           '/client/api/me/dashboard$1'],
+  [/^\/bids\/validate$/,           '/client/api/branch/bids/validate'],
+  [/^\/bids\/otp$/,                '/client/api/branch/bids/otp'],
+  [/^\/bids\/(\d+)$/,              '/client/api/branch/bids/$1'],
+  [/^\/bids(\?|$)/,                '/client/api/me/bids$1'],
+  [/^\/allotment\/mine(\?|$)/,     '/client/api/me/allotments$1'],
+  [/^\/clients\/([^/?]+)$/,        '/client/api/me/clients/$1'],
+  [/^\/clients(\?|$)/,             '/client/api/me/clients$1'],
+  [/^\/issues(\?|$)/,              '/client/api/issues$1'],
+  [/^\/settings(\?|$)/,            '/client/api/me/settings$1']
+];
+
+function partnerPath(path) {
+  for (var i = 0; i < PARTNER_ROUTES.length; i++) {
+    var re = PARTNER_ROUTES[i][0];
+    if (re.test(path)) return path.replace(re, PARTNER_ROUTES[i][1]);
+  }
+  throw new Error('not available to a branch or Authorised Partner');
+}
+
 /**
  * Page grants, read exactly the way middleware/pageAccess.js reads them, so the
  * screen and the server never disagree about what this account may do.
@@ -274,8 +331,11 @@ function resetPage(key) { PAGES[key] = 0; }
 async function api(path, opts) {
   opts = opts || {};
   var headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-  if (TOKEN) headers.Authorization = 'Bearer ' + TOKEN;
-  var res = await fetch('/api' + path, {
+  // A partner session is a cookie, not a bearer token. Sending a stale staff token
+  // alongside it would be answered by whichever the server checked first.
+  if (TOKEN && !PARTNER) headers.Authorization = 'Bearer ' + TOKEN;
+  var url = PARTNER ? partnerPath(path) : '/api' + path;
+  var res = await fetch(url, {
     method: opts.method || 'GET',
     headers: headers,
     credentials: 'same-origin',
@@ -419,7 +479,15 @@ function applyGrants() {
 }
 
 /* ---------------- tabs ---------------- */
+/* Tabs a branch does not get. Masters, exchange files, settings, circulars, the
+   archive and the audit trail are the desk's: an AP holding any of them would hold
+   the whole module. Hidden AND refused - the tab is removed from the page, and
+   partnerPath() has no route for those endpoints, so a hand-typed URL gets an error
+   rather than a screen that half works. */
+var DESK_ONLY_TABS = ['export', 'masters'];
+
 function showTab(t) {
+  if (PARTNER && DESK_ONLY_TABS.indexOf(t) >= 0) t = 'dash';
   STATE.tab = t;
   $$('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
   ['dash', 'book', 'place', 'export', 'masters', 'rules'].forEach(function (k) {
@@ -3358,8 +3426,17 @@ async function checkSession() {
   try {
     var me = await api('/me');
     ME = me;
-    $('#whoName').textContent = me.user.email || ('user #' + me.user.id);
-    $('#whoRole').textContent = me.user.role || '';
+    // A branch is named by its branch, not by the mailbox that signed in: the same
+    // address can be on more than one branchho row, and "A016 - 121 clients" is what
+    // tells someone they are looking at the right book.
+    $('#whoName').textContent = PARTNER
+      ? ((me.actor && me.actor.branch_name) || me.user.email || '')
+      : (me.user.email || ('user #' + me.user.id));
+    $('#whoRole').textContent = PARTNER
+      ? ((me.actor && me.actor.label) || '') +
+        ((me.actor && me.actor.branch_code) ? ' ' + me.actor.branch_code : '') +
+        (me.client_count != null ? ' · ' + me.client_count + ' client(s)' : '')
+      : (me.user.role || '');
     $('#btnSignOut').classList.remove('hide');
 
     var pages = (me.permissions && me.permissions.pages) || [];
@@ -3373,6 +3450,17 @@ async function checkSession() {
         ' role does not include the OFS BackOffice.',
         'An administrator grants the "ofs-desk" page to your role in the Admin console.');
       return false;
+    }
+    if (PARTNER) {
+      // Remove the desk's own tabs from the page rather than disabling them: a
+      // disabled Masters tab invites a support call asking to have it enabled.
+      DESK_ONLY_TABS.forEach(function (k) {
+        var b = document.querySelector('#tabs button[data-tab="' + k + '"]');
+        if (b) b.remove();
+        var pane = $('#pane-' + k);
+        if (pane) pane.remove();
+      });
+      document.body.classList.add('partner');
     }
     return true;
   } catch (e) {
@@ -3388,7 +3476,11 @@ async function checkSession() {
                  : code === 'session_expired' ? 'expired'
                  : code === 'session_revoked' ? 'revoked'
                  : '';
-      location.replace('/backoffice/login.html' + (reason ? '?reason=' + reason : ''));
+      // Two doors. A branch has no back-office login and never will; sending them
+      // to one is a dead end with a password box they cannot fill.
+      location.replace(PARTNER
+        ? '/' + (reason ? '?reason=' + reason : '')
+        : '/backoffice/login.html' + (reason ? '?reason=' + reason : ''));
       return false;
     }
     showGate('Cannot reach the server', e.message, 'Check that the app is running and try again.');
@@ -3397,8 +3489,11 @@ async function checkSession() {
 }
 
 async function signOut() {
-  try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (e) {}
-  location.reload();
+  // Two sessions, two doors. Signing a branch out through the staff endpoint leaves
+  // their portal cookie alive, which is the opposite of what the button promises.
+  var url = PARTNER ? '/client/auth/logout' : '/auth/logout';
+  try { await fetch(url, { method: 'POST', credentials: 'same-origin' }); } catch (e) {}
+  location.href = PARTNER ? '/' : location.pathname;
 }
 
 async function boot() {

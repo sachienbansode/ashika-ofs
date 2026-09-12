@@ -135,7 +135,16 @@ async function verifyBranchCode(code, chosen) {
 
   S.branch = r.branch;
   S.client = { name: r.branch.name, ucc: r.branch.code };
-  enterApp();
+  /* A branch or AP gets the DESK's screens, not the investor's.
+   *
+   * They are acting for a book of clients: a dashboard, a bid book with filters and
+   * a CSV, and the full bid form. The investor shell is built for one person's own
+   * bid and cannot show any of that, so the session goes straight to /partner/ —
+   * which is the back-office page, scoped on the server to this branch's clients.
+   *
+   * The cookie is already set by the verify call above, so this is a navigation and
+   * not a second sign-in. */
+  location.href = '/partner/';
 }
 
 /* ---------------- step chrome ---------------- */

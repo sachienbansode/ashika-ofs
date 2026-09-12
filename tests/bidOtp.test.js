@@ -113,9 +113,15 @@ test('a branch may only reach its own clients, and a stranger UCC reads as absen
 
 test('a branch cannot cancel after the cut-off, with no force flag to reach for', () => {
   const src = read('routes/clientPortal.js');
-  const branchDelete = src.slice(src.indexOf("router.delete('/branch/bids/"));
+  // THIS handler only. Slicing to the end of the file made the assertion depend on
+  // every route added after it — and \bforce\b rather than 'force', because the
+  // substring also lives inside the word "enforced", which is exactly the kind of
+  // comment a security-sensitive handler attracts.
+  const from = src.indexOf("router.delete('/branch/bids/");
+  assert.ok(from > 0, 'the branch cancel route is gone');
+  const branchDelete = src.slice(from, src.indexOf('\n});', from));
   assert.match(branchDelete, /cancelBlockedMessage/);
-  assert.ok(!/force/.test(branchDelete), 'the desk keeps a force flag; a branch does not get one');
+  assert.ok(!/\bforce\b/.test(branchDelete), 'the desk keeps a force flag; a branch does not get one');
 });
 
 test('the setting exists and defaults to on', () => {
