@@ -18,7 +18,7 @@ const ba = require('../lib/branchAuth');
 const cs = require('../middleware/clientAuth');
 const branches = require('../db/branchAdapter');
 const mailer = require('../lib/mailer');
-const { brandedEmail } = require('../lib/emailBranding');
+const { otpEmail } = require('../lib/templates/otp');
 
 const router = express.Router();
 
@@ -27,18 +27,6 @@ const verifyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHea
 
 const ipOf = (req) => (req.ip || '').replace(/^::ffff:/, '') || null;
 
-function otpEmail(name, code, mins) {
-  return brandedEmail(`
-    <p style="margin:0 0 14px">Hello ${String(name || 'there').replace(/[&<>]/g, '')},</p>
-    <p style="margin:0 0 18px">Use this code to sign in to the Ashika OFS bidding module:</p>
-    <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:30px;font-weight:700;
-                letter-spacing:.22em;color:#243f8e;background:#f2f7fb;border:1px solid #e2ecf2;
-                border-radius:10px;padding:16px;text-align:center;margin:0 0 18px">${code}</div>
-    <p style="margin:0 0 6px;color:#6b7f9e;font-size:12px">
-      This code expires in ${mins} minutes and can be used once.</p>
-    <p style="margin:0;color:#6b7f9e;font-size:12px">
-      If you did not request it, ignore this email. Ashika will never ask you for this code.</p>`);
-}
 
 /**
  * POST /client/auth/branch/start { email }
@@ -114,7 +102,10 @@ router.post('/start', startLimiter, async (req, res) => {
 
     const sent = await mailer.send({
       to: email, subject: 'Your Ashika OFS sign-in code',
-      html: otpEmail(eligible[0].contact_person || eligible[0].branch_name, code, ca.OTP_TTL_MIN),
+      html: otpEmail({ name: eligible[0].contact_person || eligible[0].branch_name, code: code,
+                       minutes: ca.OTP_TTL_MIN,
+                       expiresAt: new Date(Date.now() + ca.OTP_TTL_MIN * 60000),
+                       audience: 'branch' }),
       purpose: 'ofs_branch_otp', triggeredBy: 'branch-signin', ip });
 
     await ca.logAttempt({ event: 'otp_sent', email, ip, userAgent: ua, ok: !!sent.sent,

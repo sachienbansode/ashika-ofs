@@ -18,7 +18,7 @@ const { SCHEMA, query, rows, one } = require('../db/ofsAdapter');
 const ca = require('../lib/clientAuth');
 const cs = require('../middleware/clientAuth');
 const mailer = require('../lib/mailer');
-const { brandedEmail } = require('../lib/emailBranding');
+const { otpEmail } = require('../lib/templates/otp');
 const ld = require('../db/ldAdapter');
 const sms = require('../lib/sms');
 const settings = require('../lib/settings');
@@ -30,19 +30,6 @@ const verifyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHea
 
 const ipOf = (req) => (req.ip || '').replace(/^::ffff:/, '') || null;
 
-function otpEmail(name, code, mins) {
-  return brandedEmail(`
-    <p style="margin:0 0 14px">Dear ${String(name || 'Investor').replace(/[&<>]/g, '')},</p>
-    <p style="margin:0 0 18px">Use this code to sign in to the Ashika OFS bidding module:</p>
-    <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:30px;font-weight:700;
-                letter-spacing:.22em;color:#243f8e;background:#f2f7fb;border:1px solid #e2ecf2;
-                border-radius:10px;padding:16px;text-align:center;margin:0 0 18px">${code}</div>
-    <p style="margin:0 0 6px;color:#6b7f9e;font-size:12px">
-      This code expires in ${mins} minutes and can be used once.</p>
-    <p style="margin:0;color:#6b7f9e;font-size:12px">
-      If you did not request it, ignore this email — no one can sign in without it.
-      Ashika will never ask you for this code by phone or message.</p>`);
-}
 
 /** POST /client/auth/start { identifier } — a registered mobile OR email. */
 router.post('/start', startLimiter, async (req, res) => {
@@ -141,7 +128,9 @@ router.post('/start', startLimiter, async (req, res) => {
     const results = await Promise.all([
       target.email
         ? mailer.send({ to: target.email, subject: 'Your Ashika OFS sign-in code',
-            html: otpEmail(target.name, ch.code, ch.expiresInMin),
+            html: otpEmail({ name: target.name, code: ch.code, minutes: ch.expiresInMin,
+                             expiresAt: new Date(Date.now() + ch.expiresInMin * 60000),
+                             audience: 'client' }),
             purpose: 'ofs_client_otp', triggeredBy: 'client-signin', ip })
         : Promise.resolve({ sent: false, error: 'no_email_on_file' }),
       target.mobile

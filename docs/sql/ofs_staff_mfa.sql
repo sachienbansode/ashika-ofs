@@ -13,6 +13,25 @@
 -- goes live (OFS_OTP_TEST_MODE), because UAT has no real client mailboxes.
 -- ============================================================================
 
+
+-- --------------------------------------------------------------- 0. RIGHT DB?
+-- A comment at the top of a long script is scrolled past. This is not: it fails
+-- on line 1 and names the database you should be on, instead of letting you get
+-- eighteen lines in and reading "relation ... does not exist", which sounds like
+-- the table is missing rather than like you are in the wrong place.
+DO $guard$
+BEGIN
+  IF to_regclass('"admin-staging-api".roles') IS NULL THEN
+    RAISE EXCEPTION 'Wrong database: this script must run on uat_ananta_staging, not %.',
+                    current_database()
+      USING HINT = 'The platform keeps users, roles and page_registry in uat_ananta_staging. '
+                   'ofs_bids holds only the OFS tables. Reconnect pgAdmin to uat_ananta_staging '
+                   '(Servers > ... > Databases > uat_ananta_staging), open the Query Tool there, '
+                   'and run this script again.';
+  END IF;
+END
+$guard$;
+
 -- ----------------------------------------------------------- 1. WHERE ARE WE NOW
 SELECT r.name AS role, r.requires_mfa, count(u.id) AS users
   FROM "admin-staging-api".roles r

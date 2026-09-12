@@ -19,7 +19,7 @@ const { SCHEMA, query, one } = require('../db/ofsAdapter');
 const sa = require('../lib/staffAuth');
 const otp = require('../lib/otp');
 const mailer = require('../lib/mailer');
-const { brandedEmail } = require('../lib/emailBranding');
+const { otpEmail } = require('../lib/templates/otp');
 const audit = require('../lib/audit');
 const staffSession = require('../lib/staffSession');
 
@@ -92,18 +92,6 @@ async function issueSession(res, user, req) {
   return { ok: true, user: { id: user.id, email: user.email, role: user.role } };
 }
 
-function otpEmail(name, code, mins) {
-  return brandedEmail(`
-    <p style="margin:0 0 14px">Hello ${String(name || 'there').replace(/[&<>]/g, '')},</p>
-    <p style="margin:0 0 18px">Use this code to sign in to the Ashika OFS BackOffice:</p>
-    <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:30px;font-weight:700;
-                letter-spacing:.22em;color:#243f8e;background:#f2f7fb;border:1px solid #e2ecf2;
-                border-radius:10px;padding:16px;text-align:center;margin:0 0 18px">${code}</div>
-    <p style="margin:0 0 6px;color:#6b7f9e;font-size:12px">
-      This code expires in ${mins} minutes and can be used once.</p>
-    <p style="margin:0;color:#6b7f9e;font-size:12px">
-      If this was not you, your password may be known to someone else — change it in the portal.</p>`);
-}
 
 /**
  * The back-office code is REAL, even while client codes are still fixed for UAT.
@@ -138,7 +126,8 @@ async function startMfa(req, user) {
 
   const r = await mailer.send({
     to: user.email, subject: 'Your Ashika OFS BackOffice sign-in code',
-    html: otpEmail(user.first_name, code, otp.OTP_TTL_MIN),
+    html: otpEmail({ name: user.first_name, code: code, minutes: otp.OTP_TTL_MIN,
+                     expiresAt: new Date(Date.now() + otp.OTP_TTL_MIN * 60000), audience: 'staff' }),
     purpose: 'ofs_staff_otp', triggeredBy: 'desk-signin', ip: ipOf(req)
   });
   if (!r.sent) {

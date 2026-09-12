@@ -15,6 +15,25 @@
 -- database is often older than the code pointed at it.
 -- ============================================================================
 
+
+-- --------------------------------------------------------------- 0. RIGHT DB?
+-- A comment at the top of a long script is scrolled past. This is not: it fails
+-- on line 1 and names the database you should be on, instead of letting you get
+-- eighteen lines in and reading "relation ... does not exist", which sounds like
+-- the table is missing rather than like you are in the wrong place.
+DO $guard$
+BEGIN
+  IF to_regclass('"admin-staging-api".roles') IS NULL THEN
+    RAISE EXCEPTION 'Wrong database: this script must run on uat_ananta_staging, not %.',
+                    current_database()
+      USING HINT = 'The platform keeps users, roles and page_registry in uat_ananta_staging. '
+                   'ofs_bids holds only the OFS tables. Reconnect pgAdmin to uat_ananta_staging '
+                   '(Servers > ... > Databases > uat_ananta_staging), open the Query Tool there, '
+                   'and run this script again.';
+  END IF;
+END
+$guard$;
+
 -- ------------------------------------------------------- 1. WHO AM I SIGNED IN AS
 -- Run this first. If the role's pages show 'ofs-masters' without ':edit',
 -- that is the whole problem.

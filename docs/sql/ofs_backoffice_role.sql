@@ -15,6 +15,25 @@
 -- Ashika's rule, applied throughout: whoever has OFS access has FULL OFS access.
 -- ============================================================================
 
+
+-- --------------------------------------------------------------- 0. RIGHT DB?
+-- A comment at the top of a long script is scrolled past. This is not: it fails
+-- on line 1 and names the database you should be on, instead of letting you get
+-- eighteen lines in and reading "relation ... does not exist", which sounds like
+-- the table is missing rather than like you are in the wrong place.
+DO $guard$
+BEGIN
+  IF to_regclass('"admin-staging-api".roles') IS NULL THEN
+    RAISE EXCEPTION 'Wrong database: this script must run on uat_ananta_staging, not %.',
+                    current_database()
+      USING HINT = 'The platform keeps users, roles and page_registry in uat_ananta_staging. '
+                   'ofs_bids holds only the OFS tables. Reconnect pgAdmin to uat_ananta_staging '
+                   '(Servers > ... > Databases > uat_ananta_staging), open the Query Tool there, '
+                   'and run this script again.';
+  END IF;
+END
+$guard$;
+
 -- ---------------------------------------------------------------- 1. the pages
 -- The OFS app registers these itself at startup (lib/pageRegistry.js). Repeated
 -- here so the role can be created before the app has ever run against this DB.

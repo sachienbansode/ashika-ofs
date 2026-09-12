@@ -20,6 +20,7 @@
 require('dotenv').config();
 
 const mailer = require('../lib/mailer');
+const { mailCheckEmail } = require('../lib/templates/otp');
 const { adminOne } = require('../db/adminAdapter');
 
 const ok = (m) => console.log('  \x1b[32m✓\x1b[0m ' + m);
@@ -147,7 +148,7 @@ const info = (m) => console.log('    ' + m);
 
   const r = await mailer.send({
     to, subject: 'Ashika OFS — mail check',
-    html: '<p>This is the OFS mail check. If you are reading it, back-office sign-in codes will arrive.</p>',
+    html: mailCheckEmail({ host: require('os').hostname(), source: s.source }),
     purpose: 'ofs_mail_check', triggeredBy: 'check-mail'
   });
   if (r.sent) { ok('sent to ' + to + ' (' + (r.messageId || 'no id') + ')'); console.log(''); process.exit(0); }
