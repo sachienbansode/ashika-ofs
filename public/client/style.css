@@ -211,21 +211,3 @@
 .bb-otp{margin-top:11px;padding:11px;border:1px solid rgba(217,138,31,.3);border-radius:9px;
   background:rgba(217,138,31,.06);font-size:12.5px;line-height:1.55}
 .bb-otp-note{margin-top:7px;font-size:11.5px;color:var(--muted)}
-
-
-/* ------------------------------------------------------------- my clients ---
-   A branch with a few hundred clients needs to find one, not scroll past them.
-   The row action is the point of the screen: it carries the UCC to the bid box,
-   which is the only thing anyone was reading this list for. */
-.cl-bar{gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
-.cl-bar input[type=search]{flex:1 1 240px;min-width:0}
-.cl-bar .sp{flex:1}
-.cl-page{gap:10px;align-items:center;justify-content:flex-end;margin:12px 0 0}
-#clientTbl td.act{text-align:right;white-space:nowrap}
-#clientTbl .cl-no{font-size:11px;color:var(--muted)}
-#clientTbl.fit{min-width:0;width:100%}
-@media (max-width:640px){
-  .cl-bar .sp{display:none}
-  .cl-page{justify-content:space-between}
-  #clientTbl td.act{text-align:left}
-}

@@ -133,9 +133,7 @@ async function verifyBranchCode(code, chosen) {
     return;
   }
 
-  S.branch = r.branch;
-  S.client = { name: r.branch.name, ucc: r.branch.code };
-  /* A branch or AP gets the DESK's screens, not the investor's.
+  /* A branch or AP gets the DESK's screens, not this one.
    *
    * They are acting for a book of clients: a dashboard, a bid book with filters and
    * a CSV, and the full bid form. The investor shell is built for one person's own
@@ -382,20 +380,26 @@ function tickResend() {
 }
 
 /* ---------------- signed in ---------------- */
+/**
+ * This shell is the CLIENT's, and only the client's.
+ *
+ * It used to serve a branch too, switching a tab on, adding a UCC field to the bid
+ * box and flipping the bid endpoint — a client portal wearing extra clothes. A
+ * branch needs a dashboard, a filterable bid book and MIS over a book of clients,
+ * none of which fits a screen built around one person's single bid, and every one
+ * would have been another fork. They get the desk's own screens at /partner now,
+ * so every one of those forks is gone from here.
+ *
+ * The branch DOOR stays on the sign-in page: that is where a branch signs in, and
+ * verifyBranchCode sends them to /partner once it has.
+ */
 function enterApp() {
   var c = S.client || {};
-  var br = S.branch || null;
   $('#loginStage').classList.add('hide');
   $('#app').classList.remove('hide');
-  $('#clientAv').textContent = initials(br ? br.code : c.name);
-  $('#clientName').textContent = br ? (br.name || br.code) : (c.name || 'Client');
-  $('#clientUcc').textContent = br
-    ? br.type_label + ' ' + br.code + ' · ' + br.client_count + ' client(s)'
-    : (c.ucc || '');
-  // A branch has clients; a client does not. Naming the tab "My bids" for a branch
-  // holding two hundred clients is wrong in a way that matters.
-  show($('#tabClients'), !!br);
-  $('#tabBids').textContent = br ? 'Bids' : 'My bids';
+  $('#clientAv').textContent = initials(c.name);
+  $('#clientName').textContent = c.name || 'Client';
+  $('#clientUcc').textContent = c.ucc || '';
   setStep(3);
   loadIssues();
   loadBids(0);
@@ -418,12 +422,11 @@ function showCTab(t) {
   });
 
   $$('#cTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.ctab === t); });
-  ['issues', 'bids', 'clients', 'allot', 'rules'].forEach(function (k) {
+  ['issues', 'bids', 'allot', 'rules'].forEach(function (k) {
     var el = $('#cpane-' + k);
     if (el) el.classList.toggle('hide', k !== t);
   });
   if (t === 'bids') loadBids(0);
-  if (t === 'clients') loadClients();
   if (t === 'allot') loadAllotments();
   if (t === 'rules') renderRules($('#rulesBox'));
 }
@@ -481,23 +484,15 @@ function bidBox(i, mine, retOpen, hniOpen) {
     return '<div class="note" style="margin-top:11px">Bidding is closed for this offer.</div>';
   }
   var id = i.id;
-  var branch = !!S.branch;
   var cats = [];
   if (retOpen) cats.push('Retail');
   if (hniOpen) cats.push('HNI');
   var sel = mine && cats.indexOf(mine.category) >= 0 ? mine.category : cats[0];
 
   return '<div class="bidbox" data-bid-issue="' + id + '">' +
-    (branch
-      ? '<div class="bb-head">Bid for a client ' +
-        '<span class="bb-sub">the client confirms with a code sent to them</span></div>'
-      : mine
-        ? '<div class="bb-head">Change your bid <span class="bb-sub">allowed until the cut-off</span></div>'
-        : '<div class="bb-head">Place a bid</div>') +
-    (branch
-      ? '<div class="bb-row"><label class="bb-f" style="grid-column:1/-1"><span>Client UCC</span>' +
-        '<input type="text" data-bf="ucc" placeholder="One of your clients" autocomplete="off"></label></div>'
-      : '') +
+    (mine
+      ? '<div class="bb-head">Change your bid <span class="bb-sub">allowed until the cut-off</span></div>'
+      : '<div class="bb-head">Place a bid</div>') +
     '<div class="bb-row">' +
       (cats.length > 1
         ? '<label class="bb-f"><span>Category</span><select data-bf="cat">' +
@@ -539,13 +534,13 @@ function readBidBox(box) {
     is_cutoff: cutoff,
     price: cutoff ? null : Number(g('price').value) || 0
   };
-  // A branch nominates the client; a client never does — their session decides.
-  if (S.branch && g('ucc')) body.client_ucc = g('ucc').value.trim().toUpperCase();
+  // The UCC is never in the body: the session decides whose bid this is, and that
+  // is the whole reason a client cannot bid on another account by editing a request.
   return body;
 }
 
-/** Which API this session bids through. */
-function bidBase() { return S.branch ? '/client/api/branch/bids' : '/client/api/bids'; }
+/** One session, one endpoint. */
+function bidBase() { return '/client/api/bids'; }
 
 function showVerdict(box, kind, lines) {
   var v = box.querySelector('[data-bf="verdict"]');
@@ -577,9 +572,8 @@ async function checkBid(box, quiet) {
 
 async function submitBid(box, otp) {
   var body = readBidBox(box);
-  // A branch bids for a named client, so BIDS_BY_ISSUE — which is keyed by issue —
-  // is not "the bid being edited". Only a client session edits in place here.
-  var editing = S.branch ? null : BIDS_BY_ISSUE[body.issue_id];
+  // Keyed by issue, which is sound here: a client has at most one bid per issue.
+  var editing = BIDS_BY_ISSUE[body.issue_id];
   var btn = box.querySelector('[data-bf="submit"]');
   if (otp) { body.otp_ref = otp.ref; body.otp = otp.code; }
   btn.disabled = true;
@@ -589,78 +583,25 @@ async function submitBid(box, otp) {
       toast('Bid updated', 'Your bid has been changed.', 'ok');
     } else {
       await api(bidBase(), { method: 'POST', body: body });
-      toast('Bid placed', S.branch
-        ? 'Placed for ' + body.client_ucc + ', confirmed by the client.'
-        : 'Your bid is with the desk.', 'ok');
+      toast('Bid placed', 'Your bid is with the desk.', 'ok');
     }
-    hideBidOtp(box);
     await loadIssues();
-    if (S.branch) loadBids(0);
   } catch (e) {
     if (e.status === 401) return sessionLost();
     if (e.status === 428 && e.body && e.body.error === 'otp_required') {
-      return showBidOtp(box, body, e.body.action || 'place');
+      /* A client bidding for THEMSELVES is never asked for a code — the session is
+       * the confirmation. This branch used to open the "the client must confirm
+       * this" box, which belonged to a branch acting on someone else's behalf and
+       * moved to the partner shell with the rest of it. Reaching it here would mean
+       * the server thinks this session is acting for another account, so say that
+       * plainly rather than showing a code box that cannot be right. */
+      return showVerdict(box, 'bad', [(e.body && e.body.message) ||
+        'This bid needs a confirmation your session cannot give. Please contact the OFS desk.']);
     }
     var errs = (e.body && e.body.errors) || [(e.body && e.body.message) || e.message];
     showVerdict(box, 'bad', errs);
     toast(editing ? 'Bid not updated' : 'Bid not placed', errs[0], 'bad');
   } finally { btn.disabled = false; }
-}
-
-/* --------------------------------------------------- the client's confirmation --
- * A branch does not place a bid on its own say-so. The code goes to the CLIENT's
- * registered mobile and email, and the branch types back what the client tells them.
- */
-function hideBidOtp(box) {
-  var el = box.querySelector('.bb-otp');
-  if (el) el.remove();
-}
-
-function showBidOtp(box, body, action) {
-  hideBidOtp(box);
-  var el = document.createElement('div');
-  el.className = 'bb-otp';
-  el.innerHTML =
-    '<b>' + esc(body.client_ucc || 'The client') + ' must confirm this.</b><br>' +
-    'A one-time code goes to their registered mobile and email — not to you.' +
-    '<div class="bb-actions" style="margin-top:9px">' +
-      '<button class="btn btn-o btn-sm" data-otp="send">Send code to client</button>' +
-      '<input type="text" data-otp="code" inputmode="numeric" maxlength="6" ' +
-        'placeholder="6-digit code" style="flex:0 1 150px" disabled>' +
-      '<button class="btn btn-p btn-sm" data-otp="go" disabled>Confirm and place</button>' +
-    '</div><div class="bb-otp-note" data-otp="note"></div>';
-  box.appendChild(el);
-
-  var note = el.querySelector('[data-otp="note"]');
-  var ref = null;
-
-  el.querySelector('[data-otp="send"]').addEventListener('click', async function () {
-    var b = this;
-    b.disabled = true;
-    try {
-      var r = await api('/client/api/branch/bids/otp', { method: 'POST', body: {
-        client_ucc: body.client_ucc, issue_id: body.issue_id, action: action,
-        detail: inr(body.qty, 0) + ' shares at ' + (body.is_cutoff ? 'cut-off' : rupee(body.price)) } });
-      ref = r.ref;
-      el.querySelector('[data-otp="code"]').disabled = false;
-      el.querySelector('[data-otp="go"]').disabled = false;
-      el.querySelector('[data-otp="code"]').focus();
-      note.innerHTML = 'Sent to ' + esc(r.sent_to) + ' · valid ' + r.ttl_minutes + ' minutes.' +
-        (r.test_code ? ' <b>Test mode: ' + esc(r.test_code) + '</b>' : '');
-    } catch (e) {
-      note.textContent = (e.body && e.body.message) || e.message;
-    } finally { b.disabled = false; }
-  });
-
-  var go = function () {
-    var code = el.querySelector('[data-otp="code"]').value.replace(/\D/g, '');
-    if (!ref || code.length !== 6) { note.textContent = 'Enter the 6-digit code the client received.'; return; }
-    submitBid(box, { ref: ref, code: code });
-  };
-  el.querySelector('[data-otp="go"]').addEventListener('click', go);
-  el.querySelector('[data-otp="code"]').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') go();
-  });
 }
 
 async function withdrawBid(box) {
@@ -691,9 +632,6 @@ async function loadIssues(quiet) {
       ? list.map(issueCard).join('')
       : '<div class="tbl-empty">There is no open Offer for Sale right now. ' +
         'Issues appear here as soon as Ashika publishes them.</div>';
-    // A client chosen on My clients is carried across to whichever bid box is
-    // rendered here, so the UCC never has to be typed twice.
-    applyPendingUcc();
   } catch (e) {
     if (e.status === 401) return sessionLost();
     if (!quiet) toast('Could not load issues', e.message, 'bad');
@@ -814,93 +752,6 @@ async function downloadBidsCsv() {
 }
 
 /** The clients this branch may act for. */
-/* --------------------------------------------------------------- my clients --
- * Paged on the server, ten at a time, with a Bid button on every row.
- *
- * The list used to render every client the branch has and stop there: 121 rows of
- * scrolling, and then you had to remember the UCC, switch to Open issues and type
- * it in by hand. The button carries the UCC across, which is the only thing that
- * screen was being used to look up.
- */
-var CL = { offset: 0, limit: 10, q: '', total: 0 };
-
-async function loadClients(reset) {
-  if (reset) CL.offset = 0;
-  CL.q = ($('#clQ').value || '').trim();
-  try {
-    var qs = 'limit=' + CL.limit + '&offset=' + CL.offset + (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
-    var d = await api('/client/api/me/clients?' + qs);
-    var list = d.clients || [];
-    CL.total = Number(d.total) || 0;
-
-    // "121 client(s)" is the whole book; on a filtered or paged view the desk also
-    // needs to know which of them is on the screen.
-    var from = CL.total ? CL.offset + 1 : 0;
-    var to = Math.min(CL.offset + CL.limit, CL.total);
-    $('#clCount').textContent = CL.total
-      ? from + '–' + to + ' of ' + CL.total + (CL.q ? ' matching' : '') + ' client(s)'
-      : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
-
-    $('#clientTbl').innerHTML = list.length ? (
-      '<thead><tr><th>UCC</th><th>Name</th><th>Category</th><th>Status</th><th></th></tr></thead><tbody>' +
-      list.map(function (c) {
-        return '<tr><td class="m">' + esc(c.ucc) + '</td>' +
-          '<td>' + esc(c.name || '—') + '</td>' +
-          '<td>' + esc(c.category || '—') + '</td>' +
-          '<td><span class="chip ' + (c.active ? 'open' : 'grey') + '">' +
-            (c.active ? 'Active' : 'Inactive') + '</span></td>' +
-          // Only an active client can be bid for, so an inactive row says why
-          // rather than offering a button that leads to a refusal.
-          '<td class="act">' + (c.active
-            ? '<button class="btn btn-o btn-sm" data-bidfor="' + esc(c.ucc) + '">Place bid</button>'
-            : '<span class="cl-no">cannot bid</span>') + '</td></tr>';
-      }).join('') + '</tbody>'
-    ) : ('<tbody><tr><td class="tbl-empty">' +
-         (CL.q ? 'No client matches that search.' : 'No clients are mapped to your branch.') +
-         '</td></tr></tbody>');
-
-    renderClPager();
-  } catch (e) {
-    if (e.status === 401) return sessionLost();
-    toast('Could not load clients', e.message, 'bad');
-  }
-}
-
-function renderClPager() {
-  var el = $('#clPager');
-  if (!el) return;
-  var pages = Math.max(1, Math.ceil(CL.total / CL.limit));
-  var page = Math.floor(CL.offset / CL.limit) + 1;
-  if (CL.total <= CL.limit) { el.innerHTML = ''; return; }
-  el.innerHTML =
-    '<button class="btn btn-o btn-sm" data-clpage="prev"' + (CL.offset <= 0 ? ' disabled' : '') + '>Previous</button>' +
-    '<span class="tag">Page ' + page + ' of ' + pages + '</span>' +
-    '<button class="btn btn-o btn-sm" data-clpage="next"' +
-      (CL.offset + CL.limit >= CL.total ? ' disabled' : '') + '>Next</button>';
-}
-
-/**
- * Jump to Open issues with this client already filled in.
- *
- * If exactly one issue is open it opens that bid box outright; with more than one
- * there is nothing to guess, so the UCC is remembered and applied to whichever box
- * the branch opens next.
- */
-function bidForClient(ucc) {
-  PENDING_UCC = String(ucc || '').trim().toUpperCase();
-  showTab('issues');
-  applyPendingUcc();
-  toast('Bidding for ' + PENDING_UCC, 'Choose the offer, then place the bid.', 'ok');
-}
-var PENDING_UCC = '';
-function applyPendingUcc() {
-  if (!PENDING_UCC) return;
-  var f = $('[data-bf="ucc"]');
-  if (!f) return;                       // no bid box open yet; applied when one is
-  f.value = PENDING_UCC;
-  f.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
 async function loadAllotments() {
   try {
     var d = await api('/client/api/me/allotments');
@@ -988,21 +839,6 @@ async function boot() {
   });
   $('#signOutBtn').addEventListener('click', signOut);
   $('#bidsCsv').addEventListener('click', downloadBidsCsv);
-  // reset:true on every new search — staying on page 7 of a list that now has two
-  // rows shows an empty table and looks like the search found nothing.
-  $('#clGo').addEventListener('click', function () { loadClients(true); });
-  $('#clQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadClients(true); });
-  $('#clClear').addEventListener('click', function () { $('#clQ').value = ''; loadClients(true); });
-  $('#clPager').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-clpage]');
-    if (!b || b.disabled) return;
-    CL.offset = Math.max(0, CL.offset + (b.dataset.clpage === 'next' ? CL.limit : -CL.limit));
-    loadClients();
-  });
-  $('#clientTbl').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-bidfor]');
-    if (b) bidForClient(b.dataset.bidfor);
-  });
   $$('#cTabs button').forEach(function (b) {
     b.addEventListener('click', function () { showCTab(b.dataset.ctab); });
   });

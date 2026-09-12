@@ -121,15 +121,39 @@ test('my clients is paged on the server', () => {
   assert.match(body, /req\.query\.all/);
 });
 
-test('the clients screen carries the UCC to the bid box', () => {
+/**
+ * The client portal is the CLIENT's, and nobody else's.
+ *
+ * It used to serve a branch as well, switching a tab on, adding a UCC field to the
+ * bid box and flipping the endpoint — a client portal wearing extra clothes. Once
+ * branches moved to /partner that became a second, unreachable implementation of
+ * the same screens, and two implementations of one thing is the drift this whole
+ * change was meant to avoid. So it is gone, and this is what keeps it gone.
+ *
+ * The branch DOOR is not part of that: a branch still signs in on this page, and
+ * verifyBranchCode sends them to /partner once they have.
+ */
+test('no branch shell survives in the client portal', () => {
   const app = fs.readFileSync(path.join(ROOT, 'public/client/client.js'), 'utf8');
-  assert.match(app, /data-bidfor="/, 'every active row gets a Place bid button');
-  assert.match(app, /function bidForClient\(ucc\)/);
-  assert.match(app, /function applyPendingUcc\(\)/);
-  // An inactive client cannot be bid for, so it must not be offered a button that
-  // leads to a refusal.
-  assert.match(app, /c\.active\s*\n?\s*\?\s*'<button class="btn btn-o btn-sm" data-bidfor=/);
-  // A new search must reset the page, or the table looks empty and reads as
-  // "nothing found" when it is really "page 7 of a two-row list".
-  assert.match(app, /loadClients\(true\)/);
+  const html = fs.readFileSync(path.join(ROOT, 'public/client/index.html'), 'utf8');
+
+  // Every fork that made this screen behave as two different products.
+  assert.ok(!/S\.branch/.test(app), 'a session-kind fork is still switching this shell');
+  assert.ok(!/loadClients\(/.test(app), 'the clients list is still here');
+  assert.ok(!/data-bidfor=/.test(app), 'the clients table is still here');
+  assert.ok(!/branch\/bids/.test(app), 'the branch bid endpoint is still reachable from here');
+  assert.ok(!/tabClients|cpane-clients/.test(html), 'the tab or its pane is still in the page');
+
+  // One session, one endpoint — and the UCC is never in the body, which is what
+  // stops a client bidding on another account by editing a request.
+  assert.match(app, /function bidBase\(\) \{ return '\/client\/api\/bids'; \}/);
+  assert.ok(!/body\.client_ucc =/.test(app));
+});
+
+test('the branch door stays, and leads to the partner shell', () => {
+  const app = fs.readFileSync(path.join(ROOT, 'public/client/client.js'), 'utf8');
+  // Removing the branch SHELL must not remove the branch SIGN-IN.
+  assert.match(app, /function sendBranchCode\(/);
+  assert.match(app, /function verifyBranchCode\(/);
+  assert.match(app, /location\.href = '\/partner\/';/);
 });

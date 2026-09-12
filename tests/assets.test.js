@@ -26,9 +26,12 @@ const ASSETS = [
   { file: 'public/backoffice/login.css',  min: 1500, markers: ['.btn-o'] },
   { file: 'public/client/style.css',      min: 6000, markers: ['.issue', '.bidbox', '.bb-row', '.bb-otp', '.tabs.door'] },
   { file: 'public/shared/rules.css',      min: 1000, markers: ['.rules'] },
-  { file: 'public/backoffice/app.js',     min: 40000, markers: ['function boot(', 'function applyGrants('] },
+  // This one file is BOTH shells now — the desk at /backoffice and a branch at
+  // /partner — so the markers cover the partner half too.
+  { file: 'public/backoffice/app.js',     min: 40000, markers: ['function boot(', 'function applyGrants(',
+                                                                 'function partnerPath(', 'function loadPartnerClients('] },
   { file: 'public/client/client.js',      min: 12000, markers: ['function boot(', 'function bidBox(',
-                                                                 'function sendBranchCode(', 'function loadClients('] },
+                                                                 'function sendBranchCode(', 'function bidBase('] },
   { file: 'public/shared/rules.js',       min: 3000, markers: [] }
 ];
 
