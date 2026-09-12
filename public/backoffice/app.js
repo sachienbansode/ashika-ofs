@@ -485,9 +485,13 @@ function applyGrants() {
    partnerPath() has no route for those endpoints, so a hand-typed URL gets an error
    rather than a screen that half works. */
 var DESK_ONLY_TABS = ['export', 'masters'];
-/* The other direction: a branch's own book of clients. The desk needs no such
-   screen — it can reach any UCC — so the tab is removed for a staff session. */
-var PARTNER_ONLY_TABS = ['clients'];
+/* Clients used to be partner-only, on the reasoning that a desk can reach any UCC
+   from the bid form anyway. That was the wrong screen to withhold: what the desk
+   could not do was see margin CLIENT-WISE — available, used and free, side by side,
+   for the accounts it is about to bid for. So the tab is now on both shells, over
+   different scopes: the desk searches everyone, a branch or AP sees its own book,
+   and the server decides which, not this file. */
+var PARTNER_ONLY_TABS = [];
 var ALL_PANES = ['dash', 'book', 'place', 'clients', 'export', 'masters', 'rules'];
 
 function showTab(t) {
@@ -499,7 +503,7 @@ function showTab(t) {
     var pane = $('#pane-' + k);
     if (pane) pane.classList.toggle('hide', k !== t);
   });
-  if (t === 'clients') loadPartnerClients(true);
+  if (t === 'clients') loadClients(true);
   if (t === 'book') loadBook();
   if (t === 'export') { loadExportLog(); previewExport(); }
   if (t === 'masters') loadMasters();
@@ -889,42 +893,76 @@ function renderIssueInfo() {
 }
 
 
-/* -------------------------------------------------------------- my clients --
- * A branch's own book, paged on the server ten at a time.
+/* ----------------------------------------------------------------- clients --
+ * One screen, three scopes.
  *
- * The point of the screen is the button on each row. Without it this is a list you
- * scroll, memorise a UCC from, and then retype on the Place bid form — which is how
- * the wrong client gets bid for.
+ *   the desk      searches every client, and gets whatever it asks for;
+ *   a branch/AP   sees its own book, paged on the server ten at a time.
+ *
+ * The scope is NOT decided here. Both shells call /clients; the desk's goes to
+ * /api/clients and the partner's is rewritten to /client/api/me/clients, which
+ * answers only for that branch's UCCs. This file could not widen a partner's scope
+ * if it tried, which is the property worth having.
+ *
+ * What the screen is FOR is the margin. A UCC and a name can be read off the bid
+ * form; available, used and free side by side cannot, and they are what decides
+ * whether a bid placed in the next five minutes will be accepted. Free margin is
+ * shown NEGATIVE when it is negative — that is margin cut after bids went live, and
+ * somebody has to choose which bid gives way before the exchange file is built.
  */
 var CL = { offset: 0, limit: 10, q: '', total: 0 };
 
-async function loadPartnerClients(reset) {
-  if (!PARTNER) return;
+async function loadClients(reset) {
   if (reset) CL.offset = 0;
   CL.q = (($('#clQ') && $('#clQ').value) || '').trim();
   try {
-    var qs = '?limit=' + CL.limit + '&offset=' + CL.offset +
-             (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
+    // The desk's endpoint searches and caps by limit; the partner's pages. Ask for
+    // what each understands rather than sending both and hoping they are ignored.
+    var qs = PARTNER
+      ? '?limit=' + CL.limit + '&offset=' + CL.offset + (CL.q ? '&q=' + encodeURIComponent(CL.q) : '')
+      : '?limit=100' + (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
     var d = await api('/clients' + qs);
     var list = d.clients || [];
-    CL.total = Number(d.total) || 0;
+    CL.total = d.total == null ? list.length : Number(d.total) || 0;
 
     // "121 client(s)" is the whole book; on a filtered or paged view the reader
     // also needs to know which of them is on the screen in front of them.
-    var from = CL.total ? CL.offset + 1 : 0;
-    var to = Math.min(CL.offset + CL.limit, CL.total);
-    $('#clCount').textContent = CL.total
-      ? from + '–' + to + ' of ' + inr(CL.total, 0) + (CL.q ? ' matching' : '') + ' client(s)'
-      : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
+    if (PARTNER) {
+      var from = CL.total ? CL.offset + 1 : 0;
+      var to = Math.min(CL.offset + CL.limit, CL.total);
+      $('#clCount').textContent = CL.total
+        ? from + '–' + to + ' of ' + inr(CL.total, 0) + (CL.q ? ' matching' : '') + ' client(s)'
+        : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
+    } else {
+      // A desk search is capped, so say when the cap was hit rather than letting
+      // "100 client(s)" read as "there are 100".
+      $('#clCount').textContent = !list.length
+        ? (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients')
+        : (list.length >= 100 ? 'first 100 — narrow the search to see the rest'
+                              : inr(list.length, 0) + ' client(s)');
+    }
+
+    renderClientTotals(d);
 
     $('#clientsTbl').innerHTML = list.length ? (
-      '<thead><tr><th>UCC</th><th>Client</th><th>Category</th><th>Status</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>UCC</th><th>Client</th><th>Category</th><th>Status</th>' +
+      '<th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
+      '<th></th></tr></thead><tbody>' +
       list.map(function (c) {
+        var free = Number(c.free_margin) || 0;
+        var used = Number(c.margin_used) || 0;
         return '<tr><td class="m">' + esc(c.ucc) + '</td>' +
-          '<td>' + esc(c.name || '—') + '</td>' +
+          '<td>' + esc(c.name || c.client_name || '—') + '</td>' +
           '<td>' + esc(c.category || '—') + '</td>' +
           '<td><span class="chip ' + (c.active ? 'open' : 'closed') + '">' +
             (c.active ? 'Active' : 'Inactive') + '</span></td>' +
+          '<td class="n">' + inr(c.available_margin, 0) + '</td>' +
+          // Used is only interesting when there is something behind it, and the
+          // bid count is what makes the figure checkable against the book.
+          '<td class="n">' + (used ? inr(used, 0) +
+            '<span class="sub"> · ' + inr(c.live_bids, 0) + ' bid(s)</span>' : '—') + '</td>' +
+          '<td class="n ' + (free < 0 ? 'neg' : free > 0 ? 'mg-pos' : '') + '">' +
+            inr(free, 0) + '</td>' +
           // Only an active client may be bid for, so an inactive row says so rather
           // than offering a button that leads straight to a refusal.
           '<td class="act">' + (c.active
@@ -933,7 +971,9 @@ async function loadPartnerClients(reset) {
       }).join('') + '</tbody>'
     ) : ('<tbody><tr><td class="empty">' +
          (CL.q ? 'No client matches that search.'
-               : 'No clients are mapped to your branch.') + '</td></tr></tbody>');
+               : PARTNER ? 'No clients are mapped to your branch.'
+                         : 'Search for a client by UCC, name, PAN or mobile.') +
+         '</td></tr></tbody>');
 
     renderClientsPager();
   } catch (e) {
@@ -942,10 +982,40 @@ async function loadPartnerClients(reset) {
   }
 }
 
+/**
+ * The totals strip above the table.
+ *
+ * Two different scopes, and the labels say which is which: `totals` covers the rows
+ * on this screen, `book` covers every client mapped to this branch. An AP asking
+ * "how much room do my clients have" means the second; a total that quietly meant
+ * page one would answer a question nobody asked.
+ */
+function renderClientTotals(d) {
+  var el = $('#clTotals');
+  if (!el) return;
+  var t = d.totals || null;
+  var b = d.book || null;
+  if (!t && !b) { el.innerHTML = ''; return; }
+
+  function strip(label, x) {
+    if (!x || !x.clients) return '';
+    return '<span class="tag">' + esc(label) + ': ' +
+      inr(x.clients, 0) + ' client(s) · available ' + inr(x.available, 0) +
+      ' · used ' + inr(x.used, 0) +
+      ' · free <b class="' + (x.free < 0 ? 'mg-neg' : 'mg-pos') + '">' + inr(x.free, 0) + '</b>' +
+      (x.short ? ' · <b class="mg-neg">' + inr(x.short, 0) + ' over their margin</b>' : '') +
+      '</span>';
+  }
+  el.innerHTML = (b ? strip('Your whole book', b) : '') +
+                 (t ? strip(b ? 'On this page' : 'Matching this search', t) : '');
+}
+
 function renderClientsPager() {
   var el = $('#clPager');
   if (!el) return;
-  if (CL.total <= CL.limit) { el.innerHTML = ''; return; }
+  // Only the partner endpoint pages. The desk's is a capped search, and a pager
+  // over it would offer a "Next" that returns the same ten rows.
+  if (!PARTNER || CL.total <= CL.limit) { el.innerHTML = ''; return; }
   var pages = Math.max(1, Math.ceil(CL.total / CL.limit));
   var page = Math.floor(CL.offset / CL.limit) + 1;
   el.innerHTML =
@@ -1140,6 +1210,12 @@ function bidPayload() {
       editingId: STATE.editing.id,
       issue_id: STATE.editing.issue_id,
       client_ucc: STATE.editing.client_ucc,
+      // The exchange goes on a MODIFY too. Leaving it out was a real refusal: the
+      // server falls back to the exchange already stored on the bid, and a bid
+      // placed on a both-exchange issue before the form had an exchange field has
+      // NULL there — so the screen showed BSE, the request carried nothing, and
+      // Validate answered "choose the exchange" about a choice already made.
+      exchange: $('#pbExch').value || null,
       category: $('#pbCat').value,
       qty: Number($('#pbQty').value) || 0,
       is_cutoff: cutoff,
@@ -3745,14 +3821,14 @@ async function boot() {
   // My clients is a partner-only pane. Bind through a null check rather than
   // assuming: an element that is not on the page must never stop boot().
   var bindIf = function (sel, ev, fn) { var el = $(sel); if (el) el.addEventListener(ev, fn); };
-  bindIf('#clGo', 'click', function () { loadPartnerClients(true); });
-  bindIf('#clClear', 'click', function () { $('#clQ').value = ''; loadPartnerClients(true); });
-  bindIf('#clQ', 'keydown', function (e) { if (e.key === 'Enter') loadPartnerClients(true); });
+  bindIf('#clGo', 'click', function () { loadClients(true); });
+  bindIf('#clClear', 'click', function () { $('#clQ').value = ''; loadClients(true); });
+  bindIf('#clQ', 'keydown', function (e) { if (e.key === 'Enter') loadClients(true); });
   bindIf('#clPager', 'click', function (e) {
     var b = e.target.closest('[data-clpage]');
     if (!b || b.disabled) return;
     CL.offset = Math.max(0, CL.offset + (b.dataset.clpage === 'next' ? CL.limit : -CL.limit));
-    loadPartnerClients();
+    loadClients();
   });
   bindIf('#clientsTbl', 'click', function (e) {
     var b = e.target.closest('[data-bidfor]');

@@ -168,3 +168,44 @@ test('a client can fill a suggested bid, and can say which exchange', () => {
   // would move it.
   assert.match(read('routes/clientPortal.js'), /is_cutoff, value, status, exchange, created_at/);
 });
+
+test('the exchange is sent on a MODIFY, not only on a new bid', () => {
+  /* The bug this pins, exactly as it reached a phone: the form showed BSE, the
+   * hint under it said the bid was going to BSE, and Validate answered "Choose
+   * the exchange for this bid". bidPayload() had two branches and only the new-bid
+   * one carried the field, so on a modify the server fell back to the exchange
+   * stored on the bid — NULL, for anything placed before the form had the field. */
+  const fields = {
+    '#pbType': 'price', '#pbExch': 'BSE', '#pbCat': 'HNI',
+    '#pbQty': '302', '#pbPrice': '665.40', '#pbIssue': '7', '#pbUcc': 'S000001'
+  };
+  const ctx = vm.createContext({
+    Number, String, Math,
+    $: (sel) => ({ value: fields[sel] == null ? '' : fields[sel] }),
+    STATE: { editing: { id: 41, issue_id: 7, client_ucc: 'S000001' } }
+  });
+  const m = /function bidPayload\(\)[\s\S]*?\n}/m.exec(SRC);
+  assert.ok(m, 'bidPayload not found');
+  vm.runInContext(m[0], ctx);
+
+  const modify = ctx.bidPayload();
+  assert.equal(modify.editingId, 41);
+  assert.equal(modify.exchange, 'BSE', 'a modify must carry the exchange the form is showing');
+
+  ctx.STATE.editing = null;
+  assert.equal(ctx.bidPayload().exchange, 'BSE', 'and so must a new bid');
+
+  // Both branches, so neither can be changed without the other being considered.
+  const body = m[0];
+  assert.equal((body.match(/exchange: \$\('#pbExch'\)\.value \|\| null/g) || []).length, 2,
+    'bidPayload has a branch that does not send the exchange');
+});
+
+test('a client modifying a bid sends the exchange too', () => {
+  // Same failure, other front end. readBidBox is one function for place and
+  // modify alike, so this is a check that it stays that way.
+  const src = read('public/client/client.js');
+  const fn = src.slice(src.indexOf('function readBidBox('));
+  assert.match(fn.slice(0, 900), /exchange: /, 'readBidBox drops the exchange');
+  assert.ok(!/function readBidBoxForModify/.test(src), 'a second payload builder is how this bug happens');
+});

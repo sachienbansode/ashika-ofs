@@ -720,3 +720,10 @@ td.n.neg{color:var(--red);font-weight:650}
 #bookTbl thead th:last-child{background:#f7fafc;z-index:2}
 #bookTbl tbody tr:hover td:last-child{background:#f9fcfd}
 #bookTbl tfoot td:last-child{position:sticky;right:0;background:#f7fafc}
+
+/* Client-wise margin. Free margin below zero is not a styling flourish: it means
+   live bids already exceed the margin behind them, and it has to be findable by eye
+   in a column of figures. */
+.mg-neg{color:var(--red);font-weight:650}
+.mg-pos{color:var(--green);font-weight:650}
+#clTotals .tag{font-weight:500}

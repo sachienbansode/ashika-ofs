@@ -198,10 +198,24 @@ test('two closed issues on one scrip are still told apart', () => {
     'a closed issue carries the date it closed');
 });
 
-test('My clients is a partner tab, and the desk does not get it', () => {
-  assert.match(SRC, /var PARTNER_ONLY_TABS = \['clients'\];/);
-  assert.match(SRC, /if \(!PARTNER && PARTNER_ONLY_TABS\.indexOf\(t\) >= 0\) t = 'dash';/);
-  assert.match(SRC, /if \(t === 'clients'\) loadPartnerClients\(true\);/);
+test('Clients is one tab on both shells, over two different scopes', () => {
+  // It WAS partner-only. What made that wrong is margin: the desk could reach any
+  // UCC from the bid form, but could not see available, used and free client-wise
+  // for the accounts it was about to bid for. Both shells get the tab; the SERVER
+  // decides the scope, because api() rewrites /clients for a partner and this file
+  // has no say in it.
+  assert.match(SRC, /var PARTNER_ONLY_TABS = \[\];/);
+  assert.match(SRC, /if \(!PARTNER && PARTNER_ONLY_TABS\.indexOf\(t\) >= 0\) t = 'dash';/,
+    'the mechanism stays, even with nothing in the list');
+  assert.match(SRC, /if \(t === 'clients'\) loadClients\(true\);/);
+  // The partner's scope is not a filter this file applies — it is the endpoint.
+  const { partnerPath } = shellAt('/partner/');
+  assert.equal(partnerPath('/clients?limit=10&offset=0'),
+    '/client/api/me/clients?limit=10&offset=0');
+  // And the margin columns are the reason the screen exists.
+  assert.match(SRC, /available_margin/);
+  assert.match(SRC, /free_margin/);
+  assert.match(SRC, /function renderClientTotals/);
   // Its controls live in a partner-only pane, so they are bound through a null
   // check — the whole point of the boot() lesson above.
   assert.match(SRC, /var bindIf = function \(sel, ev, fn\)/);

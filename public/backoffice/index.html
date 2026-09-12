@@ -39,7 +39,7 @@
   <button data-tab="place">Place bid</button>
   <!-- A branch's own book of clients. The desk has no equivalent and needs none —
        it can reach any UCC — so this tab is removed for a staff session. -->
-  <button data-tab="clients">My clients</button>
+  <button data-tab="clients" id="tabClients">Clients</button>
   <button data-tab="export">Exchange files</button>
   <button data-tab="masters">Masters</button>
   <button data-tab="rules">Bidding rules</button>
@@ -222,6 +222,7 @@
         <div class="sp"></div>
         <span class="tag" id="clCount"></span>
       </div>
+      <div class="bar" id="clTotals" style="margin:0 0 10px"></div>
       <div class="wrap"><table id="clientsTbl" class="fit"></table></div>
       <div class="bar" id="clPager" style="justify-content:flex-end;margin:12px 0 0"></div>
     </div>

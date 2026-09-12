@@ -211,3 +211,17 @@
 .bb-otp{margin-top:11px;padding:11px;border:1px solid rgba(217,138,31,.3);border-radius:9px;
   background:rgba(217,138,31,.06);font-size:12.5px;line-height:1.55}
 .bb-otp-note{margin-top:7px;font-size:11.5px;color:var(--muted)}
+
+/* ------------------------------------------------------------------ margin --
+ * Three figures, equal weight, because the one that matters changes: an investor
+ * with no bids reads Available, an investor with bids reads Free. Free below zero
+ * is red — live bids already exceed the margin behind them, and that is something
+ * to act on, not a number to scroll past. */
+.mg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.mg-c{border:1px solid var(--line,#e4e8f0);border-radius:10px;padding:12px 14px;background:#fbfcfe}
+.mg-c .k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#667085)}
+.mg-c .v{font-size:20px;font-weight:650;margin-top:5px;font-variant-numeric:tabular-nums}
+.mg-c .s{font-size:11.5px;color:var(--muted,#667085);margin-top:3px}
+.mg-c.neg .v{color:var(--red,#d64550)}
+.mg-c.pos .v{color:var(--green,#12805c)}
+@media (max-width:560px){ .mg-grid{grid-template-columns:1fr} }

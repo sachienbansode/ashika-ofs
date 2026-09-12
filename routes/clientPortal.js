@@ -16,6 +16,7 @@ const audit = require('../lib/audit');
 const dbErr = require('../lib/dbErrors');
 const bidOtp = require('../lib/bidOtp');
 const ld = require('../db/ldAdapter');
+const marginView = require('../lib/marginView');
 const pii = require('../lib/pii');
 
 const router = express.Router();
@@ -203,17 +204,27 @@ router.get('/me/bids', async (req, res, next) => {
       : maskPortalRows(req, await ld.enrich(b, 'client_ucc'));
 
     // Margin is a per-client fact, so it is only meaningful on a client session.
+    /* The margin behind this session.
+     *
+     * For a client it is their own account. For a branch or an AP it is their
+     * book — one line at the top of the same screen, with the per-client detail
+     * in the Clients tab, because "your clients have this much room" is the
+     * thing an AP checks before placing anything and used to say only
+     * "margin is held per client".
+     *
+     * Same three figures, same shared reader, in both cases.
+     */
     let margin = null;
     if (req.portal.kind === 'client') {
-      const m = await one(
-        `SELECT COALESCE(available,0) AS available FROM ${SCHEMA}.ofs_margin WHERE client_ucc = $1`,
-        [req.portal.ucc]);
-      const used = await one(
-        `SELECT COALESCE(sum(value),0) AS v FROM ${SCHEMA}.ofs_bid
-          WHERE client_ucc = $1 AND status = 'Live'`, [req.portal.ucc]);
-      const available = Number(m && m.available) || 0;
-      const consumed = Number(used && used.v) || 0;
-      margin = { available, used: consumed, free: available - consumed };
+      const m = (await marginView.forUccs([req.portal.ucc])).get(
+        String(req.portal.ucc).trim().toUpperCase()) || marginView.empty(req.portal.ucc);
+      margin = { scope: 'client', ucc: m.ucc,
+                 available: m.available_margin, used: m.margin_used, free: m.free_margin,
+                 at: m.margin_at, source: m.margin_source, live_bids: m.live_bids };
+    } else {
+      const t = await marginView.totalsFor(scope);
+      margin = { scope: 'book', clients: t.clients, available: t.available,
+                 used: t.used, free: t.free, short: t.short, with_bids: t.with_bids };
     }
 
     res.json({ actor: whoAmI(req), bids: withNames,
@@ -262,7 +273,20 @@ router.get('/me/clients', async (req, res, next) => {
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const all = String(req.query.all || '') === '1';        // the CSV wants everything
     const page = all ? list : list.slice(offset, offset + limit);
-    res.json({ actor: whoAmI(req), clients: page, total, limit, offset, q: q || null });
+
+    /* Margin for the rows on the screen, and totals for the WHOLE book.
+     *
+     * Two different scopes on purpose: the columns answer "can this client bid",
+     * the totals answer "how much room does my book have", and an AP reading a
+     * total that silently covered only page 1 would answer the second question
+     * with the first page's numbers. Margin is fetched for the page because a
+     * book of several hundred does not need four hundred rows of detail to show
+     * ten; the totals are one query over the scope either way.
+     */
+    const withMargin = await marginView.attach(page, 'ucc');
+    res.json({ actor: whoAmI(req), clients: withMargin, total, limit, offset, q: q || null,
+               totals: marginView.totalsOf(withMargin),
+               book: await marginView.totalsFor(scope) });
   } catch (e) { next(e); }
 });
 
@@ -609,13 +633,11 @@ router.get('/me/clients/:ucc', async (req, res, next) => {
     const el = await ld.eligibility(ucc);
     if (!el.found) return res.status(404).json({ error: 'not_found' });
 
-    const m = await one(
-      `SELECT COALESCE(available,0) AS available FROM ${SCHEMA}.ofs_margin WHERE client_ucc = $1`, [ucc]);
-    const used = await one(
-      `SELECT COALESCE(sum(value),0) AS v FROM ${SCHEMA}.ofs_bid
-        WHERE client_ucc = $1 AND status = 'Live'`, [ucc]);
-    const available = Number(m && m.available) || 0;
-    const consumed = Number(used && used.v) || 0;
+    // The same reader the desk's panel uses, so the two panels cannot disagree
+    // about one client's free margin.
+    const mv = (await marginView.forUccs([ucc])).get(ucc) || marginView.empty(ucc);
+    const available = mv.available_margin;
+    const consumed = mv.margin_used;
 
     const c = el.client || {};
     const [masked] = maskPortalRows(req, [{
@@ -627,9 +649,11 @@ router.get('/me/clients/:ucc', async (req, res, next) => {
         ucc: ucc, name: c.name || null, category: c.category || null,
         pan: masked.pan, mobile: masked.mobile, email: masked.email,
         branch_id: c.branch_id || null, active: el.active === true,
-        available_margin: available
+        available_margin: available, margin_at: mv.margin_at
       },
+      margin_used: consumed,
       free_margin: available - consumed,
+      live_bids: mv.live_bids,
       // The desk's panel prints this note when PII is masked; a branch is always
       // masked, so it always prints, and the AP is never left wondering whether a
       // dotted PAN is a data problem.

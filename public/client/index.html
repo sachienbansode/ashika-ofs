@@ -175,6 +175,16 @@
   </div>
 
   <div id="cpane-bids" class="hide">
+    <!-- Margin, before the bids rather than after them: it is what decides whether
+         the next bid can be placed at all, and it used to be one grey line of text
+         in the card header that nobody read. -->
+    <div class="card" id="marginCard" style="margin-bottom:14px">
+      <div class="card-h"><h3 id="marginTitle">My margin</h3>
+        <span class="sub" id="marginAt"></span></div>
+      <div class="card-b"><div class="mg-grid" id="marginGrid"></div>
+        <div class="note" id="marginNote" style="margin-top:12px"></div></div>
+    </div>
+
     <div class="card">
       <div class="card-h"><h3 id="bidsTitle">My bids</h3><span class="sub" id="marginSummary"></span></div>
       <div class="card-b" style="padding-bottom:0">

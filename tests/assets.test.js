@@ -29,7 +29,7 @@ const ASSETS = [
   // This one file is BOTH shells now — the desk at /backoffice and a branch at
   // /partner — so the markers cover the partner half too.
   { file: 'public/backoffice/app.js',     min: 40000, markers: ['function boot(', 'function applyGrants(',
-                                                                 'function partnerPath(', 'function loadPartnerClients('] },
+                                                                 'function partnerPath(', 'function loadClients('] },
   { file: 'public/client/client.js',      min: 12000, markers: ['function boot(', 'function bidBox(',
                                                                  'function sendBranchCode(', 'function bidBase('] },
   { file: 'public/shared/rules.js',       min: 3000, markers: [] }

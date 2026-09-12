@@ -519,8 +519,8 @@ function bidBox(i, mine, retOpen, hniOpen) {
       '<button class="btn btn-o btn-sm" data-bf="fill">Fill suggested bid</button>' +
       '<button class="btn btn-o btn-sm" data-bf="check">Check</button>' +
       '<button class="btn btn-p btn-sm" data-bf="submit">' +
-        (branch ? 'Place bid' : mine ? 'Update bid' : 'Place bid') + '</button>' +
-      (mine && !branch ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
+        (mine ? 'Update bid' : 'Place bid') + '</button>' +
+      (mine ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
     '</div>' +
   '</div>';
 }
@@ -702,6 +702,73 @@ async function loadIssues(quiet) {
   }
 }
 
+/**
+ * Client-wise margin, on the client's own screen.
+ *
+ * The server sends one of two shapes and says which: a CLIENT gets their own
+ * account, a branch or AP gets the totals across their book. The three figures are
+ * the same three the desk sees, computed by the same code on the server, so an
+ * investor ringing the desk about their margin and the desk looking it up are
+ * reading one number.
+ *
+ *   Available  what the desk has loaded for today. Margins are cleared each
+ *              morning and re-uploaded, so a stale timestamp against a non-zero
+ *              figure is worth showing rather than hiding.
+ *   Used       the value of live bids. A cancelled bid releases its hold.
+ *   Free       what is left. Below zero means margin was reduced after bids went
+ *              live — the investor has not done anything wrong, but the desk has
+ *              to be told, so the card says so instead of showing a red number
+ *              with no explanation.
+ */
+function renderMargin(m, branch) {
+  var card = $('#marginCard');
+  if (!card) return;
+  if (!m) { card.classList.add('hide'); $('#marginSummary').textContent = ''; return; }
+  card.classList.remove('hide');
+
+  var book = m.scope === 'book';
+  var free = Number(m.free) || 0;
+  $('#marginTitle').textContent = book ? 'Margin across your clients' : 'My margin';
+  $('#marginAt').textContent = book
+    ? inr(m.clients || 0, 0) + ' client(s)'
+    : (m.at ? 'As loaded ' + dt(m.at) : 'No margin loaded for today');
+
+  function cell(k, v, s, cls) {
+    return '<div class="mg-c ' + (cls || '') + '"><div class="k">' + esc(k) + '</div>' +
+           '<div class="v">' + rupee(v, 0) + '</div>' +
+           '<div class="s">' + esc(s || '') + '</div></div>';
+  }
+  $('#marginGrid').innerHTML =
+    cell('Available', m.available, book ? 'Loaded for your clients' : 'Loaded by the desk today') +
+    cell('Used', m.used, book
+      ? (m.with_bids ? inr(m.with_bids, 0) + ' client(s) with live bids' : 'No live bids')
+      : (m.live_bids ? 'Held against ' + inr(m.live_bids, 0) + ' live bid(s)' : 'No live bids')) +
+    cell('Free', free, book ? 'Across the whole book' : 'What you can still bid with',
+         free < 0 ? 'neg' : free > 0 ? 'pos' : '');
+
+  var note = $('#marginNote');
+  if (book && m.short) {
+    note.className = 'note bad';
+    note.textContent = inr(m.short, 0) + ' of your clients have live bids worth more than ' +
+      'the margin loaded against them. Please speak to the OFS desk before the cut-off.';
+  } else if (!book && free < 0) {
+    note.className = 'note bad';
+    note.textContent = 'Your live bids are worth more than the margin currently loaded ' +
+      'against your account. Please contact the OFS desk before the cut-off.';
+  } else if (!book && !Number(m.available)) {
+    note.className = 'note';
+    note.textContent = 'No margin has been loaded against your account yet today. ' +
+      'Margins are set by the desk each morning — a bid cannot be placed until one is.';
+  } else {
+    note.className = 'note hide';
+    note.textContent = '';
+  }
+
+  // The old one-line summary stays in the bids header for the at-a-glance read.
+  $('#marginSummary').textContent = 'Free ' + rupee(free, 0) +
+    ' of ' + rupee(m.available, 0);
+}
+
 /** Ten rows a page, server-side — a branch can hold hundreds of clients. */
 var BIDS_PAGE = { offset: 0, limit: 10, total: 0 };
 
@@ -713,10 +780,7 @@ async function loadBids(offset) {
     BIDS_PAGE.total = d.total || 0;
 
     $('#bidsTitle').textContent = branch ? 'Bids — ' + (d.actor.branch_code || '') : 'My bids';
-    var m = d.margin || null;
-    $('#marginSummary').textContent = m
-      ? 'Available ' + rupee(m.available, 0) + ' · used ' + rupee(m.used, 0) + ' · free ' + rupee(m.free, 0)
-      : (branch ? 'Margin is held per client — open a client to see theirs.' : '');
+    renderMargin(d.margin || null, branch);
 
     var b = d.bids || [];
     var from = BIDS_PAGE.total ? BIDS_PAGE.offset + 1 : 0;
@@ -815,7 +879,7 @@ async function downloadBidsCsv() {
   } finally { btn.disabled = false; }
 }
 
-/** The clients this branch may act for. */
+/** What this client was allotted, once the desk has imported the exchange file. */
 async function loadAllotments() {
   try {
     var d = await api('/client/api/me/allotments');
