@@ -40,11 +40,13 @@ const info = (m) => console.log('    ' + m);
 
   if (!s) {
     bad('There is no row in "admin-staging-api".smtp_settings (id = 1).');
-    info('The portal writes this row. Configure SMTP in the Stage API admin screens;');
-    info('OFS has no settings of its own and is not meant to.');
+    info('The portal writes this row. Configure SMTP in the Stage API admin screens,');
+    info('or set SMTP_HOST / SMTP_USER / SMTP_PASS / SMTP_FROM in this app\'s .env.');
     process.exit(2);
   }
-  ok('smtp_settings row found');
+  ok(s.source === 'env'
+    ? 'using SMTP_* from this app\'s .env (the platform row is not consulted)'
+    : 'smtp_settings row found (from the platform)');
   info('host      ' + (s.host || '(none)') + ':' + (s.port || 587) + (s.secure ? ' (TLS)' : ''));
   info('username  ' + (s.username || '(none)'));
   info('from      ' + (s.from_email || s.username || '(none)'));
@@ -55,7 +57,13 @@ const info = (m) => console.log('    ' + m);
   }
 
   if (s.username) {
-    const pass = mailer.decryptPass(s.password_encrypted);
+    const pass = mailer.passwordOf(s);
+    if (!pass && s.source === 'env') {
+      bad('SMTP_USER is set but SMTP_PASS is empty.');
+      info('For a Google Workspace account this must be an APP PASSWORD, not the');
+      info('account password — a normal password fails with 535 even when correct.');
+      process.exit(2);
+    }
     if (!pass) {
       bad('The stored password will not decrypt.');
       info('API_KEY_SECRET in this app\'s .env must be BYTE-IDENTICAL to the portal\'s —');
@@ -73,9 +81,23 @@ const info = (m) => console.log('    ' + m);
       info('');
       info('then set the same value here. API_KEY_SECRET is used for this one');
       info('purpose in OFS, so changing it breaks nothing else.');
+      info('');
+      info('Or skip the portal entirely and hold the credentials here:');
+      info('');
+      info('    SMTP_HOST=smtp.gmail.com');
+      info('    SMTP_PORT=587');
+      info('    SMTP_USER=it.notifications@ashikagroup.com');
+      info('    SMTP_PASS=<the Google app password>');
+      info('    SMTP_FROM=it.notifications@ashikagroup.com');
+      info('');
+      info('When SMTP_HOST is set the platform row is not read at all, and');
+      info('API_KEY_SECRET stops mattering. Sends are still logged to the shared');
+      info('Email & OTP Logs either way.');
       process.exit(2);
     }
-    ok('password decrypts (' + pass.length + ' characters)');
+    ok(s.source === 'env'
+      ? 'password present (' + pass.length + ' characters)'
+      : 'password decrypts (' + pass.length + ' characters)');
   } else {
     info('no username set — treating this as an unauthenticated relay');
   }

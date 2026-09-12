@@ -93,7 +93,7 @@ Fill these — everything else has a working default:
 | `ANANTA_DATABASE_URL` | `postgresql://root_admin@13.233.106.37:5432/uat_ananta_staging` |
 | `ANANTA_PG_PASSWORD` | same password |
 | `JWT_SECRET` | **exactly** the platform's value, or every login is rejected |
-| `API_KEY_SECRET` | **exactly** the platform's value, or the SMTP password will not decrypt |
+| `API_KEY_SECRET` | **exactly** the platform's value, or the SMTP password will not decrypt. The portal is a separate host, so this has to be copied from there. If you cannot get it, set `SMTP_HOST` instead — see below |
 | `CORS_ORIGINS` | `https://ofs.ashikagroup.com` |
 | `APP_URL` | `https://ofs.ashikagroup.com` |
 
@@ -250,7 +250,8 @@ tree match the remote outright. `.env` is gitignored, so it survives untouched.
 | `[sso] rejected: SSO_UNCONFIGURED` | `OFS_SSO_SECRET` is not set on this app. |
 | 401 `session_superseded` mid-session | The account signed in elsewhere; `users.active_sid` rotated. Also working as intended. |
 | Bids rejected `unknown_client` | The Ananta connection works but `dwh.tbl_user_info` has no such UCC — run `npm run smoke`. |
-| `/api/allotment/mail/status` → `password_undecryptable` | `API_KEY_SECRET` does not match the platform's. |
+| `/api/allotment/mail/status` → `password_undecryptable` | `API_KEY_SECRET` does not match the platform's. Copy it from the portal host, or set `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` in this app's `.env` — when `SMTP_HOST` is set the platform row is not read and the shared secret stops mattering. |
+| `/api/allotment/mail/status` → `password_missing` | `SMTP_USER` is set but `SMTP_PASS` is empty. For Google Workspace it must be an **app password**, not the account password. |
 | certbot fails validation | DNS is not pointing at the VM yet, or NSG/ufw is blocking port 80. |
 | Works, then dies after reboot | `pm2 startup systemd` was never run, or `pm2 save` was not re-run after it. |
 | `npm ci` → `EUSAGE ... existing package-lock.json` | The lockfile is missing from the checkout. `git pull` (it is committed), or fall back to `npm install --omit=dev`. |

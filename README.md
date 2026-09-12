@@ -438,7 +438,14 @@ Deliberate behaviours, because this endpoint faces the public internet:
 `{issue_id, confirm:true}` to actually send — these go to real clients about real money, so
 the send is a deliberate second action. SMTP config is the platform's own
 (`"admin-staging-api".smtp_settings`, password AES-GCM sealed with `API_KEY_SECRET`), so
-`API_KEY_SECRET` must match the platform byte for byte. Every send is written to the shared
+`API_KEY_SECRET` must match the platform byte for byte — and the portal is a separate
+host, so that value has to be copied from it.
+
+Where it cannot be, set `SMTP_HOST` (with `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+`SMTP_FROM`) in this app's own `.env`: the platform row is then not read at all and the
+shared secret stops mattering. Same mailbox, credentials held locally. This exists
+because back-office MFA is on the far side of that dependency — a secret nobody on the
+OFS box can produce locks every member of staff out of OFS. Every send is written to the shared
 `email_logs` table and shows up in Admin → Email & OTP Logs. Clients with no email on file are
 marked `skipped`, not `failed`; `POST /api/allotment/mail/reset` requeues the failures.
 
