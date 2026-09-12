@@ -485,14 +485,21 @@ function applyGrants() {
    partnerPath() has no route for those endpoints, so a hand-typed URL gets an error
    rather than a screen that half works. */
 var DESK_ONLY_TABS = ['export', 'masters'];
+/* The other direction: a branch's own book of clients. The desk needs no such
+   screen — it can reach any UCC — so the tab is removed for a staff session. */
+var PARTNER_ONLY_TABS = ['clients'];
+var ALL_PANES = ['dash', 'book', 'place', 'clients', 'export', 'masters', 'rules'];
 
 function showTab(t) {
   if (PARTNER && DESK_ONLY_TABS.indexOf(t) >= 0) t = 'dash';
+  if (!PARTNER && PARTNER_ONLY_TABS.indexOf(t) >= 0) t = 'dash';
   STATE.tab = t;
   $$('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
-  ['dash', 'book', 'place', 'export', 'masters', 'rules'].forEach(function (k) {
-    $('#pane-' + k).classList.toggle('hide', k !== t);
+  ALL_PANES.forEach(function (k) {
+    var pane = $('#pane-' + k);
+    if (pane) pane.classList.toggle('hide', k !== t);
   });
+  if (t === 'clients') loadPartnerClients(true);
   if (t === 'book') loadBook();
   if (t === 'export') { loadExportLog(); previewExport(); }
   if (t === 'masters') loadMasters();
@@ -724,17 +731,37 @@ function fillIssueSelects() {
     var el = $(sel); if (el) el.disabled = none;
   });
 
-  // Every list gets the symbol AND the company; the bid form also gets the window
-  // that is closing, because "which COALINDIA?" is a real question on a day with a
-  // T and a T+1 leg open at once.
-  var opts = STATE.issues.map(function (i) {
-    return '<option value="' + i.id + '">' + esc(issueOptionLabel(i, false)) + '</option>';
-  }).join('');
+  /* "which COALINDIA?" is a real question, and the filter lists were answering it
+   * with four identical lines. Two things were wrong:
+   *
+   *   the label left the window off, so a scrip with a T leg, a T+1 leg and two
+   *   closed test issues rendered as the same string four times; and
+   *   every issue ever loaded was offered, including closed ones nobody had bid on,
+   *   which is noise in the one control you use to cut through noise.
+   *
+   * So: the same label the bid form uses, and only issues worth filtering by —
+   * the ones open or opening, plus closed ones that actually have bids, because a
+   * desk reconciling yesterday still has to pick them. A closed issue with no bids
+   * can filter nothing and is left out. */
+  var opt = function (i) {
+    return '<option value="' + i.id + '">' + esc(issueOptionLabel(i, true)) + '</option>';
+  };
+  var openOnes = STATE.issues.filter(isBiddable);
+  var closedWithBids = STATE.issues.filter(function (i) {
+    return !isBiddable(i) && Number(i.bid_count) > 0;
+  });
+  var group = function (label, list) {
+    return list.length ? '<optgroup label="' + esc(label) + '">' + list.map(opt).join('') + '</optgroup>' : '';
+  };
   ['#bkIssue', '#exIssue'].forEach(function (sel) {
     var el = $(sel); if (!el) return;
     var cur = el.value;
-    el.innerHTML = '<option value="">All issues</option>' + opts;
-    if (cur) el.value = cur;
+    el.innerHTML = '<option value="">All issues</option>' +
+      group('Open', openOnes) +
+      group('Closed — has bids', closedWithBids);
+    // Keep the selection if it is still on the list; otherwise fall back to All
+    // rather than silently filtering by whatever happens to be first.
+    el.value = cur && el.querySelector('option[value="' + cur + '"]') ? cur : '';
   });
 
   var pb = $('#pbIssue');
@@ -796,7 +823,11 @@ function issueOptionLabel(i, withWindow) {
             : i.ret_status === 'Upcoming' ? { w: 'Retail opens', t: i.ret_open }
             : i.hni_status === 'Upcoming' ? { w: 'HNI opens', t: i.hni_open }
             : null;
-  return which ? base + '  ·  ' + which.w + ' ' + dt(which.t) : base + '  ·  closed';
+  if (which) return base + '  ·  ' + which.w + ' ' + dt(which.t);
+  // A closed issue still needs to be told apart from the other closed issue on the
+  // same scrip — "COALINDIA · closed" twice is the same problem one line down.
+  var end = new Date(Math.max(new Date(i.ret_close), new Date(i.hni_close)));
+  return base + '  ·  closed' + (isNaN(end) ? '' : ' ' + dt(end));
 }
 
 /** The issue currently selected on the bid form. */
@@ -855,6 +886,91 @@ function renderIssueInfo() {
       ? '<div class="note warn" style="margin-top:9px">The seller has not published a floor price for this issue yet. ' +
         'A cut-off bid cannot be valued against the retail cap until they do.</div>'
       : '');
+}
+
+
+/* -------------------------------------------------------------- my clients --
+ * A branch's own book, paged on the server ten at a time.
+ *
+ * The point of the screen is the button on each row. Without it this is a list you
+ * scroll, memorise a UCC from, and then retype on the Place bid form — which is how
+ * the wrong client gets bid for.
+ */
+var CL = { offset: 0, limit: 10, q: '', total: 0 };
+
+async function loadPartnerClients(reset) {
+  if (!PARTNER) return;
+  if (reset) CL.offset = 0;
+  CL.q = (($('#clQ') && $('#clQ').value) || '').trim();
+  try {
+    var qs = '?limit=' + CL.limit + '&offset=' + CL.offset +
+             (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
+    var d = await api('/clients' + qs);
+    var list = d.clients || [];
+    CL.total = Number(d.total) || 0;
+
+    // "121 client(s)" is the whole book; on a filtered or paged view the reader
+    // also needs to know which of them is on the screen in front of them.
+    var from = CL.total ? CL.offset + 1 : 0;
+    var to = Math.min(CL.offset + CL.limit, CL.total);
+    $('#clCount').textContent = CL.total
+      ? from + '–' + to + ' of ' + inr(CL.total, 0) + (CL.q ? ' matching' : '') + ' client(s)'
+      : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
+
+    $('#clientsTbl').innerHTML = list.length ? (
+      '<thead><tr><th>UCC</th><th>Client</th><th>Category</th><th>Status</th><th></th></tr></thead><tbody>' +
+      list.map(function (c) {
+        return '<tr><td class="m">' + esc(c.ucc) + '</td>' +
+          '<td>' + esc(c.name || '—') + '</td>' +
+          '<td>' + esc(c.category || '—') + '</td>' +
+          '<td><span class="chip ' + (c.active ? 'open' : 'closed') + '">' +
+            (c.active ? 'Active' : 'Inactive') + '</span></td>' +
+          // Only an active client may be bid for, so an inactive row says so rather
+          // than offering a button that leads straight to a refusal.
+          '<td class="act">' + (c.active
+            ? '<button class="mini" data-bidfor="' + esc(c.ucc) + '">Place bid</button>'
+            : '<span class="sub">cannot bid</span>') + '</td></tr>';
+      }).join('') + '</tbody>'
+    ) : ('<tbody><tr><td class="empty">' +
+         (CL.q ? 'No client matches that search.'
+               : 'No clients are mapped to your branch.') + '</td></tr></tbody>');
+
+    renderClientsPager();
+  } catch (e) {
+    if (e.status === 401) return checkSession();
+    toast('Clients failed', apiMessage(e), 'bad');
+  }
+}
+
+function renderClientsPager() {
+  var el = $('#clPager');
+  if (!el) return;
+  if (CL.total <= CL.limit) { el.innerHTML = ''; return; }
+  var pages = Math.max(1, Math.ceil(CL.total / CL.limit));
+  var page = Math.floor(CL.offset / CL.limit) + 1;
+  el.innerHTML =
+    '<button class="mini" data-clpage="prev"' + (CL.offset <= 0 ? ' disabled' : '') + '>Previous</button> ' +
+    '<span class="tag">Page ' + page + ' of ' + pages + '</span> ' +
+    '<button class="mini" data-clpage="next"' +
+      (CL.offset + CL.limit >= CL.total ? ' disabled' : '') + '>Next</button>';
+}
+
+/**
+ * Carry a client to the bid form.
+ *
+ * Sets the UCC, switches tab, and fires the same input event typing would, so the
+ * client-and-margin panel fills itself exactly as it does for a desk — one path,
+ * not a second copy of the lookup that can drift from it.
+ */
+function bidForClient(ucc) {
+  var el = $('#pbUcc');
+  if (!el) return;
+  el.value = String(ucc || '').trim().toUpperCase();
+  showTab('place');
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  loadExistingBids();
+  var q = $('#pbQty');
+  if (q) q.focus();
 }
 
 /* ---------------- clock + countdowns ---------------- */
@@ -3475,6 +3591,11 @@ async function checkSession() {
         if (pane) pane.classList.add('hide');
       });
       document.body.classList.add('partner');
+    } else {
+      PARTNER_ONLY_TABS.forEach(function (k) {
+        var b = document.querySelector('#tabs button[data-tab="' + k + '"]');
+        if (b) b.remove();
+      });
     }
     return true;
   } catch (e) {
@@ -3671,6 +3792,23 @@ async function boot() {
   });
   $('#setTbl').addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && e.target.dataset && e.target.dataset.set) saveSetting(e.target.dataset.set);
+  });
+
+  // My clients is a partner-only pane. Bind through a null check rather than
+  // assuming: an element that is not on the page must never stop boot().
+  var bindIf = function (sel, ev, fn) { var el = $(sel); if (el) el.addEventListener(ev, fn); };
+  bindIf('#clGo', 'click', function () { loadPartnerClients(true); });
+  bindIf('#clClear', 'click', function () { $('#clQ').value = ''; loadPartnerClients(true); });
+  bindIf('#clQ', 'keydown', function (e) { if (e.key === 'Enter') loadPartnerClients(true); });
+  bindIf('#clPager', 'click', function (e) {
+    var b = e.target.closest('[data-clpage]');
+    if (!b || b.disabled) return;
+    CL.offset = Math.max(0, CL.offset + (b.dataset.clpage === 'next' ? CL.limit : -CL.limit));
+    loadPartnerClients();
+  });
+  bindIf('#clientsTbl', 'click', function (e) {
+    var b = e.target.closest('[data-bidfor]');
+    if (b) bidForClient(b.dataset.bidfor);
   });
 
   $('#btnSignOut').addEventListener('click', signOut);

@@ -37,6 +37,9 @@
   <button data-tab="dash" class="on">Dashboard</button>
   <button data-tab="book">Bid book</button>
   <button data-tab="place">Place bid</button>
+  <!-- A branch's own book of clients. The desk has no equivalent and needs none —
+       it can reach any UCC — so this tab is removed for a staff session. -->
+  <button data-tab="clients">My clients</button>
   <button data-tab="export">Exchange files</button>
   <button data-tab="masters">Masters</button>
   <button data-tab="rules">Bidding rules</button>
@@ -208,6 +211,22 @@
   </section>
 
   <!-- ---------------- Bidding rules ---------------- -->
+  <!-- ---------------- My clients (branch / AP only) ---------------- -->
+  <section class="pane hide" id="pane-clients">
+    <div class="card">
+      <div class="bar">
+        <input type="search" id="clQ" placeholder="Search UCC or name" autocomplete="off"
+               style="flex:1 1 260px">
+        <button class="btn ghost" id="clGo" type="button">Search</button>
+        <button class="btn ghost" id="clClear" type="button">Clear</button>
+        <div class="sp"></div>
+        <span class="tag" id="clCount"></span>
+      </div>
+      <div class="wrap"><table id="clientsTbl" class="fit"></table></div>
+      <div class="bar" id="clPager" style="justify-content:flex-end;margin:12px 0 0"></div>
+    </div>
+  </section>
+
   <section class="pane hide" id="pane-rules"><div id="rulesBox"></div></section>
 
   <!-- ---------------- Masters ---------------- -->

@@ -164,3 +164,49 @@ test('a partner is told the UCC is not theirs, not that it does not exist', () =
   // simply belongs to another branch.
   assert.match(SRC, /PARTNER \? 'That UCC is not one of your clients\.'/);
 });
+
+/**
+ * The filter dropdowns have to name what they are filtering by.
+ *
+ * The bid book listed four lines reading "COALINDIA — Coal India Ltd", because the
+ * label left the window off and every issue ever loaded was offered — a T leg, a
+ * T+1 leg and two closed test issues on the same scrip are one string repeated. A
+ * filter you cannot read is worse than no filter: it is picked at random.
+ */
+test('issue filters carry the window, and drop what cannot be filtered by', () => {
+  // The same label the bid form uses, not the bare symbol.
+  assert.match(SRC, /esc\(issueOptionLabel\(i, true\)\)/);
+  assert.ok(!/issueOptionLabel\(i, false\)/.test(SRC),
+    'the short label made every leg of a scrip look identical');
+
+  const fill = SRC.slice(SRC.indexOf('function fillIssueSelects()'));
+  const body = fill.slice(0, fill.indexOf('\n}\n'));
+  assert.match(body, /var openOnes = STATE\.issues\.filter\(isBiddable\);/);
+  // Closed issues stay ONLY when they hold bids — a desk reconciling yesterday
+  // still has to pick them, and a closed issue with none can filter nothing.
+  assert.match(body, /!isBiddable\(i\) && Number\(i\.bid_count\) > 0/);
+  assert.match(body, /<optgroup label="/);
+  // A selection that is no longer on the list falls back to All, rather than
+  // silently filtering by whichever issue happens to be first.
+  assert.match(body, /el\.value = cur && el\.querySelector\('option\[value="' \+ cur \+ '"\]'\) \? cur : '';/);
+});
+
+test('two closed issues on one scrip are still told apart', () => {
+  const label = SRC.slice(SRC.indexOf('function issueOptionLabel('));
+  const body = label.slice(0, label.indexOf('\n}\n'));
+  assert.match(body, /closed' \+ \(isNaN\(end\) \? '' : ' ' \+ dt\(end\)\)/,
+    'a closed issue carries the date it closed');
+});
+
+test('My clients is a partner tab, and the desk does not get it', () => {
+  assert.match(SRC, /var PARTNER_ONLY_TABS = \['clients'\];/);
+  assert.match(SRC, /if \(!PARTNER && PARTNER_ONLY_TABS\.indexOf\(t\) >= 0\) t = 'dash';/);
+  assert.match(SRC, /if \(t === 'clients'\) loadPartnerClients\(true\);/);
+  // Its controls live in a partner-only pane, so they are bound through a null
+  // check — the whole point of the boot() lesson above.
+  assert.match(SRC, /var bindIf = function \(sel, ev, fn\)/);
+  assert.match(SRC, /bindIf\('#clientsTbl', 'click'/);
+  // And the row button carries the UCC into the real form rather than a copy.
+  assert.match(SRC, /function bidForClient\(ucc\)/);
+  assert.match(SRC, /el\.dispatchEvent\(new Event\('input', \{ bubbles: true \}\)\)/);
+});
