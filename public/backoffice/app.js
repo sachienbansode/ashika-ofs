@@ -747,25 +747,30 @@ function renderIssueInfo() {
   };
   var money = function (v) { return v == null || v === '' ? '—' : rupee(v); };
   box.className = '';
+  // Paired, and in a fixed order. Eight fields laid out three across left the last
+  // row half empty, and the two full-width window rows sat in the MIDDLE of the
+  // grid, so the column edges above them did not line up with the ones below. Eight
+  // scalars in two columns is four clean rows, with the windows underneath. The
+  // discount is always printed too: dropping the field when it is zero shifted
+  // every field after it into a different column.
   box.innerHTML =
     '<div class="bar" style="margin-bottom:8px"><b>' + esc(i.symbol) + '</b>' +
       '<span class="tag">' + esc(i.exchange) + '</span>' +
       '<span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span></div>' +
-    '<div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">' +
+    '<div class="grid2 pairs">' +
       f('Company', esc(i.company || '—')) +
       f('ISIN', '<span class="m">' + esc(i.isin || '—') + '</span>') +
       f('Floor price', money(i.floor_price)) +
       f('Retail cut-off min', money(i.cut_price_min)) +
       f('Tick', inr(i.tick, 2)) +
       f('Lot', inr(i.lot, 0)) +
-      (Number(i.discount_pct) ? f('Retail discount', inr(i.discount_pct, 2) + '%') : '') +
-      // Stacked, like the master table: one long line wrapped mid-stamp and put the
-      // arrow at the start of the second line, where it reads as a stray character.
-      // Full width: a timestamp clipped mid-stamp is the one thing on this panel
-      // nobody can afford to misread.
+      f('Retail discount', Number(i.discount_pct) ? inr(i.discount_pct, 2) + '%' : '—') +
+      f('Cut-off bids', i.cutoff_flag === false ? 'Not allowed' : 'Retail only') +
+      // Full width, and last: a timestamp clipped mid-stamp is the one thing on this
+      // panel nobody can afford to misread, and a full-width row in the middle of a
+      // grid breaks the alignment of everything under it.
       f('HNI window', windowCell(i.hni_open, i.hni_close), 'row') +
       f('Retail window', windowCell(i.ret_open, i.ret_close), 'row') +
-      f('Cut-off bids', i.cutoff_flag === false ? 'Not allowed' : 'Allowed (Retail only)') +
     '</div>' +
     (i.floor_price == null
       ? '<div class="note warn" style="margin-top:9px">The seller has not published a floor price for this issue yet. ' +
@@ -1211,7 +1216,7 @@ async function loadClientPanel(ucc) {
     var c = d.client;
     $('#pbClient').className = '';
     $('#pbClient').innerHTML =
-      '<div class="grid2">' +
+      '<div class="grid2 pairs">' +
         '<div class="f"><div class="k">Name</div><div class="v">' + esc(c.name || '') + '</div></div>' +
         '<div class="f"><div class="k">PAN</div><div class="v">' + esc(c.pan || '') + '</div></div>' +
         '<div class="f"><div class="k">Mobile</div><div class="v">' + esc(c.mobile || '') + '</div></div>' +

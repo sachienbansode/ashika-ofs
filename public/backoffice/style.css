@@ -451,7 +451,7 @@ header.top{padding-left:max(20px,calc((100vw - 1560px) / 2));
   button.btn{height:42px}
   button.mini{height:34px}
 
-  .grid2{grid-template-columns:1fr}
+  .grid2,.grid2.pairs{grid-template-columns:1fr}
   .kpis{grid-template-columns:1fr 1fr}
   .bar input,.bar select{flex:1 1 100%}
   .bar .btn{flex:1 1 auto}
@@ -634,9 +634,12 @@ td.n.neg{color:var(--red);font-weight:650}
    not a form being filled in, and every row saved here is a row that keeps the
    margin panel on screen. */
 .place-side .sec{margin-bottom:10px}
-/* Three across, not two: the default 165px track left six client fields as three
-   rows of two, and those three rows are exactly what pushed the panel off screen. */
-.place-side .grid2{margin-top:0;grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}
+.place-side .grid2{margin-top:0}
+/* A fixed pair of columns, not auto-fit. auto-fit gives whatever number happens to
+   fit, so the last row of an odd count ends mid-row and the column edges do not
+   line up either side of a full-width row. Two columns and an even field count do.
+   It collapses to one column with every other .grid2 on a phone. */
+.grid2.pairs{grid-template-columns:repeat(2,minmax(0,1fr))}
 .place-side .grid2 .f{padding:8px 11px;box-shadow:0 0 0 1px var(--hair)}
 /* The hairlines in a .grid2 are the container's background showing through a 1px
    gap, so a row that does not divide evenly by the column count leaves a grey
