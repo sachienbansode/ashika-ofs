@@ -145,9 +145,13 @@
           <span class="fh">Quantity × price. Calculated, not typed.</span></label>
       </div>
 
-      <div class="bar" style="margin-top:14px">
-        <button class="btn ghost" id="pbCheck">Validate</button>
+      <!-- Place bid stays disabled until Validate passes, which is right but was
+           unexplained: a permanently grey primary button reads as broken. -->
+      <div class="bar pb-actions">
+        <button class="btn ghost" id="pbCheck" type="button">Validate</button>
         <button class="btn" id="pbPlace" disabled>Place bid</button>
+        <span class="fh" id="pbActionHint">Validate first — it checks the band, the
+          window and the client's margin. Nothing is sent to the exchange until you place it.</span>
       </div>
       <div id="pbResult"></div>
       <div id="pbOtp" class="hide"></div>

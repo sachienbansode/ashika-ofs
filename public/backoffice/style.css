@@ -235,13 +235,26 @@ input:focus,select:focus{border-color:var(--teal);background:#fff;
   box-shadow:0 0 0 3px rgba(23,180,185,.15);outline:none}
 input:disabled,select:disabled{background:#f3f6f9;color:#9aa9bd;cursor:not-allowed}
 
-button.btn{height:var(--ctl);padding:0 18px;font-size:13px;font-weight:600;border-radius:9px}
-button.btn.ghost{background:#fff;border:1px solid var(--edge);color:var(--navy)}
-button.btn.ghost:hover:not(:disabled){border-color:var(--teal);background:#f8fdfd}
+/* A button has to look like something you press: a real edge, a little lift off
+   the page, and a press that moves. Without those a full-width primary reads as
+   a coloured band and a ghost reads as an empty input. */
+button.btn{height:var(--ctl);padding:0 20px;font-size:13px;font-weight:600;border-radius:9px;
+  box-shadow:0 1px 2px rgba(16,32,64,.12),0 6px 16px rgba(23,180,185,.22)}
+button.btn:not(:disabled):hover{filter:brightness(1.06);transform:translateY(-1px);
+  box-shadow:0 2px 4px rgba(16,32,64,.14),0 10px 22px rgba(23,180,185,.26)}
+button.btn:not(:disabled):active{transform:translateY(1px);
+  box-shadow:0 1px 2px rgba(16,32,64,.16);filter:brightness(.97)}
+button.btn.ghost{background:#fff;border:1px solid var(--edge);color:var(--navy);
+  box-shadow:0 1px 2px rgba(16,32,64,.07)}
+button.btn.ghost:hover:not(:disabled){border-color:var(--teal);background:#f8fdfd;
+  color:var(--teal);box-shadow:0 2px 6px rgba(16,32,64,.09)}
+button.btn:focus-visible,button.mini:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+button.mini{box-shadow:0 1px 1px rgba(16,32,64,.05)}
+button.mini:not(:disabled):active{transform:translateY(1px);box-shadow:none}
 /* A disabled primary must not keep its confident gradient — that is what made
    "Place bid" look pressable when it was not. */
-button.btn:disabled,button.btn[disabled]{background:#eef2f6 !important;color:#9aa9bd !important;
-  border-color:transparent !important;box-shadow:none !important;filter:none !important;
+button.btn:disabled,button.btn[disabled]{background:#eef2f6 !important;color:#93a3b8 !important;
+  border-color:#dde5ee !important;box-shadow:none !important;filter:none !important;
   transform:none !important;opacity:1;cursor:not-allowed}
 button.mini{height:30px;padding:0 11px;font-size:11.5px;font-weight:600;border-radius:7px;
   background:#fff;border:1px solid var(--edge);color:#5a6b85;box-shadow:0 1px 1px rgba(27,42,78,.04)}
@@ -351,7 +364,14 @@ header.top{padding-left:max(20px,calc((100vw - 1560px) / 2));
 /* Place bid is a form beside a read-out, not two equal columns. */
 #pane-place .cards{grid-template-columns:minmax(320px,440px) minmax(300px,1fr)}
 #pane-place .card .bar{margin:16px 0 0}
-#pane-place .card .bar .btn{flex:1 1 auto}
+/* A button is a control, not a banner. flex:1 1 auto stretched these two across
+   the whole card — on a wide screen that is two grey bands the width of the
+   screen, which is exactly what a button should not look like. */
+#pane-place .card .bar .btn{flex:0 0 auto;min-width:138px}
+.pb-actions{gap:10px 12px;align-items:center}
+/* .fh is only styled inside a .f, and this one is a direct child of the bar. */
+.pb-actions .fh{display:block;flex:1 1 100%;margin:2px 0 0;font-size:11px;line-height:1.5;
+  color:var(--muted);text-align:left}
 
 /* ==========================================================================
    Responsive. Tables keep their columns and scroll; nothing reflows into an
@@ -407,6 +427,7 @@ header.top{padding-left:max(20px,calc((100vw - 1560px) / 2));
   .kpis{grid-template-columns:1fr 1fr}
   .bar input,.bar select{flex:1 1 100%}
   .bar .btn{flex:1 1 auto}
+  #pane-place .card .bar .btn{flex:1 1 46%}
 
   /* A toast must not sit on top of the control it is describing. */
   .toast{left:10px;right:10px;bottom:10px}
