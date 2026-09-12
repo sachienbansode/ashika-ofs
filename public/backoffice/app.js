@@ -1228,70 +1228,14 @@ function cutoffAllowed(issue, category) {
   return !issue || issue.cutoff_flag !== false;
 }
 
-/** The floor that applies to this category — Retail may have its own cut-off min. */
-function minPriceFor(issue, category) {
-  if (!issue) return null;
-  var floor = issue.floor_price == null || issue.floor_price === '' ? null : Number(issue.floor_price);
-  if (category === 'Retail') {
-    var cm = issue.cut_price_min == null || issue.cut_price_min === '' ? null : Number(issue.cut_price_min);
-    if (cm != null && cm > 0) return cm;
-  }
-  return floor != null && floor > 0 ? floor : null;
-}
-
-/**
- * The smallest quantity worth submitting.
- *
- * Retail is bounded ABOVE by the SEBI cap, so its minimum is just one lot. HNI is
- * bounded BELOW — a non-institutional bid must be at least hni_min in value — so
- * its minimum quantity is whatever clears that at the price being bid, rounded UP
- * to the lot. Rounding down would produce a number the exchange rejects.
+/*
+ * The bid arithmetic itself lives in public/shared/bidmath.js, loaded before this
+ * file and read here as BIDMATH. It used to be four functions in THIS file and
+ * another four in the client portal's, which is how the two screens could quote a
+ * client different numbers for the same issue. One copy now serves the desk, a
+ * branch or AP at /partner (the same file, served twice) and the client portal.
  */
-function minQtyFor(issue, category, price, cfg) {
-  var lot = Number(issue && issue.lot) || 1;
-  if (category !== 'HNI') return lot;
-  var p = Number(price) || minPriceFor(issue, category);
-  var floorValue = Number((cfg || {}).hni_min || 200000);
-  if (!p || !floorValue) return lot;
-  return Math.max(lot, Math.ceil(Math.ceil(floorValue / p) / lot) * lot);
-}
-
-/** The largest retail quantity that still fits under the SEBI cap at this price. */
-function maxRetailQty(issue, price, cfg) {
-  var lot = Number(issue && issue.lot) || 1;
-  var p = Number(price) || minPriceFor(issue, 'Retail');
-  var cap = Number((cfg || {}).retail_cap || 200000);
-  if (!p) return null;
-  return Math.max(0, Math.floor(Math.floor(cap / p) / lot) * lot);
-}
-
-/**
- * A suggested bid, which is what "default" means here.
- *
- *   Retail  bids at the TOP of what the cap allows — the highest price improves the
- *           chance of allotment, and the quantity is then whatever still fits.
- *   HNI     bids at the floor, the MINIMUM price, and the smallest quantity that
- *           clears the non-retail minimum.
- *
- * Both are starting points a desk is expected to change, not instructions.
- */
-function suggestedBid(issue, category, cfg) {
-  var mp = minPriceFor(issue, category);
-  if (!issue || mp == null) return null;
-  var tick = Number(issue.tick) || 0.05;
-  if (category === 'HNI') {
-    var price = mp;
-    return { price: price, qty: minQtyFor(issue, 'HNI', price, cfg),
-             why: 'HNI: the minimum price, and the smallest quantity that clears the non-retail minimum.' };
-  }
-  // Retail: the cap is on VALUE, so a higher price buys fewer shares. Bid at the
-  // floor plus nothing — the floor IS the best price for fitting under the cap —
-  // unless an indicative price is known.
-  var rp = Math.round(mp / tick) * tick;
-  return { price: Number(rp.toFixed(2)), qty: maxRetailQty(issue, rp, cfg),
-           why: 'Retail: the lowest allowed price, and the largest quantity that still fits under the ' +
-                rupee(Number((cfg || {}).retail_cap || 200000), 0) + ' cap.' };
-}
+var BIDMATH = window.OFS_BIDMATH;
 
 /** Recompute everything derived from the current form state. */
 function refreshBidForm() {
@@ -1316,10 +1260,14 @@ function refreshBidForm() {
     ex.disabled = true;
     $('#pbExchHint').textContent = i.symbol + ' is offered on ' + on + ' only.';
   } else if (on === 'BOTH') {
-    ex.innerHTML = '<option value="">Choose…</option><option value="NSE">NSE</option><option value="BSE">BSE</option>';
-    ex.value = wantedEx === 'NSE' || wantedEx === 'BSE' ? wantedEx : '';
+    ex.innerHTML = '<option value="NSE">NSE</option><option value="BSE">BSE</option>';
+    // Somebody must choose, so the form chooses — leaving it blank only moved the
+    // refusal to Validate. BIDMATH.defaultExchange is that choice, and it is the
+    // same one the client portal makes.
+    ex.value = wantedEx === 'NSE' || wantedEx === 'BSE' ? wantedEx : BIDMATH.defaultExchange(i);
     ex.disabled = false;
-    $('#pbExchHint').textContent = 'On both exchanges — this bid goes to one of them, and only that file will carry it.';
+    $('#pbExchHint').textContent = 'On both exchanges — this bid goes to ' + ex.value +
+      ', and only that file will carry it. Change it here if you want the other one.';
   } else {
     ex.innerHTML = '<option value="">—</option>';
     ex.disabled = true;
@@ -1344,23 +1292,23 @@ function refreshBidForm() {
   $('#pbPrice').disabled = isCut;
   if (isCut) $('#pbPrice').value = '';
 
-  var mp = minPriceFor(i, cat);
+  var mp = BIDMATH.minPriceFor(i, cat);
   $('#pbPriceHint').textContent = i
     ? (mp == null ? 'No floor published yet for this issue.'
                   : 'At or above ' + rupee(mp) + ', in steps of ' + inr(i.tick, 2) + '.')
     : '';
 
   var price = isCut ? mp : (Number($('#pbPrice').value) || 0);
-  var minQ = i ? minQtyFor(i, cat, price, cfg) : 1;
+  var minQ = i ? BIDMATH.minQtyFor(i, cat, price, cfg) : 1;
   $('#pbQty').min = minQ;
   $('#pbQty').step = Number(i && i.lot) || 1;
   $('#pbQtyHint').textContent = !i ? ''
     : cat === 'HNI'
       ? 'At least ' + inr(minQ, 0) + ' at this price, in multiples of ' + inr(i.lot, 0) + '.'
       : 'Multiples of ' + inr(i.lot, 0) +
-        (maxRetailQty(i, price, cfg) ? '. Up to ' + inr(maxRetailQty(i, price, cfg), 0) + ' under the retail cap.' : '');
+        (BIDMATH.maxRetailQty(i, price, cfg) ? '. Up to ' + inr(BIDMATH.maxRetailQty(i, price, cfg), 0) + ' under the retail cap.' : '');
 
-  var sug = i ? suggestedBid(i, cat, cfg) : null;
+  var sug = i ? BIDMATH.suggestedBid(i, cat, cfg) : null;
   $('#pbDefaultHint').textContent = sug ? sug.why : '';
   $('#pbDefault').disabled = !sug;
 
@@ -1380,7 +1328,7 @@ function refreshBidForm() {
 function fillSuggestedBid() {
   var i = selectedIssue();
   if (!i) return;
-  var sug = suggestedBid(i, $('#pbCat').value, STATE.settings || {});
+  var sug = BIDMATH.suggestedBid(i, $('#pbCat').value, STATE.settings || {});
   if (!sug) { toast('No suggestion', 'This issue has no published floor to work from.', 'warn'); return; }
   $('#pbType').value = 'price';
   $('#pbPrice').disabled = false;

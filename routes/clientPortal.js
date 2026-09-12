@@ -100,7 +100,7 @@ router.get('/issues', async (req, res, next) => {
     const scope = await scopeUccs(req);
     const mine = scope.length ? await rows(
       `SELECT id, ref, issue_id, client_ucc, branch_code, placed_by, category, qty, price,
-              is_cutoff, value, status, created_at
+              is_cutoff, value, status, exchange, created_at
          FROM ${SCHEMA}.ofs_bid
         WHERE client_ucc = ANY($1) AND status <> 'Cancelled'
         ORDER BY created_at DESC`, [scope]) : [];

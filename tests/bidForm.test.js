@@ -14,20 +14,20 @@ const path = require('node:path');
 const vm = require('node:vm');
 const domain = require('../lib/domain');
 
-// The form helpers are plain functions in a browser file; lift them out and run
-// them rather than re-implementing them here, so this tests the shipped code.
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'public/backoffice/app.js'), 'utf8');
-function lift(names) {
-  const ctx = { rupee: (n) => '₹' + n, inr: (n) => String(n), Math, Number, String };
-  vm.createContext(ctx);
-  for (const n of names) {
-    const m = new RegExp('function ' + n + '\\([\\s\\S]*?\\n}', 'm').exec(SRC);
-    assert.ok(m, 'could not find function ' + n + ' in app.js');
-    vm.runInContext(m[0], ctx);
-  }
-  return ctx;
+// The arithmetic is a browser file shared by all three logins; run the shipped
+// file rather than re-implementing it here, so this tests what actually loads.
+const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const SRC = read('public/backoffice/app.js');
+const ctx = vm.createContext({ Math, Number, String, isFinite });
+ctx.window = ctx;
+vm.runInContext(read('public/shared/bidmath.js'), ctx);
+// cutoffAllowed is a form rule, not arithmetic, and stays in app.js.
+for (const n of ['cutoffAllowed']) {
+  const m = new RegExp('function ' + n + '\\([\\s\\S]*?\\n}', 'm').exec(SRC);
+  assert.ok(m, 'could not find function ' + n + ' in app.js');
+  vm.runInContext(m[0], ctx);
 }
-const F = lift(['cutoffAllowed', 'minPriceFor', 'minQtyFor', 'maxRetailQty', 'suggestedBid']);
+const F = Object.assign({ cutoffAllowed: ctx.cutoffAllowed }, ctx.OFS_BIDMATH);
 
 const ISSUE = { symbol: 'COALINDIA', floor_price: 400, cut_price_min: 395, tick: 0.05, lot: 1, cutoff_flag: true };
 const CFG = { retail_cap: 200000, hni_min: 200000 };
@@ -105,4 +105,66 @@ test('a suggestion always survives the server\'s own validation', () => {
       .filter((e) => !/market|closed|cut-off of/i.test(e));   // clock-dependent, not the point here
     assert.deepEqual(errs, [], cat + ' suggestion is refused by the server: ' + errs.join(' | '));
   }
+});
+
+/* ---------------------------------------------------------------------------
+ * One copy of the arithmetic, and the exchange the form picks for you.
+ * ------------------------------------------------------------------------ */
+
+test('all three logins load the same arithmetic, and none keeps a copy', () => {
+  // /backoffice and /partner are the same file served twice, so they can never
+  // disagree. The client portal is a separate page — this is what keeps it in
+  // step, and the check that nobody quietly pastes a second copy back in.
+  for (const p of ['public/backoffice/index.html', 'public/client/index.html']) {
+    assert.match(read(p), /<script src="\/shared\/bidmath\.js"><\/script>/, p + ' does not load it');
+  }
+  for (const p of ['public/backoffice/app.js', 'public/client/client.js']) {
+    const src = read(p);
+    for (const fn of ['minPriceFor', 'minQtyFor', 'maxRetailQty', 'suggestedBid']) {
+      assert.ok(!new RegExp('function ' + fn + '\\s*\\(').test(src),
+        p + ' has its own ' + fn + ' again — that is the drift this module removed');
+    }
+  }
+});
+
+test('a both-exchange offer defaults to BSE; a single-exchange one cannot be argued with', () => {
+  assert.equal(F.defaultExchange({ exchange: 'BOTH' }), 'BSE');
+  assert.equal(F.defaultExchange({ exchange: 'both' }), 'BSE');
+  assert.equal(F.defaultExchange({ exchange: 'NSE' }), 'NSE', 'an NSE-only offer stays NSE');
+  assert.equal(F.defaultExchange({ exchange: 'BSE' }), 'BSE');
+  // Nothing to default to, and nothing invented: an issue with no exchange yet.
+  assert.equal(F.defaultExchange({ exchange: '' }), '');
+  assert.equal(F.defaultExchange(null), '');
+});
+
+test('the default the form picks is one the server will accept', () => {
+  for (const on of ['BOTH', 'NSE', 'BSE']) {
+    const issue = { exchange: on };
+    assert.equal(domain.bidExchange(issue, F.defaultExchange(issue)),
+      on === 'BOTH' ? 'BSE' : on,
+      'the form would offer an exchange the server routes elsewhere');
+  }
+});
+
+test('the desk form preselects the default instead of leaving "Choose…"', () => {
+  // The blank option was the bug: the screen asked for a choice, the person did
+  // not notice it, and Validate refused a bid that was otherwise fine.
+  assert.match(SRC, /ex\.value = wantedEx === 'NSE' \|\| wantedEx === 'BSE' \? wantedEx : BIDMATH\.defaultExchange\(i\);/);
+  assert.ok(!/<option value="">Choose…<\/option>/.test(SRC), 'the blank exchange option is gone');
+  // An existing bid's own exchange must still win over the default, or modifying
+  // a bid would quietly move it to the other exchange.
+  assert.match(SRC, /if \(bid\.exchange\) \$\('#pbExch'\)\.value = bid\.exchange;/);
+});
+
+test('a client can fill a suggested bid, and can say which exchange', () => {
+  const src = read('public/client/client.js');
+  assert.match(src, /data-bf="fill"/, 'no Fill suggested bid button on the client portal');
+  assert.match(src, /OFS_BIDMATH\.suggestedBid\(i, g\('cat'\)\.value, SETTINGS\)/);
+  assert.match(src, /function exchangeField/);
+  // Without this the client's own bid on a both-exchange offer was refused on
+  // submit for a choice the screen never offered.
+  assert.match(src, /exchange: \/\^\(NSE\|BSE\)\$\/\.test/);
+  // And an existing bid's exchange has to come back from the server, or a modify
+  // would move it.
+  assert.match(read('routes/clientPortal.js'), /is_cutoff, value, status, exchange, created_at/);
 });

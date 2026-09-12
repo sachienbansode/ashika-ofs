@@ -512,15 +512,66 @@ function bidBox(i, mine, retOpen, hniOpen) {
         '<input type="number" min="0" step="' + (Number(i.tick) || 0.05) + '" data-bf="price" ' +
         (mine && !mine.is_cutoff ? 'value="' + Number(mine.price) + '" ' : '') +
         (mine && !mine.is_cutoff ? '' : 'disabled ') + 'placeholder="At or above floor"></label>' +
+      exchangeField(i, mine) +
     '</div>' +
     '<div class="bb-verdict" data-bf="verdict"></div>' +
     '<div class="bb-actions">' +
+      '<button class="btn btn-o btn-sm" data-bf="fill">Fill suggested bid</button>' +
       '<button class="btn btn-o btn-sm" data-bf="check">Check</button>' +
       '<button class="btn btn-p btn-sm" data-bf="submit">' +
         (branch ? 'Place bid' : mine ? 'Update bid' : 'Place bid') + '</button>' +
       (mine && !branch ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
     '</div>' +
   '</div>';
+}
+
+/**
+ * Which exchange this bid goes to.
+ *
+ * An offer runs on NSE, on BSE, or on both, and one bid reaches exactly ONE of
+ * them. Where the offer is on one exchange there is nothing to choose and the
+ * field just says so. Where it is on both, somebody has to choose — and until
+ * now nobody could: this box had no exchange at all, so every bid on a
+ * both-exchange offer was refused on submit with a message about a choice the
+ * screen never offered. It defaults to the same exchange the desk's form
+ * defaults to, and can be changed here.
+ */
+function exchangeField(i, mine) {
+  var on = String(i.exchange || '').toUpperCase();
+  var pick = (mine && mine.exchange) || OFS_BIDMATH.defaultExchange(i);
+  if (on !== 'BOTH') {
+    return '<label class="bb-f"><span>Exchange</span>' +
+      '<input type="text" value="' + esc(on || '—') + '" data-bf="exch" readonly></label>';
+  }
+  return '<label class="bb-f"><span>Exchange</span><select data-bf="exch">' +
+    ['NSE', 'BSE'].map(function (x) {
+      return '<option value="' + x + '"' + (x === pick ? ' selected' : '') + '>' + x + '</option>';
+    }).join('') + '</select></label>';
+}
+
+/**
+ * Fill the form with a bid that would pass — the desk's "Fill suggested bid",
+ * on the client's own screen and computed by the same shared code, so the two
+ * never quote different numbers for the same offer.
+ *
+ * It is a starting point, not advice: everything in it can be changed, and the
+ * server checks it again either way.
+ */
+function fillSuggested(box) {
+  var i = ISSUES_BY_ID[box.getAttribute('data-bid-issue')];
+  if (!i) return;
+  var g = function (k) { return box.querySelector('[data-bf="' + k + '"]'); };
+  var sug = OFS_BIDMATH.suggestedBid(i, g('cat').value, SETTINGS);
+  if (!sug) {
+    return showVerdict(box, 'bad', ['This offer has no published floor price to work from yet.']);
+  }
+  g('type').value = 'limit';
+  g('price').disabled = false;
+  g('price').value = sug.price;
+  g('qty').value = sug.qty;
+  var ex = g('exch');
+  if (ex && ex.tagName === 'SELECT' && !ex.value) ex.value = OFS_BIDMATH.defaultExchange(i);
+  showVerdict(box, '', [sug.why, 'Check it before you place it — you can change any of it.']);
 }
 
 /** Read one card's form. `mine` decides place vs modify. */
@@ -532,7 +583,11 @@ function readBidBox(box) {
     category: g('cat').value,
     qty: Number(g('qty').value) || 0,
     is_cutoff: cutoff,
-    price: cutoff ? null : Number(g('price').value) || 0
+    price: cutoff ? null : Number(g('price').value) || 0,
+    // Only ever NSE or BSE. A single-exchange offer shows its exchange in a
+    // read-only box, and an offer with none yet shows a dash — neither is a
+    // choice, and neither belongs in the request.
+    exchange: /^(NSE|BSE)$/.test((g('exch') && g('exch').value) || '') ? g('exch').value : null
   };
   // The UCC is never in the body: the session decides whose bid this is, and that
   // is the whole reason a client cannot bid on another account by editing a request.
@@ -620,14 +675,23 @@ async function withdrawBid(box) {
 }
 
 var BIDS_BY_ISSUE = {};
+/* The issues themselves, and the caps that go with them — "Fill suggested bid"
+ * needs the floor, the tick and the lot, and the box only carries an id. */
+var ISSUES_BY_ID = {};
+var SETTINGS = {};
 
 async function loadIssues(quiet) {
   try {
     var d = await api('/client/api/issues');
     if (d.settings && d.settings.daily_cutoff) $('#cutTime').textContent = d.settings.daily_cutoff;
+    SETTINGS = d.settings || {};
     var list = d.issues || [];
     BIDS_BY_ISSUE = {};
-    list.forEach(function (i) { if (i.my_bid) BIDS_BY_ISSUE[String(i.id)] = i.my_bid; });
+    ISSUES_BY_ID = {};
+    list.forEach(function (i) {
+      ISSUES_BY_ID[String(i.id)] = i;
+      if (i.my_bid) BIDS_BY_ISSUE[String(i.id)] = i.my_bid;
+    });
     $('#clientIssues').innerHTML = list.length
       ? list.map(issueCard).join('')
       : '<div class="tbl-empty">There is no open Offer for Sale right now. ' +
@@ -848,6 +912,7 @@ async function boot() {
   $('#clientIssues').addEventListener('click', function (e) {
     var box = e.target.closest('.bidbox');
     if (!box) return;
+    if (e.target.closest('[data-bf="fill"]'))   { e.preventDefault(); fillSuggested(box); return; }
     if (e.target.closest('[data-bf="check"]'))  { e.preventDefault(); checkBid(box); return; }
     if (e.target.closest('[data-bf="submit"]')) { e.preventDefault(); submitBid(box, null); return; }
     if (e.target.closest('[data-bf="cancel"]')) { e.preventDefault(); withdrawBid(box); }
