@@ -273,7 +273,27 @@ tbody tr:hover{background:var(--tint)}
 td.n{font-weight:600;color:var(--ink)}
 td b{font-weight:600;color:var(--navy)}
 .wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* min-width:max-content stops a table ever wrapping, which is right for a book of
+   short numeric columns and wrong for the issue master: it made the table wider
+   than the screen, and because the row expander is a <tr> inside that same table,
+   the detail panel went off the right edge with it. A table that can lay out in
+   the space it has gets .fit; the scrollbar stays as the fallback below ~900px. */
 .wrap table{min-width:max-content}
+.wrap table.fit{min-width:0;width:100%}
+table.fit td{vertical-align:top}
+table.fit td.act{white-space:nowrap;text-align:right}
+table.fit td .sub{margin-top:3px;line-height:1.4}
+/* The two ends of a bidding window, stacked. The arrow marks the close so the
+   pair still reads as one span and not as two unrelated timestamps. */
+.win{font-size:11.5px;white-space:nowrap;color:var(--ink)}
+.win.to{color:var(--muted)}
+.win.to::before{content:'→ ';color:var(--muted)}
+table.fit td.m{white-space:nowrap}
+/* The audit diff is the one genuinely long cell. Let it wrap and cap it, rather
+   than let one row's JSON set the width of the whole table. */
+table.fit td.sm{white-space:normal;word-break:break-word;max-width:420px}
+table.fit td .tag,table.fit td .chip{white-space:nowrap}
+@media (max-width:1100px){ .wrap table.fit{min-width:760px} }
 .empty{color:var(--muted);text-align:center;padding:34px 16px;font-size:13px}
 
 /* ---------------------------------------------------------- chips and notes */

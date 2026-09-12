@@ -123,3 +123,40 @@ test('every addEventListener target exists in the page or is built by the script
     }
   }
 });
+
+/**
+ * The issue master fitting on the screen.
+ *
+ * The row expander is a <tr> inside the same table as the rows, so a table wider
+ * than the viewport drags the detail panel off the right edge with it — the floor,
+ * the book, the document upload, all past the fold behind a horizontal scrollbar.
+ * Two things have to hold together for that not to happen: the table must be
+ * allowed to lay out in the width it has, and it must stop asking for fourteen
+ * columns' worth of it.
+ */
+test('the issue master table is allowed to fit the screen', () => {
+  const html = read('public/backoffice/index.html');
+  const css = read('public/backoffice/style.css');
+  const js = read('public/backoffice/app.js');
+
+  assert.match(html, /<table id="issueTbl" class="fit">/,
+    'the issue table opts out of min-width:max-content');
+  assert.match(css, /\.wrap table\.fit\{min-width:0/,
+    '.fit is what lets it shrink — without the rule the class does nothing');
+  assert.match(css, /\.win\.to::before\{content:'→ '/, 'stacked window ends keep their arrow');
+
+  // The header row it renders, counted. Nine columns fit; fourteen did not.
+  const head = js.slice(js.indexOf("pagedTable('issues', $('#issueTbl')"));
+  const thead = head.slice(head.indexOf('<thead>'), head.indexOf('</tr></thead>'));
+  const cols = (thead.match(/<th[ >]/g) || []).length;   // <thead> itself starts with <th
+  assert.ok(cols <= 9, `issue table renders ${cols} columns; keep it at 9 or fewer`);
+
+  // What the columns dropped has to stay reachable, not just disappear.
+  assert.match(js, /function issueTermsHtml\(d\)/);
+  assert.match(js, /issueSummaryHtml\(d\) \+ issueTermsHtml\(d\)/,
+    'the expander shows the terms the table no longer prints');
+  for (const k of ['ISIN', 'Tick', 'Lot', 'Retail cut-off min', 'Cut-off bids']) {
+    assert.ok(js.slice(js.indexOf('function issueTermsHtml')).slice(0, 2600).includes(k),
+      `${k} moved out of the table and must appear in the expander`);
+  }
+});

@@ -774,32 +774,38 @@ async function loadBook() {
     STATE.book = b;
     renderBookTotals(b);
     pagedTable('bids', $('#bookTbl'), b, function (page) {
-      return '<thead><tr><th>Ref</th><th>Symbol</th><th>UCC</th><th>Client</th><th>Branch</th><th>PAN</th><th>Cat</th>' +
-      '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>' +
+      // Thirteen columns scrolled sideways, which on the book is worse than on the
+      // master: Status and the Modify/Cancel buttons were the ones off the edge.
+      // The reference, the client and who placed it each fold into one cell.
+      return '<thead><tr><th>Bid</th><th>Client</th><th>Branch</th><th>Cat</th>' +
+      '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th>' +
+      '<th>Status</th><th></th></tr></thead><tbody>' +
       page.map(function (x) {
         return '<tr data-bid="' + x.id + '">' +
-          '<td class="m">' + esc(x.ref) + '</td><td>' + esc(x.symbol || '') + '</td>' +
-          '<td class="m">' + esc(x.client_ucc) + '</td><td>' + esc(x.client_name || '') + '</td>' +
+          '<td class="m">' + esc(x.ref) +
+            '<div class="sub">' + esc(x.symbol || '') + '</div></td>' +
+          '<td>' + esc(x.client_name || x.client_ucc) +
+            '<div class="sub m">' + esc(x.client_ucc) +
+            (x.pan ? ' · ' + esc(x.pan) : '') + '</div></td>' +
           '<td class="m">' + esc(x.branch_code || '—') + '</td>' +
-          '<td class="m">' + esc(x.pan || '') + '</td>' +
           '<td><span class="tag ' + (x.category === 'Retail' ? 'ret' : 'hni') + '">' + esc(x.category) + '</span></td>' +
           '<td class="n">' + inr(x.qty, 0) + '</td>' +
           '<td class="n">' + (x.is_cutoff ? 'Cut-off' : inr(x.price, 2)) + '</td>' +
           '<td class="n">' + inr(x.value, 0) + '</td>' +
-          '<td><span class="st ' + statusCls(x.status) + '">' + esc(x.status) + '</span></td>' +
-          '<td>' + esc(placedByLabel(x.placed_by)) + '</td>' +
-          '<td>' + (x.status === 'Cancelled' ? '' :
+          '<td><span class="st ' + statusCls(x.status) + '">' + esc(x.status) + '</span>' +
+            '<div class="sub">by ' + esc(placedByLabel(x.placed_by)) + '</div></td>' +
+          '<td class="act">' + (x.status === 'Cancelled' ? '' :
             '<button class="mini" data-edit="' + x.id + '">Modify</button> ' +
             '<button class="mini" data-cancel="' + x.id + '">Cancel</button>') + '</td>' +
         '</tr>';
       }).join('') + '</tbody>' +
       // The page's own subtotal. Ten rows at a time means the figures above are for
       // the whole book, not for what is on screen — so say which is which.
-      '<tfoot><tr><td colspan="7">This page</td>' +
+      '<tfoot><tr><td colspan="4">This page</td>' +
         '<td class="n">' + inr(page.reduce(function (t, x) { return t + Number(x.qty || 0); }, 0), 0) + '</td>' +
         '<td></td>' +
         '<td class="n">' + inr(page.reduce(function (t, x) { return t + Number(x.value || 0); }, 0), 0) + '</td>' +
-        '<td colspan="3"></td></tr></tfoot>';
+        '<td colspan="2"></td></tr></tfoot>';
     }, 'bids', loadBook, 'No bid matches this filter.');
   } catch (e) { toast('Bid book failed', e.message, 'bad'); }
 }
@@ -1605,25 +1611,43 @@ function showMTab(t) {
 }
 function loadMasters() { showMTab(STATE.mtab); }
 
+/**
+ * One bidding window in a table cell. Two stacked lines, not one long one: a
+ * full dd-MMM-yyyy hh:mm AM stamp at each end is ~250px wide, and two of those
+ * side by side are what pushed this table off the screen.
+ */
+function windowCell(open, close) {
+  if (!open && !close) return '<span class="sub">—</span>';
+  return '<div class="win m">' + esc(dt(open)) + '</div>' +
+         '<div class="win m to">' + esc(dt(close)) + '</div>';
+}
+
 async function loadIssues() {
   try {
     var d = await api('/issues');
     var r = d.issues || [];
+    STATE.issueRows = r;
     pagedTable('issues', $('#issueTbl'), r, function (page) {
-      return '<thead><tr><th>Symbol</th><th>Company</th><th>ISIN</th><th>Exch</th>' +
-      '<th class="n">Floor</th><th class="n">Cut-off min</th><th class="n">Disc %</th>' +
-      '<th class="n">Tick</th><th class="n">Lot</th>' +
-      '<th>HNI window</th><th>Retail window</th><th>Docs</th><th>Status</th><th></th></tr></thead><tbody>' +
+      // Fourteen columns did not fit any screen, so the table scrolled sideways
+      // and took the expanded row with it. The terms nobody scans row by row —
+      // ISIN, tick, lot, discount, cut-off minimum — now sit stacked under the
+      // figure they belong to, and the whole row fits without a scrollbar.
+      return '<thead><tr><th>Scrip</th><th>Exch</th><th class="n">Floor</th>' +
+      '<th>HNI window</th><th>Retail window</th><th class="n">Terms</th>' +
+      '<th>Docs</th><th>Status</th><th></th></tr></thead><tbody>' +
       page.map(function (i) {
-        return '<tr><td><b>' + esc(i.symbol) + '</b></td><td>' + esc(i.company) + '</td>' +
-          '<td class="m">' + esc(i.isin) + '</td><td>' + esc(i.exchange) + '</td>' +
+        return '<tr><td><b>' + esc(i.symbol) + '</b>' +
+            '<div class="sub">' + esc(i.company || '—') + '</div>' +
+            '<div class="sub m">' + esc(i.isin || 'ISIN pending') + '</div></td>' +
+          '<td><span class="tag">' + esc(i.exchange) + '</span></td>' +
           // An undisclosed floor is a blank, not a zero — see migration 014.
-          '<td class="n">' + (i.floor_price == null ? '—' : inr(i.floor_price)) + '</td>' +
-          '<td class="n">' + (i.cut_price_min == null ? '—' : inr(i.cut_price_min)) + '</td>' +
-          '<td class="n">' + inr(i.discount_pct, 2) + '</td>' +
-          '<td class="n">' + inr(i.tick) + '</td><td class="n">' + inr(i.lot, 0) + '</td>' +
-          '<td class="m">' + dt(i.hni_open) + ' → ' + dt(i.hni_close) + '</td>' +
-          '<td class="m">' + dt(i.ret_open) + ' → ' + dt(i.ret_close) + '</td>' +
+          '<td class="n">' + (i.floor_price == null ? '—' : inr(i.floor_price)) +
+            '<div class="sub">cut-off ' +
+            (i.cut_price_min == null ? '—' : inr(i.cut_price_min)) + '</div></td>' +
+          '<td>' + windowCell(i.hni_open, i.hni_close) + '</td>' +
+          '<td>' + windowCell(i.ret_open, i.ret_close) + '</td>' +
+          '<td class="n">' + inr(i.discount_pct, 2) + '%' +
+            '<div class="sub">tick ' + inr(i.tick) + ' · lot ' + inr(i.lot, 0) + '</div></td>' +
           // No paperwork is worth saying out loud: the circular is what justifies
           // this issue's floor price and windows to anyone reading it later.
           '<td>' + (Number(i.doc_count) > 0
@@ -1631,13 +1655,12 @@ async function loadIssues() {
             : '<span class="chip soon" title="Open the row to attach the circular or notice">none</span>') + '</td>' +
           '<td><span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span>' +
             (i.needs_review
-              ? ' <span class="chip soon" title="' + esc(i.review_note || '') +
-                '">needs review</span>' : '') + '</td>' +
+              ? '<div class="sub" title="' + esc(i.review_note || '') + '">needs review</div>' : '') + '</td>' +
           // Open is what reaches the documents — the circular, the member notice, the
           // PDF. It was wired on the Archive table only, so for a LIVE issue, which
           // is the one that actually needs its circular attached, there was no way
           // in from this screen at all.
-          '<td><button class="mini" data-detail="' + i.id + '">Open</button> ' +
+          '<td class="act"><button class="mini" data-detail="' + i.id + '">Open</button> ' +
             '<button class="mini" data-grant="ofs-masters" data-issedit="' + i.id + '">Edit</button></td></tr>';
       }).join('') + '</tbody>';
     }, 'issues', loadIssues, 'No issue in the master yet.');
@@ -2751,20 +2774,19 @@ function importMargins() {
 /* ---------------- archive ---------------- */
 function archiveRow(i) {
   return '<tr data-arch="' + i.id + '">' +
-    '<td><b>' + esc(i.symbol) + '</b><br><span style="font-size:11px;color:var(--muted)">' +
-      esc(i.company || '') + '</span></td>' +
-    '<td class="m">' + esc(i.isin || '') + '</td>' +
-    '<td>' + esc(i.exchange) + '</td>' +
-    '<td class="m">' + (i.issue_date ? String(i.issue_date).slice(0, 10) : '—') + '</td>' +
+    '<td><b>' + esc(i.symbol) + '</b>' +
+      '<div class="sub">' + esc(i.company || '') + '</div>' +
+      '<div class="sub m">' + esc(i.isin || '') + ' · ' + esc(i.exchange) + '</div></td>' +
+    '<td class="m">' + (i.issue_date ? dtDate(i.issue_date + 'T00:00:00+05:30') : '—') + '</td>' +
     '<td class="n">' + inr(i.floor_price) + '</td>' +
-    '<td class="n">' + inr(i.bid_count, 0) + '</td>' +
-    '<td class="n">' + inr(i.client_count, 0) + '</td>' +
+    '<td class="n">' + inr(i.bid_count, 0) +
+      '<div class="sub">' + inr(i.client_count, 0) + ' client(s)</div></td>' +
     '<td class="n">' + inr(i.total_qty, 0) + '</td>' +
     '<td class="n">' + crore(i.total_value) + '</td>' +
-    '<td class="n">' + inr(i.allot_qty, 0) + '</td>' +
-    '<td class="n">' + inr(i.files_generated, 0) + '</td>' +
+    '<td class="n">' + inr(i.allot_qty, 0) +
+      '<div class="sub">' + inr(i.files_generated, 0) + ' file(s)</div></td>' +
     '<td class="m">' + (i.archived_at ? dt(i.archived_at) : '—') + '</td>' +
-    '<td><button class="mini" data-detail="' + i.id + '">Open</button> ' +
+    '<td class="act"><button class="mini" data-detail="' + i.id + '">Open</button> ' +
         '<button class="mini" data-grant="ofs-masters" data-unarch="' + i.id + '">Restore</button></td></tr>';
 }
 
@@ -2780,10 +2802,10 @@ async function loadArchive() {
     var d = await api('/issues/archive' + (q ? '?q=' + encodeURIComponent(q) : ''));
     var a = d.archived || [];
     pagedTable('archive', $('#archiveTbl'), a, function (page) {
-      return '<thead><tr><th>Scrip</th><th>ISIN</th><th>Exch</th><th>Trading day</th>' +
-      '<th class="n">Floor</th><th class="n">Bids</th><th class="n">Clients</th>' +
+      return '<thead><tr><th>Scrip</th><th>Trading day</th>' +
+      '<th class="n">Floor</th><th class="n">Bids</th>' +
       '<th class="n">Qty</th><th class="n">Value</th><th class="n">Allotted</th>' +
-      '<th class="n">Files</th><th>Archived</th><th></th></tr></thead><tbody>' +
+      '<th>Archived</th><th></th></tr></thead><tbody>' +
       page.map(archiveRow).join('') + '</tbody>';
     }, 'issues', loadArchive, 'Nothing archived yet.');
   } catch (e) { toast('Archive failed', e.message, 'bad'); }
@@ -2813,6 +2835,46 @@ function issueSummaryHtml(d) {
     money('Allotment value', crore(i.allot_value)) +
     money('Emails sent', inr(i.allot_mails_sent, 0)) +
   '</div>';
+}
+
+/**
+ * The issue's own terms, in the expander.
+ *
+ * The table above prints what a desk scans — scrip, floor, windows, status. The
+ * rest of the contract (series, BSE code, reserved quantities, whether a cut-off
+ * bid is allowed at all) lives here, one click away, instead of in four more
+ * columns nobody could read without scrolling sideways.
+ */
+function issueTermsHtml(d) {
+  var i = d.issue || {};
+  // The summary view carries the traded terms but not tick/lot/series, so borrow
+  // them from the master row when this is the Masters table. Elsewhere they are
+  // simply not shown rather than shown wrong.
+  var m = (STATE.issueRows || []).find(function (x) { return String(x.id) === String(i.id); }) || {};
+  var f = function (k, v) {
+    return '<div class="f"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
+  };
+  var num = function (v, dp) { return v == null || v === '' ? '—' : inr(v, dp); };
+  return '<h2 class="sec">Terms</h2>' +
+    '<div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
+      f('ISIN', '<span class="m">' + esc(i.isin || '—') + '</span>') +
+      f('Exchange', esc(i.exchange || '—')) +
+      (m.series ? f('Series', esc(m.series)) : '') +
+      (m.bse_scrip_code ? f('BSE scrip code', '<span class="m">' + esc(m.bse_scrip_code) + '</span>') : '') +
+      f('Floor price', i.floor_price == null ? '—' : rupee(i.floor_price)) +
+      f('Retail cut-off min', i.cut_price_min == null ? '—' : rupee(i.cut_price_min)) +
+      f('Retail discount', num(i.discount_pct, 2) + '%') +
+      (m.tick != null ? f('Tick', num(m.tick, 2)) : '') +
+      (m.lot != null ? f('Lot', num(m.lot, 0)) : '') +
+      f('Issue qty', num(i.issue_qty, 0)) +
+      f('Reserved for retail', num(i.retail_qty, 0)) +
+      f('HNI window', '<span class="m" style="font-size:11.5px">' + esc(dt(i.hni_open)) +
+        ' → ' + esc(dt(i.hni_close)) + '</span>') +
+      f('Retail window', '<span class="m" style="font-size:11.5px">' + esc(dt(i.ret_open)) +
+        ' → ' + esc(dt(i.ret_close)) + '</span>') +
+      (m.cutoff_flag === undefined ? ''
+        : f('Cut-off bids', m.cutoff_flag === false ? 'Not allowed' : 'Allowed (Retail only)')) +
+    '</div>';
 }
 
 /**
@@ -2950,7 +3012,7 @@ async function toggleIssueRow(tr, id) {
         '<button class="mini" data-expand="' + id + '">Expand</button> ' +
         '<button class="mini" data-window="' + id + '">Open in new window</button> ' +
         '<button class="mini" data-collapse="1">Close</button>' }) +
-      issueSummaryHtml(d) + docsHtml(d) + '<div class="rowdet-more hide"></div>';
+      issueSummaryHtml(d) + issueTermsHtml(d) + docsHtml(d) + '<div class="rowdet-more hide"></div>';
 
     box.addEventListener('click', function (e) {
       var x = e.target.closest('[data-expand]');

@@ -94,7 +94,7 @@
       <span class="tag" id="bkCount"></span>
     </div>
     <div class="totals" id="bkTotals"></div>
-    <div class="wrap"><table id="bookTbl"></table></div>
+    <div class="wrap"><table id="bookTbl" class="fit"></table></div>
   </section>
 
   <!-- ---------------- Place bid ---------------- -->
@@ -208,7 +208,7 @@
     <div id="mIssues">
       <div class="bar"><button class="btn" id="miSync" data-grant="ofs-masters">Pull from exchanges</button><button class="btn ghost" id="miNew" data-grant="ofs-masters">Add manually</button><button class="btn ghost" id="miImport" data-grant="ofs-masters">Import issues CSV</button><button class="mini" id="miTemplate">Download template</button></div>
       <div id="miForm" class="hide"></div>
-      <div class="wrap"><table id="issueTbl"></table></div>
+      <div class="wrap"><table id="issueTbl" class="fit"></table></div>
     </div>
     <div id="mMargins" class="hide">
       <div class="bar">
@@ -233,7 +233,7 @@
         the history below. Margins are zeroed at the start of each day — the schedule lives
         in the Stage API admin module and calls this module's reset endpoint.
       </div>
-      <div class="wrap"><table id="marginTbl"></table></div>
+      <div class="wrap"><table id="marginTbl" class="fit"></table></div>
       <div id="mgHistory"></div>
     </div>
     <div id="mArchive" class="hide">
@@ -249,7 +249,7 @@
         bids, generated files, allotments and the audit trail stay attached, and any
         archived issue can be opened in full or restored.
       </div>
-      <div class="wrap"><table id="archiveTbl"></table></div>
+      <div class="wrap"><table id="archiveTbl" class="fit"></table></div>
       <div id="arDetail"></div>
     </div>
 
@@ -378,7 +378,7 @@
         issue masters and exchange pulls; settings; margins; generated exchange files;
         allotment imports and mails; and sign-ins. Nothing here can be edited or deleted.
       </div>
-      <div class="wrap"><table id="auditTbl"></table></div>
+      <div class="wrap"><table id="auditTbl" class="fit"></table></div>
       <div class="bar" style="margin-top:10px">
         <button class="mini" id="auPrev">← Newer</button>
         <button class="mini" id="auNext">Older →</button>
