@@ -3,7 +3,7 @@
 const express = require('express');
 const { SCHEMA, rows, one } = require('../db/ofsAdapter');
 const { requirePage } = require('../middleware/pageAccess');
-const { issueStatus, catStatus, minPrice } = require('../lib/domain');
+const { issueStatus, catStatus, minPrice, openOnDay, issueOpenOnDay } = require('../lib/domain');
 const settings = require('../lib/settings');
 
 const router = express.Router();
@@ -89,6 +89,17 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
         ORDER BY greatest(i.hni_close, i.ret_close) ASC`, aggP);
 
     const now = new Date();
+    /*
+     * When the screen is showing a PAST date, "open" has to mean open on that date.
+     * catStatus answers "right now", which is the wrong question: an issue whose
+     * window ran 09:15–15:15 on the 11th is Closed now and was open all day then, so
+     * a screen headed "11-Sep" was reporting 0 open issues above three bids placed
+     * on it.
+     *
+     * Today and "all live" keep the live answer, because on those views the question
+     * really is "what can be bid on now".
+     */
+    const onDay = scope.all || scope.date === 'today' ? null : scope.date;
     const list = issues.map((i) => {
       const issueQty = Number(i.issue_qty) || 0;
       const retQty = Number(i.retail_qty) || 0;
@@ -97,6 +108,13 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
         status_label: issueStatus(i, now),
         hni_status: catStatus(i, 'HNI', now),
         ret_status: catStatus(i, 'Retail', now),
+        // Open ON THE DAY being shown. Separate from the three above on purpose:
+        // those drive what can be bid right now, this drives what is counted and
+        // listed for the date on screen, and conflating them is what caused the
+        // "0 open issues" over three bids.
+        open_on_scope: onDay ? issueOpenOnDay(i, onDay) : null,
+        ret_open_on_scope: onDay ? openOnDay(i, 'Retail', onDay) : null,
+        hni_open_on_scope: onDay ? openOnDay(i, 'HNI', onDay) : null,
         min_price_retail: minPrice(i, 'Retail'),
         min_price_hni: minPrice(i, 'HNI'),
         subscription_x: issueQty ? Number(i.total_qty) / issueQty : null,

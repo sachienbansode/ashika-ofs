@@ -420,11 +420,16 @@ function issueCard(i) {
         '<div class="isin">' + esc(i.isin) + ' · ' + esc(i.exchange) + '</div>' +
       '</div>' +
       '<span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span>' +
+      // On a past date the live status still shows — it is true — but what mattered
+      // that day is said alongside it, or a "Closed" chip over that day's bids reads
+      // as a contradiction.
+      (i.open_on_scope ? '<span class="chip open" style="margin-left:6px">was open</span>' : '') +
     '</div>' +
     '<div class="grid2">' +
       '<div class="f"><div class="k">Floor</div><div class="v">' + rupee(i.floor_price) + '</div></div>' +
       '<div class="f"><div class="k">Retail cut-off min</div><div class="v">' + rupee(i.min_price_retail) + '</div></div>' +
-      '<div class="f"><div class="k">Bids</div><div class="v">' + inr(i.bid_count, 0) + ' · ' + inr(i.client_count, 0) + ' clients</div></div>' +
+      '<div class="f"><div class="k">Bids</div><div class="v">' + inr(i.bid_count, 0) + '</div></div>' +
+      '<div class="f"><div class="k">Clients applied</div><div class="v">' + inr(i.client_count, 0) + '</div></div>' +
       '<div class="f"><div class="k">Quantity</div><div class="v">' + inr(i.total_qty, 0) + '</div></div>' +
       '<div class="f"><div class="k">Value</div><div class="v">' + crore(total) + '</div></div>' +
       '<div class="f"><div class="k">Subscription</div><div class="v">' +
@@ -454,7 +459,15 @@ function issueCard(i) {
 function renderDash(d) {
   var t = d.totals || {};
   var all = d.issues || [];
-  var open = all.filter(isBiddable);
+  /*
+   * "Open" means open ON THE DAY SHOWN. For today and for the whole live book that
+   * is the same as biddable-right-now; for a past date it is not, and the screen was
+   * reporting 0 open issues above three bids placed on that very issue that day.
+   */
+  var onDay = all.length && all[0].open_on_scope !== null && all[0].open_on_scope !== undefined;
+  var open = onDay
+    ? all.filter(function (i) { return i.open_on_scope; })
+    : all.filter(isBiddable);
   // Default to what can be bid on. A closed issue on the dashboard is history, and
   // history mixed in with the live book is how the wrong one gets picked.
   var showAll = $('#dashShowAll') && $('#dashShowAll').checked;
@@ -471,9 +484,12 @@ function renderDash(d) {
     : inr(live.bids, 0) + ' live in all · ' + crore(live.value);
 
   $('#kpis').innerHTML =
-    kpiCard('Open issues', String(open.length), 'of ' + all.length + ' tracked') +
-    kpiCard('Bids ' + scopeWord, inr(t.bids, 0),
-      inr(t.clients, 0) + ' client(s)' + (alsoLive ? ' · ' + alsoLive : '')) +
+    kpiCard(onDay ? 'Open ' + scopeWord : 'Open issues', String(open.length),
+      'of ' + all.length + ' tracked') +
+    kpiCard('Bids ' + scopeWord, inr(t.bids, 0), alsoLive || 'placed') +
+    // Distinct clients, not bids. One client bidding on three issues is one client
+    // applied, and it is the number the desk is asked for.
+    kpiCard('Clients ' + scopeWord, inr(t.clients, 0), 'unique UCCs applied') +
     kpiCard('Quantity ' + scopeWord, inr(t.qty, 0), 'shares bid') +
     kpiCard('Value ' + scopeWord, crore(t.value),
       alsoLive ? 'whole live book ' + crore(live.value) : 'across all issues') +
@@ -501,8 +517,11 @@ function renderDash(d) {
   $('#issueCards').innerHTML = shown.length
     ? shown.map(issueCard).join('')
     : '<div class="empty">' + (all.length
-        ? 'No OFS is open for bidding right now. Tick "Show closed too" to see the ' +
-          all.length + ' tracked issue(s).'
+        ? (onDay
+            ? 'No OFS was open on ' + esc(scopeWord.replace(/^on /, '')) + '. Tick "Show closed too" to see the ' +
+              all.length + ' tracked issue(s).'
+            : 'No OFS is open for bidding right now. Tick "Show closed too" to see the ' +
+              all.length + ' tracked issue(s).')
         : 'No OFS issue. Add one under Masters → Issues.') + '</div>';
 
   var r = d.recent || [];
@@ -712,9 +731,13 @@ function renderBookTotals(rows) {
     live.length + ' bid(s) · ' + clients + ' client(s)';
 
   var cell = function (label, cls, list) {
+    // Unique clients per leg. Retail and Non-Retail are allotted against separate
+    // reserved quantities, so "how many clients are in each" is a real question and
+    // the two counts do not add up to the overall one — a client can be in both.
+    var uniq = new Set(list.map(function (x) { return x.client_ucc; })).size;
     return '<div class="tot ' + cls + '">' +
       '<div class="k">' + esc(label) + '</div>' +
-      '<div class="n">' + inr(list.length, 0) + ' bid(s)</div>' +
+      '<div class="n">' + inr(list.length, 0) + ' bid(s) · ' + inr(uniq, 0) + ' client(s)</div>' +
       '<div class="q">' + inr(sum(list, function (x) { return x.qty; }), 0) + ' shares</div>' +
       '<div class="v">' + rupee(sum(list, function (x) { return x.value; }), 0) + '</div>' +
     '</div>';
