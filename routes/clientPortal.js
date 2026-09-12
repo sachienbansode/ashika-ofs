@@ -8,13 +8,15 @@ const { SCHEMA, rows, one } = require('../db/ofsAdapter');
 const { requireClient, requireSingleClient } = require('../middleware/clientAuth');
 const branches = require('../db/branchAdapter');
 const ba = require('../lib/branchAuth');
-const { issueStatus, catStatus, minPrice, validateBid } = require('../lib/domain');
+const { issueStatus, catStatus, minPrice, validateBid, openOnDay, issueOpenOnDay,
+        marketState, closedMessage } = require('../lib/domain');
 const settings = require('../lib/settings');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
 const dbErr = require('../lib/dbErrors');
 const bidOtp = require('../lib/bidOtp');
 const ld = require('../db/ldAdapter');
+const pii = require('../lib/pii');
 
 const router = express.Router();
 router.use(requireClient);
@@ -40,6 +42,26 @@ async function scopeUccs(req) {
 }
 
 /** How this session describes itself on screen. */
+/**
+ * Mask contact details for a branch or an AP.
+ *
+ * ld.enrich hands back pan, mobile and email raw, and these rows go to a branch
+ * session — which is not the desk. An AP already knows their own clients, so full
+ * PAN and email on the screen add exposure without adding capability, and the same
+ * rows go out in the CSV, which leaves the building.
+ *
+ * A CLIENT session is left alone: masking someone's own address back at them is
+ * noise, and it is their address.
+ */
+function maskPortalRows(req, list) {
+  if (!req.portal || req.portal.kind === 'client') return list;
+  return (list || []).map((r) => Object.assign({}, r, {
+    pan: r.pan ? pii.maskPan(r.pan) : r.pan,
+    mobile: r.mobile ? pii.maskMobile(r.mobile) : r.mobile,
+    email: r.email ? pii.maskEmail(r.email) : r.email
+  }));
+}
+
 function whoAmI(req) {
   const p = req.portal || {};
   return {
@@ -149,7 +171,9 @@ router.get('/me/bids', async (req, res, next) => {
 
     // Client names for a branch list; a branch reading a column of bare UCCs cannot
     // tell which of its clients is which.
-    const withNames = req.portal.kind === 'client' ? b : await ld.enrich(b, 'client_ucc');
+    const withNames = req.portal.kind === 'client'
+      ? b
+      : maskPortalRows(req, await ld.enrich(b, 'client_ucc'));
 
     // Margin is a per-client fact, so it is only meaningful on a client session.
     let margin = null;
@@ -202,7 +226,16 @@ router.get('/me/clients', async (req, res, next) => {
                branch: c.branch_id || null, active: c.is_active === true };
     });
     if (q) list = list.filter((c) => c.ucc.includes(q) || String(c.name || '').toUpperCase().includes(q));
-    res.json({ actor: whoAmI(req), clients: list, total: list.length });
+
+    // Paged on the SERVER. 121 clients is already too many to scroll, and the AP
+    // with the biggest book has several hundred — a screen that renders all of them
+    // and lets the browser sort it out is the one that stops being usable first.
+    const total = list.length;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const all = String(req.query.all || '') === '1';        // the CSV wants everything
+    const page = all ? list : list.slice(offset, offset + limit);
+    res.json({ actor: whoAmI(req), clients: page, total, limit, offset, q: q || null });
   } catch (e) { next(e); }
 });
 
@@ -517,6 +550,148 @@ router.delete('/branch/bids/:id(\\d+)', async (req, res, next) => {
     await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
     res.json({ bid: r });
   } catch (e) { dbErr.send(res, next, e); }
+});
+
+
+/* ------------------------------------------------------------ MIS: dashboard --
+ * The desk's dashboard, scoped to one branch's clients.
+ *
+ * Deliberately the SAME response shape as /api/dashboard, because the back-office
+ * screen is the screen an AP gets: one renderer, one set of figures, one place to
+ * fix a rounding bug. What differs is the WHERE clause, and it is applied once here
+ * rather than trusted to the page.
+ *
+ * Every bid figure counts bids on this branch's clients whoever placed them - the
+ * branch itself, the back office, or the client signing in and bidding for
+ * themselves. An AP asking "how much has my book applied for" is not asking "how
+ * much did I type in".
+ */
+router.get('/me/dashboard', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const s = await settings.all();
+    const scope = await scopeUccs(req);
+    const market = marketState(s, now);
+
+    // as_on: one IST day, or the whole live book. Same contract as the desk's.
+    const asOn = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.as_on || '')) ? String(req.query.as_on) : null;
+    const all = String(req.query.scope || '') === 'all';
+    const dayClause = (alias, params) => {
+      if (all) return '';
+      if (!asOn) {
+        return ` AND (${alias}.created_at AT TIME ZONE 'Asia/Kolkata')::date`
+             + ` = (now() AT TIME ZONE 'Asia/Kolkata')::date`;
+      }
+      params.push(asOn);
+      return ` AND (${alias}.created_at AT TIME ZONE 'Asia/Kolkata')::date = $${params.length}::date`;
+    };
+
+    const empty = {
+      server_time: now.toISOString(), scope: all ? 'all' : (asOn || 'today'), as_on: asOn,
+      actor: whoAmI(req), settings: s,
+      market: { open: market.open, reason: market.reason, opens: market.opens,
+                closes: market.closes, effective_close: market.effectiveClose,
+                cutoff_applies: market.cutoffApplies, minutes_left: market.minutesLeft,
+                message: market.open ? null : closedMessage(market) },
+      issues: [], totals: { bids: 0, qty: 0, value: 0, clients: 0 },
+      all_live: { bids: 0, value: 0 }, recent: []
+    };
+    if (!scope.length) return res.json(empty);
+
+    /* Issues, with this branch's own numbers on them. A LEFT JOIN so an issue with
+     * no bids from this branch still appears - "nothing applied yet" is a fact the
+     * screen has to be able to show, and an inner join would hide it. */
+    const iParams = [scope];
+    const iDay = dayClause('b', iParams);
+    const issues = await rows(
+      `SELECT i.*,
+              COALESCE(x.bids, 0)      AS bid_count,
+              COALESCE(x.clients, 0)   AS client_count,
+              COALESCE(x.qty, 0)       AS total_qty,
+              COALESCE(x.value, 0)     AS total_value,
+              COALESCE(x.ret_value, 0) AS ret_value,
+              COALESCE(x.hni_value, 0) AS hni_value,
+              COALESCE(x.ret_qty, 0)   AS ret_qty,
+              COALESCE(x.hni_qty, 0)   AS hni_qty,
+              x.vwap
+         FROM ${SCHEMA}.ofs_issue i
+         LEFT JOIN (
+           SELECT b.issue_id,
+                  count(*)::int                        AS bids,
+                  count(DISTINCT b.client_ucc)::int    AS clients,
+                  sum(b.qty)                           AS qty,
+                  sum(b.value)                         AS value,
+                  sum(b.value) FILTER (WHERE b.category = 'Retail') AS ret_value,
+                  sum(b.value) FILTER (WHERE b.category = 'HNI')    AS hni_value,
+                  sum(b.qty)   FILTER (WHERE b.category = 'Retail') AS ret_qty,
+                  sum(b.qty)   FILTER (WHERE b.category = 'HNI')    AS hni_qty,
+                  CASE WHEN sum(b.qty) FILTER (WHERE NOT b.is_cutoff) > 0
+                       THEN sum(b.qty * b.price) FILTER (WHERE NOT b.is_cutoff)
+                          / sum(b.qty) FILTER (WHERE NOT b.is_cutoff) END AS vwap
+             FROM ${SCHEMA}.ofs_bid b
+            WHERE b.client_ucc = ANY($1) AND b.status = 'Live'${iDay}
+            GROUP BY b.issue_id
+         ) x ON x.issue_id = i.id
+        WHERE i.archived_at IS NULL
+        ORDER BY i.id DESC`, iParams);
+
+    const onDay = all || !asOn ? null : asOn;
+    const list = issues.map((i) => {
+      const issueQty = Number(i.issue_qty) || 0;
+      const retQty = Number(i.retail_qty) || 0;
+      return Object.assign({}, i, {
+        status_label: issueStatus(i, now),
+        hni_status: catStatus(i, 'HNI', now),
+        ret_status: catStatus(i, 'Retail', now),
+        open_on_scope: onDay ? issueOpenOnDay(i, onDay) : null,
+        ret_open_on_scope: onDay ? openOnDay(i, 'Retail', onDay) : null,
+        hni_open_on_scope: onDay ? openOnDay(i, 'HNI', onDay) : null,
+        min_price_retail: minPrice(i, 'Retail'),
+        min_price_hni: minPrice(i, 'HNI'),
+        // Subscription is against the WHOLE issue, not against this branch, so it
+        // stays meaningless here and is sent as null rather than as a fraction of a
+        // number nobody asked about.
+        subscription_x: null,
+        ret_subscription_x: null,
+        hni_subscription_x: null,
+        our_vwap: i.vwap == null ? null : Number(i.vwap)
+      });
+    });
+
+    const tParams = [scope];
+    const tDay = dayClause('ofs_bid', tParams);
+    const totals = await one(
+      `SELECT count(*)::int AS bids, COALESCE(sum(qty),0)::bigint AS qty,
+              COALESCE(sum(value),0) AS value, count(DISTINCT client_ucc)::int AS clients
+         FROM ${SCHEMA}.ofs_bid
+        WHERE client_ucc = ANY($1) AND status = 'Live'${tDay}`, tParams);
+
+    const allLive = await one(
+      `SELECT count(*)::int AS bids, COALESCE(sum(value),0) AS value
+         FROM ${SCHEMA}.ofs_bid WHERE client_ucc = ANY($1) AND status = 'Live'`, [scope]);
+
+    const rParams = [scope];
+    const rDay = dayClause('b', rParams);
+    const recent = await rows(
+      `SELECT b.id, b.ref, b.client_ucc, b.branch_code, b.placed_by, b.category, b.qty,
+              b.price, b.is_cutoff, b.value, b.status, b.created_at, i.symbol
+         FROM ${SCHEMA}.ofs_bid b
+         LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
+        WHERE b.client_ucc = ANY($1)${rDay}
+        ORDER BY b.created_at DESC LIMIT 15`, rParams);
+
+    res.json(Object.assign({}, empty, {
+      issues: list,
+      totals: {
+        bids: (totals && totals.bids) || 0,
+        qty: Number((totals && totals.qty) || 0),
+        value: Number((totals && totals.value) || 0),
+        clients: (totals && totals.clients) || 0
+      },
+      all_live: { bids: (allLive && allLive.bids) || 0, value: Number((allLive && allLive.value) || 0) },
+      recent: maskPortalRows(req, await ld.enrich(recent, 'client_ucc'))
+    }));
+  } catch (e) { next(e); }
 });
 
 module.exports = router;

@@ -169,12 +169,15 @@
 
   <div id="cpane-clients" class="hide">
     <div class="card"><div class="card-b">
-      <div class="bar" style="margin-bottom:10px">
-        <input type="text" id="clQ" placeholder="Search UCC or name" style="flex:1 1 220px">
+      <div class="bar cl-bar">
+        <input type="search" id="clQ" placeholder="Search UCC or name" autocomplete="off">
         <button class="btn btn-o btn-sm" id="clGo">Search</button>
+        <button class="btn btn-o btn-sm" id="clClear">Clear</button>
+        <span class="sp"></span>
         <span class="tag" id="clCount"></span>
       </div>
-      <div class="wrap"><table id="clientTbl"></table></div>
+      <div class="wrap"><table id="clientTbl" class="fit"></table></div>
+      <div class="bar cl-page" id="clPager"></div>
     </div></div>
   </div>
 

@@ -682,6 +682,9 @@ async function loadIssues(quiet) {
       ? list.map(issueCard).join('')
       : '<div class="tbl-empty">There is no open Offer for Sale right now. ' +
         'Issues appear here as soon as Ashika publishes them.</div>';
+    // A client chosen on My clients is carried across to whichever bid box is
+    // rendered here, so the UCC never has to be typed twice.
+    applyPendingUcc();
   } catch (e) {
     if (e.status === 401) return sessionLost();
     if (!quiet) toast('Could not load issues', e.message, 'bad');
@@ -802,25 +805,91 @@ async function downloadBidsCsv() {
 }
 
 /** The clients this branch may act for. */
-async function loadClients() {
+/* --------------------------------------------------------------- my clients --
+ * Paged on the server, ten at a time, with a Bid button on every row.
+ *
+ * The list used to render every client the branch has and stop there: 121 rows of
+ * scrolling, and then you had to remember the UCC, switch to Open issues and type
+ * it in by hand. The button carries the UCC across, which is the only thing that
+ * screen was being used to look up.
+ */
+var CL = { offset: 0, limit: 10, q: '', total: 0 };
+
+async function loadClients(reset) {
+  if (reset) CL.offset = 0;
+  CL.q = ($('#clQ').value || '').trim();
   try {
-    var q = $('#clQ').value.trim();
-    var d = await api('/client/api/me/clients' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    var qs = 'limit=' + CL.limit + '&offset=' + CL.offset + (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
+    var d = await api('/client/api/me/clients?' + qs);
     var list = d.clients || [];
-    $('#clCount').textContent = list.length + ' client(s)';
+    CL.total = Number(d.total) || 0;
+
+    // "121 client(s)" is the whole book; on a filtered or paged view the desk also
+    // needs to know which of them is on the screen.
+    var from = CL.total ? CL.offset + 1 : 0;
+    var to = Math.min(CL.offset + CL.limit, CL.total);
+    $('#clCount').textContent = CL.total
+      ? from + '–' + to + ' of ' + CL.total + (CL.q ? ' matching' : '') + ' client(s)'
+      : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
+
     $('#clientTbl').innerHTML = list.length ? (
-      '<thead><tr><th>UCC</th><th>Name</th><th>Category</th><th>Status</th></tr></thead><tbody>' +
+      '<thead><tr><th>UCC</th><th>Name</th><th>Category</th><th>Status</th><th></th></tr></thead><tbody>' +
       list.map(function (c) {
-        return '<tr><td class="m">' + esc(c.ucc) + '</td><td>' + esc(c.name || '') + '</td>' +
-          '<td>' + esc(c.category || '') + '</td>' +
+        return '<tr><td class="m">' + esc(c.ucc) + '</td>' +
+          '<td>' + esc(c.name || '—') + '</td>' +
+          '<td>' + esc(c.category || '—') + '</td>' +
           '<td><span class="chip ' + (c.active ? 'open' : 'grey') + '">' +
-            (c.active ? 'Active' : 'Inactive') + '</span></td></tr>';
+            (c.active ? 'Active' : 'Inactive') + '</span></td>' +
+          // Only an active client can be bid for, so an inactive row says why
+          // rather than offering a button that leads to a refusal.
+          '<td class="act">' + (c.active
+            ? '<button class="btn btn-o btn-sm" data-bidfor="' + esc(c.ucc) + '">Place bid</button>'
+            : '<span class="cl-no">cannot bid</span>') + '</td></tr>';
       }).join('') + '</tbody>'
-    ) : '<tbody><tr><td class="tbl-empty">No clients are mapped to your branch.</td></tr></tbody>';
+    ) : ('<tbody><tr><td class="tbl-empty">' +
+         (CL.q ? 'No client matches that search.' : 'No clients are mapped to your branch.') +
+         '</td></tr></tbody>');
+
+    renderClPager();
   } catch (e) {
     if (e.status === 401) return sessionLost();
     toast('Could not load clients', e.message, 'bad');
   }
+}
+
+function renderClPager() {
+  var el = $('#clPager');
+  if (!el) return;
+  var pages = Math.max(1, Math.ceil(CL.total / CL.limit));
+  var page = Math.floor(CL.offset / CL.limit) + 1;
+  if (CL.total <= CL.limit) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    '<button class="btn btn-o btn-sm" data-clpage="prev"' + (CL.offset <= 0 ? ' disabled' : '') + '>Previous</button>' +
+    '<span class="tag">Page ' + page + ' of ' + pages + '</span>' +
+    '<button class="btn btn-o btn-sm" data-clpage="next"' +
+      (CL.offset + CL.limit >= CL.total ? ' disabled' : '') + '>Next</button>';
+}
+
+/**
+ * Jump to Open issues with this client already filled in.
+ *
+ * If exactly one issue is open it opens that bid box outright; with more than one
+ * there is nothing to guess, so the UCC is remembered and applied to whichever box
+ * the branch opens next.
+ */
+function bidForClient(ucc) {
+  PENDING_UCC = String(ucc || '').trim().toUpperCase();
+  showTab('issues');
+  applyPendingUcc();
+  toast('Bidding for ' + PENDING_UCC, 'Choose the offer, then place the bid.', 'ok');
+}
+var PENDING_UCC = '';
+function applyPendingUcc() {
+  if (!PENDING_UCC) return;
+  var f = $('[data-bf="ucc"]');
+  if (!f) return;                       // no bid box open yet; applied when one is
+  f.value = PENDING_UCC;
+  f.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 async function loadAllotments() {
@@ -910,8 +979,21 @@ async function boot() {
   });
   $('#signOutBtn').addEventListener('click', signOut);
   $('#bidsCsv').addEventListener('click', downloadBidsCsv);
-  $('#clGo').addEventListener('click', loadClients);
-  $('#clQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadClients(); });
+  // reset:true on every new search — staying on page 7 of a list that now has two
+  // rows shows an empty table and looks like the search found nothing.
+  $('#clGo').addEventListener('click', function () { loadClients(true); });
+  $('#clQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadClients(true); });
+  $('#clClear').addEventListener('click', function () { $('#clQ').value = ''; loadClients(true); });
+  $('#clPager').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-clpage]');
+    if (!b || b.disabled) return;
+    CL.offset = Math.max(0, CL.offset + (b.dataset.clpage === 'next' ? CL.limit : -CL.limit));
+    loadClients();
+  });
+  $('#clientTbl').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-bidfor]');
+    if (b) bidForClient(b.dataset.bidfor);
+  });
   $$('#cTabs button').forEach(function (b) {
     b.addEventListener('click', function () { showCTab(b.dataset.ctab); });
   });
