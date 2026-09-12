@@ -90,3 +90,39 @@ test('no route builds its own copy any more', () => {
   assert.match(chk, /mailCheckEmail\(/);
   assert.ok(!/html: '<p>/.test(chk));
 });
+
+/**
+ * The logo in the header.
+ *
+ * It is a hosted URL, not inline base64, because mail clients block base64 — which
+ * means the URL has to be right on a machine nobody is looking at. The fallback was
+ * inherited from the parent app and pointed at the PORTAL's domain, where OFS's logo
+ * path does not exist: a broken image in every sign-in code, and nothing in any log
+ * to say so.
+ */
+const bd = require('../lib/emailBranding');
+
+test('the logo URL points at this app, whatever the environment says', () => {
+  const saved = { a: process.env.APP_URL, p: process.env.PUBLIC_BASE_URL, b: process.env.BRAND_LOGO_URL };
+  const clear = () => { delete process.env.APP_URL; delete process.env.PUBLIC_BASE_URL; delete process.env.BRAND_LOGO_URL; };
+  try {
+    clear();
+    assert.equal(bd.appUrl(), 'https://ofs-bids.ashikagroup.com',
+      'not the portal — the portal serves its logo at /brand-logo.png, this app at /shared/brand-logo.png');
+    assert.match(bd.brandedEmail('x'), /src="https:\/\/ofs-bids\.ashikagroup\.com\/shared\/brand-logo\.png"/);
+
+    clear();
+    process.env.APP_URL = 'https://ofs-bids.ashikagroup.com/';
+    assert.equal(bd.appUrl(), 'https://ofs-bids.ashikagroup.com', 'a trailing slash does not double up');
+    assert.ok(!/\/\/shared\//.test(bd.brandedEmail('x')));
+
+    clear();
+    process.env.BRAND_LOGO_URL = 'https://cdn.example.com/a.png';
+    assert.match(bd.brandedEmail('x'), /src="https:\/\/cdn\.example\.com\/a\.png"/, 'the override still wins');
+  } finally {
+    clear();
+    if (saved.a) process.env.APP_URL = saved.a;
+    if (saved.p) process.env.PUBLIC_BASE_URL = saved.p;
+    if (saved.b) process.env.BRAND_LOGO_URL = saved.b;
+  }
+});

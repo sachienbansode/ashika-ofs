@@ -89,7 +89,10 @@ for (const k of ['APP_URL', 'PUBLIC_BASE_URL']) {
   if (E[k] && !/^https?:\/\//.test(E[k])) flag(k, 'should be a full URL');
   else if (E[k] && /example\.com/i.test(E[k])) flag(k, 'still the template placeholder');
 }
-if (!E.APP_URL && !E.PUBLIC_BASE_URL) flag('APP_URL', 'unset — email links will fall back to the UAT portal URL');
+if (!E.APP_URL && !E.PUBLIC_BASE_URL) flag('APP_URL',
+  'unset — email links and the logo fall back to https://ofs-bids.ashikagroup.com. '
+  + 'Set it explicitly: the logo is served by THIS app at /shared/brand-logo.png, so a '
+  + 'wrong host is a broken image in every email and nothing logs it');
 
 console.log('\nBusiness defaults');
 ok('retail cap / HNI min', (E.OFS_RETAIL_CAP || '200000') + ' / ' + (E.OFS_HNI_MIN || '200000'));
