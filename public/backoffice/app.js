@@ -460,11 +460,23 @@ function renderDash(d) {
   var showAll = $('#dashShowAll') && $('#dashShowAll').checked;
   var shown = showAll ? all : open;
 
+  var scopeWord = d.scope === 'all' ? 'all live'
+                : d.as_on ? 'on ' + dtDate(d.as_on + 'T00:00:00+05:30')
+                : 'today';
+  var live = d.all_live || {};
+  // "Bids today" is not the same number as "bids in the file", and a desk that
+  // reads one as the other generates a file it did not expect. Both, labelled.
+  var alsoLive = d.scope === 'all' || !live.bids || live.bids === t.bids
+    ? null
+    : inr(live.bids, 0) + ' live in all · ' + crore(live.value);
+
   $('#kpis').innerHTML =
     kpiCard('Open issues', String(open.length), 'of ' + all.length + ' tracked') +
-    kpiCard('Live bids', inr(t.bids, 0), inr(t.clients, 0) + ' clients') +
-    kpiCard('Total quantity', inr(t.qty, 0), 'shares bid') +
-    kpiCard('Total value', crore(t.value), 'across all issues') +
+    kpiCard('Bids ' + scopeWord, inr(t.bids, 0),
+      inr(t.clients, 0) + ' client(s)' + (alsoLive ? ' · ' + alsoLive : '')) +
+    kpiCard('Quantity ' + scopeWord, inr(t.qty, 0), 'shares bid') +
+    kpiCard('Value ' + scopeWord, crore(t.value),
+      alsoLive ? 'whole live book ' + crore(live.value) : 'across all issues') +
     kpiCard('Desk cut-off', esc((d.settings && d.settings.daily_cutoff) || '15:15'), 'IST daily');
 
   // The book in one line, split the way the exchange splits it.
@@ -478,8 +490,9 @@ function renderDash(d) {
       ? '<span><i class="dot r"></i>Retail <b>' + inr(rq, 0) + '</b> shares · <b>' + crore(rv) + '</b></span>' +
         '<span><i class="dot h"></i>HNI <b>' + inr(hq, 0) + '</b> shares · <b>' + crore(hv) + '</b></span>' +
         '<span>Total <b>' + inr(t.qty, 0) + '</b> shares · <b>' + crore(t.value) + '</b> from <b>' +
-          inr(t.clients, 0) + '</b> client(s)</span>'
-      : '<span>No bids ' + (d.as_on ? 'on ' + dtDate(d.as_on + 'T00:00:00+05:30') : 'today') + ' yet.</span>';
+          inr(t.clients, 0) + '</b> client(s), ' + esc(scopeWord) + '</span>'
+      : '<span>No bids ' + esc(scopeWord === 'all live' ? 'at all' : scopeWord) + '.' +
+        (alsoLive ? ' <b>' + esc(alsoLive) + '</b> from earlier days.' : '') + '</span>';
   }
 
   var lbl = $('#dashShowAllLbl');
@@ -510,8 +523,7 @@ function renderDash(d) {
 
 async function loadDash() {
   try {
-    var asOn = asOnParam('#dashAsOn');
-    var d = await api('/dashboard' + (asOn ? '?as_on=' + encodeURIComponent(asOn) : ''));
+    var d = await api('/dashboard' + dashQuery());
     STATE.dash = d;
     STATE.issues = d.issues || [];
     // The caps the bid form works from — retail cap, HNI minimum, cut-off — come
@@ -520,16 +532,20 @@ async function loadDash() {
     renderDash(d);
     fillIssueSelects();
     refreshBidForm();
-    markRefreshed(asOnParam('#dashAsOn') ? 'pinned' : null);
+    markRefreshed(d.as_on ? 'pinned' : null);
     var dd = $('#dashDate');
     if (dd) dd.textContent = dtDate(d.server_time) + ' · ' + dtTime(d.server_time) + ' IST';
+    // Say which day every figure on this screen is describing. Ambiguity here is
+    // what made "6 live bids" and "No bids yet" look like a contradiction.
     var note = $('#dashAsOnNote');
     if (note) {
-      note.textContent = d.as_on
-        ? 'As it stood on ' + dtDate(d.as_on + 'T00:00:00+05:30') + ' — auto-refresh is paused'
-        : "Today's bids";
-      note.classList.toggle('warn-tag', !!d.as_on);
+      note.textContent = d.scope === 'all' ? 'Every live bid'
+        : d.as_on ? 'As on ' + dtDate(d.as_on + 'T00:00:00+05:30') + ' — auto-refresh paused'
+        : "Today's bids only";
+      note.classList.toggle('warn-tag', !!d.as_on || d.scope === 'all');
     }
+    var wrap = $('#dashAsOnWrap');
+    if (wrap) wrap.classList.toggle('hide', d.scope === 'all');
   } catch (e) {
     if (e.status === 401) {
       // The session died under us - stop polling and say so, rather than
@@ -3041,7 +3057,8 @@ function setAutoRefresh() {
   var ms = Number($('#autoRefresh').value) || 0;
   // Today is not a pin. Only a PAST date stops the refresh, because a past day
   // cannot change and today very much can.
-  var pinned = !!asOnParam('#dashAsOn');
+  var pinned = !!asOnParam('#dashAsOn') &&
+    !($('#dashScope') && $('#dashScope').value === 'all');
   if (ms && !pinned) {
     STATE.timer = setInterval(function () {
       loadDash();
@@ -3049,6 +3066,20 @@ function setAutoRefresh() {
     }, ms);
   }
   markRefreshed(pinned ? 'pinned' : null);
+}
+
+/**
+ * What the dashboard is being asked for.
+ *
+ * One scope for the whole screen. The KPIs, the per-issue cards and the activity
+ * list all take this — the bug was that the list defaulted to today while the totals
+ * counted every live bid, so the screen showed 6 bids worth ₹6.38 L above a panel
+ * reading "No bids yet". Both numbers were real; neither said which day it meant.
+ */
+function dashQuery() {
+  if ($('#dashScope') && $('#dashScope').value === 'all') return '?scope=all';
+  var asOn = asOnParam('#dashAsOn');
+  return asOn ? '?as_on=' + encodeURIComponent(asOn) : '';
 }
 
 /** When the figures on screen were last read, in the desk's own timezone. */
@@ -3148,6 +3179,7 @@ async function boot() {
   $('#autoRefresh').addEventListener('change', setAutoRefresh);
   $('#dashAsOn').addEventListener('change', function () { setAutoRefresh(); loadDash(); });
   $('#dashShowAll').addEventListener('change', function () { if (STATE.dash) renderDash(STATE.dash); });
+  $('#dashScope').addEventListener('change', function () { setAutoRefresh(); loadDash(); });
   $('#dashToday').addEventListener('click', function () {
     $('#dashAsOn').value = todayIST(); setAutoRefresh(); loadDash();
   });

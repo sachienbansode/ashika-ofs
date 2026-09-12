@@ -49,7 +49,12 @@
     <div class="bar">
       <b id="dashDate" style="font-size:13px"></b>
       <div class="sp"></div>
-      <label class="inline"><span>As on</span><input type="date" id="dashAsOn"></label>
+      <label class="inline"><span>Showing</span>
+        <select id="dashScope" title="A day's book, or every live bid the exchange file would carry">
+          <option value="day">One day's bids</option>
+          <option value="all">All live bids</option>
+        </select></label>
+      <label class="inline" id="dashAsOnWrap"><span>As on</span><input type="date" id="dashAsOn"></label>
       <button class="mini" id="dashToday">Today</button>
       <label class="pick" title="Closed issues are history — they are hidden unless you ask">
         <input type="checkbox" id="dashShowAll"> <span id="dashShowAllLbl">Show closed too</span></label>

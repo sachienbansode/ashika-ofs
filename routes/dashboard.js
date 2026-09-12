@@ -10,28 +10,49 @@ const router = express.Router();
 const PAGE = 'ofs-desk';
 
 /**
- * As-on date. Everything on the dashboard is "the book as it stood on this trading
- * day", not "the book now" — so the SAME date filter has to reach the aggregate,
- * the totals and the recent list, or the three disagree and the desk trusts none.
+ * Which day's book is this?
  *
- * Compared in Asia/Kolkata: the server runs UTC, where "today" starts at 05:30 IST
- * and a bid placed at 09:20 IST belongs to the previous day.
+ * The dashboard is a DAILY view: an OFS is a one- or two-day event, the desk starts
+ * each morning with a fresh book, and the figures on this screen are read as "what
+ * has come in today". So the default is today, not "every live bid ever".
+ *
+ * This was the bug: the recent list defaulted to today while the totals and the
+ * per-issue aggregates counted every live bid, so the screen showed 6 live bids
+ * worth ₹6.38 L above a panel that said "No bids yet". Both were describing real
+ * numbers; neither said which day it meant. The same clause now reaches all three,
+ * because three figures on one screen that disagree about their own scope is worse
+ * than any one of them being wrong.
+ *
+ * `scope=all` opts out, and the desk needs it: the exchange file carries every LIVE
+ * bid on an issue, including one placed yesterday on the T-day leg, so "all live" is
+ * the view that matches what will actually be uploaded.
+ *
+ * Compared in Asia/Kolkata. The server runs UTC, where today starts at 05:30 IST and
+ * a bid placed at 09:20 IST would otherwise belong to the previous day.
  */
-function asOnClause(req, alias, params) {
-  const d = String((req.query && req.query.as_on) || '').slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { sql: '', date: null };
-  params.push(d);
-  return {
-    sql: ` AND (${alias}.created_at AT TIME ZONE 'Asia/Kolkata')::date = $${params.length}::date`,
-    date: d
-  };
+function scopeOf(req) {
+  const q = req.query || {};
+  if (String(q.scope || '') === 'all') return { date: null, all: true };
+  const d = String(q.as_on || '').slice(0, 10);
+  return { date: /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : 'today', all: false };
+}
+
+function asOnClause(scope, alias, params) {
+  if (scope.all) return '';
+  if (scope.date === 'today') {
+    return ` AND (${alias}.created_at AT TIME ZONE 'Asia/Kolkata')::date`
+         + ` = (now() AT TIME ZONE 'Asia/Kolkata')::date`;
+  }
+  params.push(scope.date);
+  return ` AND (${alias}.created_at AT TIME ZONE 'Asia/Kolkata')::date = $${params.length}::date`;
 }
 
 router.get('/', requirePage(PAGE), async (req, res, next) => {
   try {
     const s = await settings.all();
+    const scope = scopeOf(req);
     const aggP = [];
-    const agg = asOnClause(req, 'ofs_bid', aggP);
+    const aggSql = asOnClause(scope, 'ofs_bid', aggP);
 
     const issues = await rows(
       `SELECT i.*,
@@ -59,7 +80,7 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
                        THEN sum(qty * price) FILTER (WHERE NOT is_cutoff)
                             / sum(qty) FILTER (WHERE NOT is_cutoff) END AS vwap
              FROM ${SCHEMA}.ofs_bid
-            WHERE status = 'Live'${agg.sql}
+            WHERE status = 'Live'${aggSql}
             GROUP BY issue_id
          ) b ON b.issue_id = i.id
         WHERE i.archived_at IS NULL
@@ -86,31 +107,36 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
     });
 
     const totP = [];
-    const tot = asOnClause(req, 'ofs_bid', totP);
+    const totSql = asOnClause(scope, 'ofs_bid', totP);
     const totals = await one(
       `SELECT count(*)::int AS bids, COALESCE(sum(qty),0)::bigint AS qty,
               COALESCE(sum(value),0) AS value, count(DISTINCT client_ucc)::int AS clients
-         FROM ${SCHEMA}.ofs_bid WHERE status = 'Live'${tot.sql}`, totP);
+         FROM ${SCHEMA}.ofs_bid WHERE status = 'Live'${totSql}`, totP);
+
+    // What the exchange file would actually carry, whatever day is on screen. A desk
+    // looking at today's book still has to know the whole live book exists, or it
+    // generates a file it did not expect.
+    const allLive = await one(
+      `SELECT count(*)::int AS bids, COALESCE(sum(value),0) AS value
+         FROM ${SCHEMA}.ofs_bid WHERE status = 'Live'`);
 
     const recP = [];
-    const rec = asOnClause(req, 'b', recP);
-    // Default is TODAY, not "the last 15 whenever they were". A desk opening the
-    // screen at 09:20 should see an empty list, not yesterday's book looking live.
-    const todayOnly = rec.date
-      ? rec.sql
-      : ` AND (b.created_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date`;
+    const recSql = asOnClause(scope, 'b', recP);
     const recent = await rows(
       `SELECT b.id, b.ref, b.client_ucc, b.branch_code, b.placed_by, b.category, b.qty, b.price,
               b.is_cutoff, b.value, b.status, b.created_at, i.symbol
          FROM ${SCHEMA}.ofs_bid b
          LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
-        WHERE true${todayOnly}
+        WHERE true${recSql}
         ORDER BY b.created_at DESC LIMIT 15`, recP);
 
     res.json({
       server_time: now.toISOString(),
-      as_on: agg.date,                      // null means "now"
-      recent_scope: rec.date || 'today',
+      // 'today' | a date | null when the whole live book is being shown. Every
+      // figure below is on this one scope — that is the point.
+      scope: scope.all ? 'all' : scope.date,
+      as_on: scope.all || scope.date === 'today' ? null : scope.date,
+      all_live: { bids: (allLive && allLive.bids) || 0, value: Number((allLive && allLive.value) || 0) },
       settings: s, issues: list, totals, recent
     });
   } catch (e) { next(e); }
