@@ -67,7 +67,33 @@ h2.sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.16em;color:var(
 .legend b{font-weight:600;color:var(--ink);font-family:var(--mono)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:3px;margin-right:5px}
 .dot.r{background:var(--green)} .dot.h{background:var(--navy)}
-.cdn{font-family:var(--mono);font-size:11.5px;color:var(--amber);margin-top:11px}
+/* ------------------------------------------------------------- countdown ----
+   Three facts on one strip: which leg is running out, how long is left, and the
+   date it ends on. It used to be a bare "closes in 69:12:27" — a number nobody
+   reads and a desk cannot repeat to a client.
+
+   The colour is the urgency, so the card tells you at a glance whether this is a
+   thing for next week or a thing for the next ten minutes. */
+.cdn{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;margin-top:12px;
+  padding:9px 12px;border-radius:10px;border:1px solid var(--hair);background:#f7fafc}
+.cdn .cd-leg{font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;
+  color:var(--muted);flex:1 1 100%}
+.cdn .cd-val{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--navy);
+  font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.cdn .cd-sub{font-size:11px;color:var(--muted)}
+.cdn.soon{background:rgba(217,138,31,.08);border-color:rgba(217,138,31,.3)}
+.cdn.soon .cd-val{color:#96610f}
+.cdn.urgent{background:rgba(214,69,80,.08);border-color:rgba(214,69,80,.32)}
+.cdn.urgent .cd-val{color:var(--red)}
+.cdn.over{background:#f1f5f9}
+.cdn.over .cd-val{color:var(--muted);font-size:13px}
+
+/* The desk's own day, which is a different thing from the exchange's window and
+   is what actually stops a bid at the cut-off. */
+.cdn-desk{margin-top:8px;padding:9px 12px;border-radius:10px;font-size:11.5px;line-height:1.5}
+.cdn-desk.shut{background:rgba(214,69,80,.07);border:1px solid rgba(214,69,80,.28);
+  color:#8f2b33}
+.cd-why{display:block;flex:1 1 100%;margin:2px 0 0;font-size:11px;color:var(--muted);line-height:1.5}
 
 /* ---------- controls ---------- */
 .bar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:14px}
@@ -253,7 +279,7 @@ button.mini{box-shadow:0 1px 1px rgba(16,32,64,.05)}
 button.mini:not(:disabled):active{transform:translateY(1px);box-shadow:none}
 /* A disabled primary must not keep its confident gradient — that is what made
    "Place bid" look pressable when it was not. */
-button.btn:disabled,button.btn[disabled]{background:#eef2f6 !important;color:#93a3b8 !important;
+button.btn:disabled,button.btn[disabled]{background:#eef2f6 !important;color:#7d8ea6 !important;
   border-color:#dde5ee !important;box-shadow:none !important;filter:none !important;
   transform:none !important;opacity:1;cursor:not-allowed}
 button.mini{height:30px;padding:0 11px;font-size:11.5px;font-weight:600;border-radius:7px;
@@ -361,17 +387,20 @@ header.top{padding-left:max(20px,calc((100vw - 1560px) / 2));
 .cards{display:grid;gap:14px;align-items:start;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr))}
 
-/* Place bid is a form beside a read-out, not two equal columns. */
-#pane-place .cards{grid-template-columns:minmax(320px,440px) minmax(300px,1fr)}
 #pane-place .card .bar{margin:16px 0 0}
 /* A button is a control, not a banner. flex:1 1 auto stretched these two across
    the whole card — on a wide screen that is two grey bands the width of the
    screen, which is exactly what a button should not look like. */
 #pane-place .card .bar .btn{flex:0 0 auto;min-width:138px}
 .pb-actions{gap:10px 12px;align-items:center}
-/* .fh is only styled inside a .f, and this one is a direct child of the bar. */
+/* .fh is only styled inside a .f, and these are direct children of the bar. */
 .pb-actions .fh{display:block;flex:1 1 100%;margin:2px 0 0;font-size:11px;line-height:1.5;
   color:var(--muted);text-align:left}
+.pb-actions .fh:empty{display:none;margin:0}
+/* The suggestion explains what the button beside it would do, so it leads. */
+#pbDefaultHint{color:var(--navy);font-weight:500}
+/* Fill and Validate are both secondary; Place bid is the one that sends. */
+.pb-actions #pbDefault{min-width:0}
 
 /* ==========================================================================
    Responsive. Tables keep their columns and scroll; nothing reflows into an
@@ -385,7 +414,6 @@ header.top{padding-left:max(20px,calc((100vw - 1560px) / 2));
 }
 
 @media (max-width:900px){
-  #pane-place .cards{grid-template-columns:1fr}
 }
 
 @media (max-width:820px){
@@ -560,19 +588,70 @@ td.n.neg{color:var(--red);font-weight:650}
    when they no longer fit, so the same markup is a single row on a desk monitor, two
    rows on a laptop and a stack on a phone — without a breakpoint guessing at it. */
 .pb-card{margin-bottom:14px}
-.pb-row{display:flex;flex-wrap:wrap;gap:12px 14px;align-items:flex-start}
-.pb-row .f{flex:1 1 170px;min-width:150px;display:flex;flex-direction:column;gap:5px}
-.pb-row .f.wide{flex:2 1 320px}          /* the issue name is long, and must stay readable */
-.pb-row .f.narrow{flex:0 1 130px;min-width:110px}
+/* A grid, not a wrapping flex row: flex leaves the last row ragged and every row a
+   different set of widths, so the eye has to re-find the columns on each line.
+   auto-fit means the same markup is four columns beside a monitor, two on a
+   laptop and one on a phone, with no breakpoint guessing at the number. */
+.pb-row{display:grid;gap:12px 14px;align-items:start;
+  /* Four columns at most, however wide the screen: a track can never be narrower
+     than a quarter of the row, so auto-fit cannot fit a fifth. Below ~660px the
+     158px floor wins instead and it drops to two, then one. No breakpoints, and
+     it measures the column it is actually in rather than the viewport. */
+  grid-template-columns:repeat(auto-fit,minmax(max(158px,calc((100% - 42px) / 4)),1fr))}
+.pb-row .f{min-width:0;display:flex;flex-direction:column;gap:5px}
+.pb-row .f.wide{grid-column:span 2}      /* the issue name is long, and must stay readable */
+/* One track: a span of 2 would create a second, off-screen one. */
+@media (max-width:520px){
+  .pb-row{grid-template-columns:1fr}
+  .pb-row .f.wide{grid-column:auto}
+}
 .pb-row .f select,.pb-row .f input{width:100%;min-width:0;box-sizing:border-box}
 .pb-row .f .fh{margin-top:0}
 
-.place-ref{display:grid;gap:14px;align-items:start;grid-template-columns:1fr 1fr;margin-bottom:14px}
-@media (max-width:900px){ .place-ref{grid-template-columns:1fr} }
+/* --------------------------------------------------------- place bid layout --
+   The bid on the left, what you consult while placing it on the right: the issue
+   first, the client under it. One column of eight fields stretched across a 1900px
+   monitor put the floor price and the client's margin two screens below the
+   quantity they are checked against — which is the only reason either panel
+   exists. The bids already on the issue stay full width underneath both.
+
+   The side column is sticky: scrolling down the form does not scroll the floor
+   and the margin off the top. It gives that up when it is taller than the
+   viewport, which is what overflow-y:auto on the sticky box is for. */
+.place-grid{display:grid;gap:14px;align-items:start;margin-bottom:14px;
+  grid-template-columns:minmax(0,1fr) minmax(300px,380px)}
+.place-main{min-width:0}
+.place-main .pb-card{margin-bottom:0}
+.place-side{display:flex;flex-direction:column;gap:14px;min-width:0;
+  position:sticky;top:14px;max-height:calc(100vh - 28px);overflow-y:auto;
+  scrollbar-width:thin}
+.place-side>.card{margin:0}
+
+/* Under ~1080px the side column is not a column any more — it stacks, and a
+   sticky stacked panel would cover the form it is meant to sit beside. */
+@media (max-width:1080px){
+  .place-grid{grid-template-columns:1fr}
+  .place-side{position:static;max-height:none;overflow:visible}
+}
+
+/* The derived figure. Big enough to check at a glance against the ₹2,00,000 cap,
+   and visibly not an input. */
+.pb-total{margin-top:14px;padding:12px 16px;border:1px solid var(--edge);border-radius:11px;
+  background:linear-gradient(180deg,#f8fbfd,#f2f7fb)}
+.pb-total .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--muted);
+  font-weight:600}
+.pb-total .v{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--navy);
+  line-height:1.25;margin-top:3px;font-variant-numeric:tabular-nums;word-break:break-word}
+.pb-total .v.muted{font-size:13px;font-weight:500;color:var(--muted)}
+.pb-total .fh{display:block;margin-top:3px;font-size:10.5px;color:var(--muted)}
 
 /* Wrap rather than clip. A truncated window or client name is the one thing on this
    screen nobody can afford to misread. */
 #pbIssueInfo .f .v,#pbClient .f .v{white-space:normal;word-break:break-word;line-height:1.45}
+/* A window is two nowrap stamps, so it gets the whole row rather than a 130px
+   track that would cut the AM/PM off the end. */
+#pbIssueInfo .f.row{grid-column:1/-1}
+#pbIssueInfo .f.row .v{display:flex;flex-wrap:wrap;gap:2px 14px}
 #pbExisting table{width:100%}
 #pbExisting td,#pbExisting th{white-space:normal}
 

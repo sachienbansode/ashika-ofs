@@ -100,15 +100,15 @@
   <!-- ---------------- Place bid ---------------- -->
   <section class="pane hide" id="pane-place">
 
-    <!-- One horizontal band of inputs across the full width, then the reference
-         panels side by side beneath it, then the existing bids. The desk reads left
-         to right once instead of down a narrow column and back up. -->
+    <!-- Two columns: the bid itself on the left, everything you consult while
+         placing it stacked on the right — the issue, then the client. The bids
+         already on this issue run full width underneath, because they belong to
+         both halves. One column below 1080px, in that same reading order. -->
+    <div class="place-grid">
+    <div class="place-main">
     <div class="card pb-card">
       <div class="bar" style="margin:0 0 12px">
         <h2 class="sec" style="margin:0" id="pbTitle">Bid on behalf of a client</h2>
-        <div class="sp"></div>
-        <button class="mini" id="pbDefault" type="button">Fill suggested bid</button>
-        <span class="fh" id="pbDefaultHint" style="flex:1 1 100%;margin:0"></span>
       </div>
       <div id="pbEditBar" class="note hide"></div>
       <div id="pbNoIssues" class="note warn hide">
@@ -140,24 +140,37 @@
         <label class="f narrow"><span class="k">Price</span>
           <input type="number" id="pbPrice" step="0.05" min="0">
           <span class="fh" id="pbPriceHint"></span></label>
-        <label class="f"><span class="k">Total value</span>
-          <input type="text" id="pbValue" readonly tabindex="-1">
-          <span class="fh">Quantity × price. Calculated, not typed.</span></label>
+      </div>
+
+      <!-- Derived, never typed — so it reads as a figure, not as one more empty box
+           the desk has to work out whether to fill in. -->
+      <div class="pb-total">
+        <div class="k">Total value</div>
+        <div class="v" id="pbValue">—</div>
+        <div class="fh">Quantity × price.</div>
       </div>
 
       <!-- Place bid stays disabled until Validate passes, which is right but was
            unexplained: a permanently grey primary button reads as broken. -->
+      <!-- All three in one bar, in the order they are used: fill the form, check it,
+           send it. Fill suggested bid was up in the title bar, a long way from the
+           fields it fills and from the button you press next. -->
       <div class="bar pb-actions">
+        <button class="btn ghost" id="pbDefault" type="button">Fill suggested bid</button>
         <button class="btn ghost" id="pbCheck" type="button">Validate</button>
         <button class="btn" id="pbPlace" disabled>Place bid</button>
-        <span class="fh" id="pbActionHint">Validate first — it checks the band, the
-          window and the client's margin. Nothing is sent to the exchange until you place it.</span>
+        <span class="fh" id="pbDefaultHint"></span>
+        <span class="fh" id="pbActionHint">Validate checks the band, the window and the
+          client's margin. Nothing is sent to the exchange until you place it.</span>
       </div>
       <div id="pbResult"></div>
       <div id="pbOtp" class="hide"></div>
     </div>
+    </div>
 
-    <div class="cards place-ref">
+    <!-- Sticky, so the floor, the band and the margin stay on screen while you
+         work down the form — the two things every field is checked against. -->
+    <aside class="place-side">
       <div class="card">
         <h2 class="sec" style="margin-top:0">Issue details</h2>
         <div id="pbIssueInfo" class="note">Choose an issue to see its floor, band, windows and status.</div>
@@ -166,6 +179,7 @@
         <h2 class="sec" style="margin-top:0">Client &amp; margin</h2>
         <div id="pbClient" class="note">Enter a UCC to see client, margin and limits.</div>
       </div>
+    </aside>
     </div>
 
     <div class="card" id="pbExistingCard">

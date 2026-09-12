@@ -130,6 +130,29 @@ function hms(ms) {
   var p = function (x) { return String(x).padStart(2, '0'); };
   return p(h) + ':' + p(m) + ':' + p(s % 60);
 }
+/**
+ * Time left, in the units a person would actually say it in.
+ *
+ * "69:12:27" is not a duration anyone reads — nobody divides by 24 in their head
+ * mid-window. Over a day it is days and hours; inside a day it is a clock, because
+ * that is when the seconds start to matter.
+ */
+function timeLeft(ms) {
+  if (!(ms > 0)) return { text: 'closed', urgency: 'over' };
+  var s = Math.floor(ms / 1000);
+  var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+  var m = Math.floor((s % 3600) / 60), sec = s % 60;
+  var p = function (x) { return String(x).padStart(2, '0'); };
+  var text = d > 0 ? d + 'd ' + h + 'h ' + m + 'm'
+           : h > 0 ? h + 'h ' + p(m) + 'm ' + p(sec) + 's'
+           : p(m) + ':' + p(sec);
+  return {
+    text: text,
+    // Under an hour a desk starts watching it; under fifteen minutes it is the
+    // only thing on the card that matters.
+    urgency: s <= 900 ? 'urgent' : s <= 3600 ? 'soon' : 'calm'
+  };
+}
 function chipCls(st) {
   if (/open/i.test(st)) return 'open';
   if (/upcoming/i.test(st)) return 'soon';
@@ -404,13 +427,29 @@ function kpiCard(k, v, s) {
 }
 
 function issueCard(i) {
-  var biddable = isBiddable(i);
   var total = Number(i.total_value) || 0;
   var rv = Number(i.ret_value) || 0, hv = Number(i.hni_value) || 0;
   var pr = total ? (rv / total * 100) : 0, ph = total ? (hv / total * 100) : 0;
   var close = new Date(Math.max(new Date(i.hni_close), new Date(i.ret_close)));
   var nextClose = i.hni_status === 'Open' ? new Date(i.hni_close)
                 : i.ret_status === 'Open' ? new Date(i.ret_close) : close;
+  var legLabel = i.hni_status === 'Open' ? 'HNI window'
+               : i.ret_status === 'Open' ? 'Retail window'
+               : i.ret_status === 'Upcoming' ? 'Retail opens ' + dt(i.ret_open)
+               : i.hni_status === 'Upcoming' ? 'HNI opens ' + dt(i.hni_open)
+               : 'Window';
+
+  // Three reasons a bid cannot be placed, and the desk is owed the right one:
+  // the issue is suspended, its window is not open, or the desk's day is over.
+  var shut = marketShut();
+  var canBid = canBidNow(i);
+  var blockedWhy = !canBid
+    ? (i.status && i.status !== 'Auto' ? 'This issue is ' + String(i.status).toLowerCase() + '.'
+      : shut ? (shut.message || 'Bidding is closed right now.')
+      : i.ret_status === 'Upcoming' || i.hni_status === 'Upcoming'
+        ? 'The window has not opened yet.'
+        : 'Both windows have closed for this issue.')
+    : '';
   return '' +
   '<div class="card" data-issue="' + i.id + '">' +
     '<div class="hd">' +
@@ -447,11 +486,26 @@ function issueCard(i) {
       '<span>HNI <b>' + dt(i.hni_open) + '</b> → <b>' + dt(i.hni_close) + '</b></span>' +
       '<span>Retail <b>' + dt(i.ret_open) + '</b> → <b>' + dt(i.ret_close) + '</b> IST</span>' +
     '</div>' +
-    '<div class="cdn" data-close="' + nextClose.toISOString() + '">closes in --:--:--</div>' +
+    // The countdown says WHICH leg is running out and WHEN it ends, not just a
+    // number: "69:12:27" told the desk nothing it could repeat to a client.
+    '<div class="cdn" data-close="' + esc(nextClose.toISOString()) + '">' +
+      '<span class="cd-leg">' + esc(legLabel) + '</span>' +
+      '<span class="cd-val">—</span>' +
+      '<span class="cd-sub">closes ' + esc(dt(nextClose)) + ' IST</span>' +
+    '</div>' +
+    // Two separate facts. The window above is the exchange's; this is the desk's own
+    // day, and it is the one that stops a bid at 15:15 on a window open until the
+    // 15th. Before this, the card offered a button that led straight to a refusal.
+    (shut
+      ? '<div class="cdn-desk shut">' + esc(shut.message || 'Bidding is closed right now.') + '</div>'
+      : '') +
     '<div class="bar" style="margin-top:10px">' +
-      (biddable
+      (canBid
         ? '<button class="btn" data-bidon="' + i.id + '">Bid on this issue</button>'
-        : '<button class="btn" disabled title="' + esc(i.status_label) + '">Bidding closed</button>') +
+        : '<button class="btn" disabled title="' + esc(blockedWhy) + '">' +
+          esc(shut ? 'Desk closed' : 'Bidding closed') + '</button>') +
+      // Not when the desk is shut: the strip above already said it, in the same words.
+      (canBid || shut ? '' : '<span class="fh cd-why">' + esc(blockedWhy) + '</span>') +
     '</div>' +
   '</div>';
 }
@@ -459,6 +513,9 @@ function issueCard(i) {
 function renderDash(d) {
   var t = d.totals || {};
   var all = d.issues || [];
+  // The trading session, as the server sees it. Never worked out from the browser's
+  // clock: the desk's cut-off is an IST rule and the machine may be on any zone.
+  STATE.market = d.market || null;
   /*
    * "Open" means open ON THE DAY SHOWN. For today and for the whole live book that
    * is the same as biddable-right-now; for a past date it is not, and the screen was
@@ -631,6 +688,26 @@ function isBiddable(i) {
       || i.ret_status === 'Upcoming' || i.hni_status === 'Upcoming';
 }
 
+/**
+ * Whether the DESK may place a bid at this instant.
+ *
+ * Deliberately not folded into isBiddable: an issue whose window runs to 15-Sep is
+ * open all week, and the KPI that counts open issues must keep saying so after the
+ * daily cut-off. What changes at 15:15 is whether anyone can act on it — which is a
+ * different question, and the one the button answers.
+ */
+function marketShut() {
+  var m = STATE.market;
+  return m && m.open === false ? m : null;
+}
+function canBidNow(i) {
+  if (!isBiddable(i)) return false;
+  if (marketShut()) return false;
+  // Upcoming is not biddable now either — it is biddable later today, and saying
+  // "Bid on this issue" over a window that has not opened is the same lie.
+  return i.ret_status === 'Open' || i.hni_status === 'Open';
+}
+
 /** "COALINDIA — Coal India Ltd · Retail closes 03 Sep 15:15" */
 function issueOptionLabel(i, withWindow) {
   var base = i.symbol + ' — ' + (i.company || '');
@@ -664,8 +741,9 @@ function renderIssueInfo() {
     box.textContent = 'Choose an issue to see its floor, band, windows and status.';
     return;
   }
-  var f = function (k, v) {
-    return '<div class="f"><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
+  var f = function (k, v, cls) {
+    return '<div class="f' + (cls ? ' ' + cls : '') + '"><div class="k">' + esc(k) +
+      '</div><div class="v">' + v + '</div></div>';
   };
   var money = function (v) { return v == null || v === '' ? '—' : rupee(v); };
   box.className = '';
@@ -681,8 +759,12 @@ function renderIssueInfo() {
       f('Tick', inr(i.tick, 2)) +
       f('Lot', inr(i.lot, 0)) +
       (Number(i.discount_pct) ? f('Retail discount', inr(i.discount_pct, 2) + '%') : '') +
-      f('HNI window', '<span class="m" style="font-size:11.5px">' + dt(i.hni_open) + ' → ' + dt(i.hni_close) + '</span>') +
-      f('Retail window', '<span class="m" style="font-size:11.5px">' + dt(i.ret_open) + ' → ' + dt(i.ret_close) + '</span>') +
+      // Stacked, like the master table: one long line wrapped mid-stamp and put the
+      // arrow at the start of the second line, where it reads as a stray character.
+      // Full width: a timestamp clipped mid-stamp is the one thing on this panel
+      // nobody can afford to misread.
+      f('HNI window', windowCell(i.hni_open, i.hni_close), 'row') +
+      f('Retail window', windowCell(i.ret_open, i.ret_close), 'row') +
       f('Cut-off bids', i.cutoff_flag === false ? 'Not allowed' : 'Allowed (Retail only)') +
     '</div>' +
     (i.floor_price == null
@@ -702,8 +784,11 @@ function tickClock() {
   var n = new Date();
   $('#clock').textContent = IST_CLOCK.format(n) + ' IST';
   $$('.cdn').forEach(function (el) {
-    var ms = new Date(el.dataset.close) - n;
-    el.textContent = ms > 0 ? 'closes in ' + hms(ms) : 'window closed';
+    var val = el.querySelector('.cd-val');
+    if (!val) return;                       // an older card shape; leave it alone
+    var left = timeLeft(new Date(el.dataset.close) - n);
+    val.textContent = left.urgency === 'over' ? 'closed' : left.text + ' left';
+    el.className = 'cdn ' + left.urgency;
   });
 }
 
@@ -1083,9 +1168,12 @@ function refreshBidForm() {
   // floor has no value yet, and saying so is better than showing zero.
   var qty = Number($('#pbQty').value) || 0;
   var val = price && qty ? price * qty : null;
-  $('#pbValue').value = val == null
+  // A read-out, not an input — it is derived and must never look typeable.
+  var vEl = $('#pbValue');
+  vEl.textContent = val == null
     ? (isCut && mp == null ? 'Unknown until the floor is published' : '—')
     : rupee(val, 2);
+  vEl.classList.toggle('muted', val == null);
 }
 
 /** Fill the form with the suggested bid for the current category. */
@@ -1276,6 +1364,15 @@ function startModify(id) {
  * dropdown is a step that exists only because the screens were built separately.
  */
 function bidOnIssue(id) {
+  // The button is disabled when the desk is shut, but the keyboard, a stale card
+  // and a second tab all reach this function too. Refusing here as well costs
+  // nothing and is the difference between a message and a filled-in form that is
+  // rejected on submit.
+  var shut = marketShut();
+  if (shut) {
+    toast('Bidding is closed', shut.message || 'The desk is not accepting bids right now.', 'warn');
+    return;
+  }
   endModify();
   showTab('place');
   var pb = $('#pbIssue');

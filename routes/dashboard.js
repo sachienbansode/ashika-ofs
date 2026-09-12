@@ -3,7 +3,8 @@
 const express = require('express');
 const { SCHEMA, rows, one } = require('../db/ofsAdapter');
 const { requirePage } = require('../middleware/pageAccess');
-const { issueStatus, catStatus, minPrice, openOnDay, issueOpenOnDay } = require('../lib/domain');
+const { issueStatus, catStatus, minPrice, openOnDay, issueOpenOnDay,
+        marketState, closedMessage } = require('../lib/domain');
 const settings = require('../lib/settings');
 
 const router = express.Router();
@@ -155,9 +156,30 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
       scope: scope.all ? 'all' : scope.date,
       as_on: scope.all || scope.date === 'today' ? null : scope.date,
       all_live: { bids: (allLive && allLive.bids) || 0, value: Number((allLive && allLive.value) || 0) },
+      // Whether a bid may be placed AT ALL right now, separately from whether any
+      // given issue's window is open. The dashboard was offering "Bid on this issue"
+      // at 18:02 against a desk cut-off of 15:15: the window was genuinely open, the
+      // desk was shut, and the only way to find that out was to fill in the form and
+      // be refused. An issue open until 15-Sep is still open — it just cannot be bid
+      // on until 09:15 tomorrow, and those are two different facts.
+      market: Object.assign({}, marketStateNow(s, now), { message: marketMessageNow(s, now) }),
       settings: s, issues: list, totals, recent
     });
   } catch (e) { next(e); }
 });
+
+/** The trading-session verdict as the browser needs it: plain, and already worded. */
+function marketStateNow(s, now) {
+  const st = marketState(s, now);
+  return {
+    open: st.open, reason: st.reason, opens: st.opens, closes: st.closes,
+    effective_close: st.effectiveClose, cutoff_applies: st.cutoffApplies,
+    minutes_left: st.minutesLeft
+  };
+}
+function marketMessageNow(s, now) {
+  const st = marketState(s, now);
+  return st.open ? null : closedMessage(st);
+}
 
 module.exports = router;
