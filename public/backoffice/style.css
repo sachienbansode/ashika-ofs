@@ -619,13 +619,33 @@ td.n.neg{color:var(--red);font-weight:650}
    and the margin off the top. It gives that up when it is taller than the
    viewport, which is what overflow-y:auto on the sticky box is for. */
 .place-grid{display:grid;gap:14px;align-items:start;margin-bottom:14px;
-  grid-template-columns:minmax(0,1fr) minmax(300px,380px)}
+  /* The bid needs four field columns and no more; the reference column needs enough
+     width to lay its facts out three across instead of two. At 380px the issue
+     panel was seven rows tall and pushed Client & margin below the fold, which is
+     the one thing this layout exists to prevent — all three visible at once. */
+  grid-template-columns:minmax(0,1fr) minmax(360px,460px)}
 .place-main{min-width:0}
 .place-main .pb-card{margin-bottom:0}
 .place-side{display:flex;flex-direction:column;gap:14px;min-width:0;
   position:sticky;top:14px;max-height:calc(100vh - 28px);overflow-y:auto;
   scrollbar-width:thin}
-.place-side>.card{margin:0}
+.place-side>.card{margin:0;padding:14px 16px}
+/* Tighter than the main column on purpose: this is a read-out being glanced at,
+   not a form being filled in, and every row saved here is a row that keeps the
+   margin panel on screen. */
+.place-side .sec{margin-bottom:10px}
+/* Three across, not two: the default 165px track left six client fields as three
+   rows of two, and those three rows are exactly what pushed the panel off screen. */
+.place-side .grid2{margin-top:0;grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}
+.place-side .grid2 .f{padding:8px 11px;box-shadow:0 0 0 1px var(--hair)}
+/* The hairlines in a .grid2 are the container's background showing through a 1px
+   gap, so a row that does not divide evenly by the column count leaves a grey
+   block where a cell would have been — it reads as a missing value. Here the
+   container is white and each cell draws its own hairline instead, so the space
+   after the last field is simply empty. */
+.place-side .grid2{background:#fff}
+.place-side .grid2 .f .v{font-size:12.5px;margin-top:2px}
+.place-side .bar{margin-bottom:8px}
 
 /* Under ~1080px the side column is not a column any more — it stacks, and a
    sticky stacked panel would cover the form it is meant to sit beside. */
@@ -636,11 +656,11 @@ td.n.neg{color:var(--red);font-weight:650}
 
 /* The derived figure. Big enough to check at a glance against the ₹2,00,000 cap,
    and visibly not an input. */
-.pb-total{margin-top:14px;padding:12px 16px;border:1px solid var(--edge);border-radius:11px;
+.pb-total{margin-top:12px;padding:10px 14px;border:1px solid var(--edge);border-radius:11px;
   background:linear-gradient(180deg,#f8fbfd,#f2f7fb)}
 .pb-total .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--muted);
   font-weight:600}
-.pb-total .v{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--navy);
+.pb-total .v{font-family:var(--mono);font-size:20px;font-weight:600;color:var(--navy);
   line-height:1.25;margin-top:3px;font-variant-numeric:tabular-nums;word-break:break-word}
 .pb-total .v.muted{font-size:13px;font-weight:500;color:var(--muted)}
 .pb-total .fh{display:block;margin-top:3px;font-size:10.5px;color:var(--muted)}
