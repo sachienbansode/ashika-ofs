@@ -53,15 +53,23 @@ test('production refuses a fixed code on either side, whatever the flag says', (
 
 test('staff sign-in uses the staff switch, not the client one', () => {
   const src = read('routes/staffAuth.js');
-  assert.match(src, /otp\.staffTestMode\(\)/);
+  assert.match(src, /otp\.staffTestMode\(/);
   const code = src.split('\n').filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join('\n');
-  assert.ok(!/otp\.testMode\(\)/.test(code), 'staff sign-in must not read the client test flag');
+  assert.ok(!/otp\.testMode\(/.test(code), 'staff sign-in must not read the client test flag');
+  // And it must PASS the settings, or Masters > Settings is a dropdown that does
+  // nothing — the failure mode here is silent, which is the worst kind for a switch
+  // someone flips expecting real codes to start going out.
+  assert.match(src, /otp\.staffTestMode\(await settings\.all\(\)\)/,
+    'the staff switch must be resolved against the settings, not the env alone');
 });
 
 test('the client, branch and bid-confirmation paths all use the client switch', () => {
   for (const f of ['lib/clientAuth.js', 'routes/branchAuth.js', 'lib/bidOtp.js']) {
-    assert.match(read(f), /testMode\(\)/, f + ' does not honour the client test flag');
-    assert.ok(!/staffTestMode/.test(read(f)), f + ' should not use the staff flag');
+    const src = read(f);
+    assert.match(src, /testMode\(/, f + ' does not honour the client test flag');
+    assert.ok(!/staffTestMode/.test(src), f + ' should not use the staff flag');
+    assert.match(src, /testMode\((cfg|await settings\.all\(\))\)/,
+      f + ' must resolve the switch against the settings');
   }
 });
 

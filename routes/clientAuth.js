@@ -116,7 +116,7 @@ router.post('/start', startLimiter, async (req, res) => {
 
     const out = Object.assign({ ref: ch.ref, sent_to: ch.sentTo, identifier, kind }, generic);
 
-    if (ca.testMode()) {
+    if (ch.testMode) {
       console.warn('[client-auth] TEST MODE — fixed code, nothing sent');
       out.test_mode = true;
       out.test_code = ch.code;

@@ -9,6 +9,7 @@ const express = require('express');
 const { SCHEMA, rows, query } = require('../db/ofsAdapter');
 const { requirePage, requireEdit } = require('../middleware/pageAccess');
 const settings = require('../lib/settings');
+const otp = require('../lib/otp');
 const audit = require('../lib/audit');
 
 const router = express.Router();
@@ -149,6 +150,28 @@ const EDITABLE = {
     hint: '1 holds the schedule outside session hours — nothing changes on the exchange overnight.',
     check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
   },
+  /* ------------------------------------------------------------- OTP mode ----
+   * Real or fixed codes, switchable without a deploy — but only on a non-production
+   * server. The production floor is in lib/otp.js and reads the app server's own
+   * environment, so nobody who can reach this screen can lift it. That is the whole
+   * design: the convenience is here, the safety is not.
+   */
+  otp_mode_client: {
+    label: 'Client, branch and AP codes', kind: 'choice', choices: ['', 'real', 'test'],
+    hint: 'Covers client sign-in, branch and AP sign-in, and the confirmation a client gives '
+      + 'for a bid placed on their behalf. "test" uses one fixed code and sends nothing — for '
+      + 'UAT, where there are no real client mailboxes. Blank follows the App Server Settings. '
+      + 'On a production app server "test" is IGNORED and real codes are always sent.',
+    check: (v) => ['', 'real', 'test'].includes(v) || 'Use real or test, or leave blank'
+  },
+  otp_mode_staff: {
+    label: 'Back-office sign-in codes', kind: 'choice', choices: ['', 'real', 'test'],
+    hint: 'Staff addresses are real Ashika mailboxes and this door leads to every client\u2019s '
+      + 'PII and to the exchange files, so a fixed code here is a shared password, not a test '
+      + 'convenience. Use "test" only to get back in when mail is broken, and set it back. '
+      + 'Blank follows the App Server Settings; on a production app server "test" is IGNORED.',
+    check: (v) => ['', 'real', 'test'].includes(v) || 'Use real or test, or leave blank'
+  },
   cutoff_price_mode: {
     label: 'Price written for a cut-off bid', kind: 'choice', choices: ['zero', 'floor'],
     hint: 'What goes in the price column when the client bid at cut-off.',
@@ -161,6 +184,15 @@ router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
     const current = await settings.all(true);
     res.json({
       settings: current,
+      /* What the APP SERVER says, which the screen cannot change. The desk needs to
+       * see this: without it, "test" sitting in a dropdown on a production server
+       * looks like it is in force when it is being ignored, and somebody plans a
+       * UAT round against a fixed code that will never work. */
+      server: {
+        production: otp.isProduction(),
+        otp_client_effective: otp.testMode(current) ? 'test' : 'real',
+        otp_staff_effective: otp.staffTestMode(current) ? 'test' : 'real'
+      },
       editable: Object.keys(EDITABLE).map((key) => ({
         key,
         value: current[key],

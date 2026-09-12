@@ -2673,17 +2673,56 @@ async function resetMargins() {
  * desk should not need a DBA to move them. Each is validated server-side against
  * what SEBI or the exchange actually permits, and each change is audited.
  */
+/**
+ * What the APP SERVER says, above the settings it overrules.
+ *
+ * The two OTP rows are the only settings on this screen that can be silently
+ * ignored: on a production app server a fixed code is refused outright, whatever
+ * the dropdown says. Without this banner, "test" sitting in a select looks like it
+ * is in force, and someone plans a UAT round against a code that will never work.
+ *
+ * It deliberately says "App Server Settings" rather than naming a file — where the
+ * flag lives is an operations question, and the desk reading this screen cannot act
+ * on a filename anyway.
+ */
+function renderServerBanner(sv) {
+  var box = $('#setServer');
+  if (!box) return;
+  if (!sv) { box.innerHTML = ''; return; }
+  var eff = function (label, mode) {
+    return '<span style="margin-right:16px"><b>' + esc(label) + ':</b> ' +
+      '<span class="chip ' + (mode === 'test' ? 'soon' : 'open') + '">' +
+      (mode === 'test' ? 'fixed test code' : 'real code, emailed') + '</span></span>';
+  };
+  box.innerHTML = '<div class="note' + (sv.production ? ' warn' : '') + '" style="margin:0 0 14px">' +
+    '<b>App Server Settings</b> — ' +
+    (sv.production
+      ? 'this app server is running in <b>production mode</b>, so a fixed test code is ' +
+        'REFUSED whatever the two OTP settings below say. Real codes are always sent. ' +
+        'Changing that is an App Server Settings change, not a change on this screen.'
+      : 'this app server is not in production mode, so the two OTP settings below are ' +
+        'in force. A setting left on <i>Follow app server</i> uses the App Server Settings.') +
+    '<div style="margin-top:8px">' +
+      eff('Client, branch and AP', sv.otp_client_effective) +
+      eff('Back office', sv.otp_staff_effective) +
+    '</div></div>';
+}
+
 async function loadSettings() {
   try {
     var d = await api('/settings');
     var rows = d.editable || [];
+    renderServerBanner(d.server);
     $('#setTbl').innerHTML =
       '<thead><tr><th>Setting</th><th style="width:180px">Value</th><th></th><th>What it does</th></tr></thead><tbody>' +
       rows.map(function (r) {
         var input;
         if (r.choices && r.choices.length > 1) {
+          // '' is a real, meaningful choice on the OTP settings — "whatever the app
+          // server says" — and an empty line in a dropdown reads as a bug.
           input = '<select data-grant="ofs-masters" data-set="' + esc(r.key) + '">' + r.choices.map(function (c) {
-            return '<option' + (String(r.value) === c ? ' selected' : '') + '>' + esc(c) + '</option>';
+            return '<option value="' + esc(c) + '"' + (String(r.value) === c ? ' selected' : '') + '>' +
+              esc(c === '' ? 'Follow app server' : c) + '</option>';
           }).join('') + '</select>';
         } else if (r.kind === 'bool') {
           input = '<select data-grant="ofs-masters" data-set="' + esc(r.key) + '">' +
@@ -2705,6 +2744,7 @@ async function loadSettings() {
       }).join('') + '</tbody>';
     applyGrants();   // the rows were just built, so re-run the sweep over them
   } catch (e) {
+    renderServerBanner(null);     // never leave a stale verdict above a failed load
     $('#setTbl').innerHTML = '<tbody><tr><td class="empty">' + esc(e.message) + '</td></tr></tbody>';
   }
 }

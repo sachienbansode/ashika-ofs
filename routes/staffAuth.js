@@ -18,6 +18,7 @@ const { T, adminOne, adminQuery } = require('../db/adminAdapter');
 const { SCHEMA, query, one } = require('../db/ofsAdapter');
 const sa = require('../lib/staffAuth');
 const otp = require('../lib/otp');
+const settings = require('../lib/settings');
 const mailer = require('../lib/mailer');
 const { otpEmail } = require('../lib/templates/otp');
 const audit = require('../lib/audit');
@@ -103,7 +104,7 @@ async function issueSession(res, user, req) {
  */
 async function startMfa(req, user) {
   const ref = crypto.randomUUID();
-  const testing = otp.staffTestMode();
+  const testing = otp.staffTestMode(await settings.all());
   const code = testing ? otp.testOtp() : otp.generateOtp();
   const to = otp.maskEmail(user.email);
 

@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { SCHEMA, query, one } = require('../db/ofsAdapter');
 const ca = require('../lib/clientAuth');
+const settings = require('../lib/settings');
 const ba = require('../lib/branchAuth');
 const cs = require('../middleware/clientAuth');
 const branches = require('../db/branchAdapter');
@@ -69,7 +70,10 @@ router.post('/start', startLimiter, async (req, res) => {
         error: reason, email, message: ba.blockMessage(reason) });
     }
 
-    const code = ca.testMode() ? ca.testOtp() : ca.generateOtp();
+    // One read, one verdict: calling testMode() three times could straddle a
+    // settings change and store a fixed code while telling the caller it was real.
+    const fixed = ca.testMode(await settings.all());
+    const code = fixed ? ca.testOtp() : ca.generateOtp();
     const ref = crypto.randomUUID();
     const to = ca.maskEmail(email);
 
@@ -79,7 +83,7 @@ router.post('/start', startLimiter, async (req, res) => {
           delivered_to, channel, expires_at, ip, user_agent)
        VALUES ($1,NULL,$2,NULL,$3,'branch',$4,$5,$6,$7, now() + ($8 || ' minutes')::interval, $9,$10)`,
       [ref, email, eligible.map((b) => b.branch_code), ca.hash(code), ca.OTP_MAX_ATTEMPTS,
-       to, ca.testMode() ? 'test' : 'email', String(ca.OTP_TTL_MIN), ip, ua.slice(0, 300)]);
+       to, fixed ? 'test' : 'email', String(ca.OTP_TTL_MIN), ip, ua.slice(0, 300)]);
 
     const out = {
       ok: true, ref, sent_to: to, email,
@@ -92,7 +96,7 @@ router.post('/start', startLimiter, async (req, res) => {
       message: 'A code has been sent to the email registered for this branch.'
     };
 
-    if (ca.testMode()) {
+    if (fixed) {
       console.warn('[branch-auth] TEST MODE — fixed code, nothing sent');
       out.test_mode = true;
       out.test_code = code;
