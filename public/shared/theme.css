@@ -180,6 +180,11 @@ table.tbl th.n{font-family:var(--sans)}
 @media (hover: none) and (pointer: coarse) {
   input, select, textarea, button { font-size: 16px !important; }
 
+  /* Double-tap-to-zoom, off — the CSS half of the pair with shared/nozoom.js,
+     which handles the pinch. This also removes the 300ms delay browsers used to
+     add before a click, waiting to see whether a second tap was coming. */
+  html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+
   /* Two exceptions, both deliberate. The one-time-code boxes are already far
      larger than 16px, and shrinking them to it would make the code harder to
      read, not easier. */

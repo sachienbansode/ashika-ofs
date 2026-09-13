@@ -36,17 +36,38 @@ test('every page tells the browser about the notch and the keyboard', () => {
   }
 });
 
-test('pinch-zoom is left alone — the auto-zoom is fixed at the source', () => {
+test('zoom is off, and off in the way that actually works on iOS', () => {
+  // The desk asked for this. The part worth pinning is that the meta tag is not
+  // enough: iOS Safari has ignored user-scalable=no and maximum-scale since iOS
+  // 10, so on an iPhone — which is where this was reported — the tag alone does
+  // nothing. The gesture handlers are what stop it there.
   for (const p of PAGES) {
-    const src = read(p);
-    assert.ok(!/user-scalable\s*=\s*no/.test(src), p + ' blocks pinch-zoom');
-    assert.ok(!/maximum-scale\s*=\s*1/.test(src), p + ' pins maximum-scale');
+    const m = /<meta name="viewport" content="([^"]+)">/.exec(read(p));
+    assert.match(m[1], /maximum-scale=1/, p);
+    assert.match(m[1], /user-scalable=no/, p);
+    assert.match(read(p), /<script src="\/shared\/nozoom\.js"><\/script>/,
+      p + ' does not load the gesture guard, so iOS will still pinch-zoom');
   }
-  // The actual cure, in the one stylesheet all three pages load.
+  const js = read('public/shared/nozoom.js');
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+    assert.match(js, new RegExp("addEventListener\\('" + ev + "'"), 'iOS needs ' + ev);
+  }
+  // passive:false, or preventDefault is ignored and the whole file does nothing.
+  assert.equal((js.match(/\{ passive: false \}/g) || []).length, 5);
+  // One finger is a scroll and must still work.
+  assert.match(js, /if \(e\.touches && e\.touches\.length > 1\) e\.preventDefault\(\);/);
+  // Double-tap is the CSS half.
+  assert.match(read('public/shared/theme.css'), /touch-action: manipulation/);
+  // A tap on a field must not be swallowed, or the keyboard stops opening.
+  assert.match(js, /closest\('input, select, textarea, button, a, \[contenteditable\]'\)/);
+});
+
+test('the 16px minimum still stands — it is what has to carry readability now', () => {
+  // With zoom off, a person who cannot read a control can no longer magnify it.
+  // The font floor stops being a convenience and becomes the whole accommodation.
   const theme = read('public/shared/theme.css');
-  assert.match(theme, /@media \(hover: none\) and \(pointer: coarse\) \{/);
-  assert.match(theme, /input, select, textarea, button \{ font-size: 16px !important; \}/,
-    'below 16px iOS zooms on focus and does not come back');
+  assert.match(theme, /input, select, textarea, button \{ font-size: 16px !important; \}/);
+  assert.match(theme, /-webkit-text-size-adjust: 100%/);
 });
 
 test('nothing in a component stylesheet can put a control back under 16px', () => {
