@@ -426,6 +426,17 @@ router.delete('/bids/:id(\\d+)', requireSingleClient, async (req, res, next) => 
     const blocked = await bids.cancelBlockedMessage();
     if (blocked) return res.status(422).json({ error: 'window_closed', message: blocked });
 
+    /* The desk cut-off is not the only clock. An HNI window can close at 13:00 with
+     * the cut-off at 15:15, and a withdrawal accepted at 14:00 cannot reach the
+     * exchange — the book would say cancelled while the exchange still held the
+     * bid, and nobody would find out until allotment. A modification has always
+     * been gated on the window through validateBid; a cancellation was not. */
+    const catShut = bids.cancelWindowMessage(
+      await one(`SELECT symbol, status, hni_open, hni_close, ret_open, ret_close
+                   FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [before.issue_id]),
+      before.category);
+    if (catShut) return res.status(422).json({ error: 'window_closed', message: catShut });
+
     const r = await bids.cancelBid(before, req.body && req.body.reason);
     await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
     // The confirmation is fire-and-forget: the bid is committed, and a mail
@@ -433,7 +444,7 @@ router.delete('/bids/:id(\\d+)', requireSingleClient, async (req, res, next) => 
     // has switched it on in Settings.
     bidMail.sendBidConfirm(req, r, 'cancel', null);
     res.json({ bid: r });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 
@@ -485,6 +496,9 @@ router.post('/branch/bids/otp', async (req, res, next) => {
       requestedBy: ba.actorLabel(a.kind) + ' ' + a.code + (a.name ? ' (' + a.name + ')' : ''),
       requestedByKind: a.kind,
       issueLabel: issue.symbol + (issue.company ? ' — ' + issue.company : ''),
+      // The terms the client is about to be shown, pinned so this code cannot
+      // later authorise a different bid for the same client on the same issue.
+      terms: b.terms || null,
       detail: b.detail, ip: req.ip, userAgent: req.headers['user-agent']
     });
     if (!r.ok) return res.status(r.reason === 'unknown_client' ? 404 : 422).json({
@@ -496,7 +510,7 @@ router.post('/branch/bids/otp', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-async function branchConfirm(req, res, { ucc, issueId, action, bidId }) {
+async function branchConfirm(req, res, { ucc, issueId, action, bidId, terms }) {
   const body = req.body || {};
   if (!body.otp_ref || !body.otp) {
     res.status(428).json({ error: 'otp_required', action, client_ucc: ucc, issue_id: issueId,
@@ -504,7 +518,7 @@ async function branchConfirm(req, res, { ucc, issueId, action, bidId }) {
     return false;
   }
   const v = await bidOtp.verify({ ref: body.otp_ref, code: String(body.otp).replace(/\D/g, ''),
-    clientUcc: ucc, issueId, action, bidId });
+    clientUcc: ucc, issueId, action, bidId, terms });
   if (!v.ok) {
     res.status(401).json({ error: v.reason, message: bidOtp.message(v.reason),
       attempts_left: v.attemptsLeft });
@@ -552,7 +566,8 @@ router.post('/branch/bids', async (req, res, next) => {
     const errs = validateBid(ctx.issue, b, ctx);
     if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
 
-    if (!(await branchConfirm(req, res, { ucc: b.client_ucc, issueId: b.issue_id, action: 'place' }))) return;
+    if (!(await branchConfirm(req, res,
+      { ucc: b.client_ucc, issueId: b.issue_id, action: 'place', terms: b }))) return;
 
     const a = branchActor(req);
     const r = await bids.insertBid(b, ctx, ba.placedByOf(a.kind), a.code, a.code);
@@ -596,7 +611,8 @@ router.put('/branch/bids/:id(\\d+)', async (req, res, next) => {
     if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
 
     if (!(await branchConfirm(req, res,
-      { ucc: before.client_ucc, issueId: before.issue_id, action: 'modify', bidId: before.id }))) return;
+      { ucc: before.client_ucc, issueId: before.issue_id, action: 'modify', bidId: before.id,
+        terms: b }))) return;
 
     const r = await bids.updateBid(before, b, ctx, null);
     await query(`UPDATE ${SCHEMA}.ofs_bid SET otp_verified = true, otp_ref = $2 WHERE id = $1`,
@@ -619,6 +635,17 @@ router.delete('/branch/bids/:id(\\d+)', async (req, res, next) => {
 
     const blocked = await bids.cancelBlockedMessage();
     if (blocked) return res.status(422).json({ error: 'window_closed', message: blocked });
+
+    /* The desk cut-off is not the only clock. An HNI window can close at 13:00 with
+     * the cut-off at 15:15, and a withdrawal accepted at 14:00 cannot reach the
+     * exchange — the book would say cancelled while the exchange still held the
+     * bid, and nobody would find out until allotment. A modification has always
+     * been gated on the window through validateBid; a cancellation was not. */
+    const catShut = bids.cancelWindowMessage(
+      await one(`SELECT symbol, status, hni_open, hni_close, ret_open, ret_close
+                   FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [before.issue_id]),
+      before.category);
+    if (catShut) return res.status(422).json({ error: 'window_closed', message: catShut });
 
     if (!(await branchConfirm(req, res,
       { ucc: before.client_ucc, issueId: before.issue_id, action: 'cancel', bidId: before.id }))) return;

@@ -73,6 +73,14 @@ const EDITABLE = {
       + 'file are the ones you mean to write to: these go to real investors.',
     check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
   },
+  client_login_unknown: {
+    label: 'Unknown sign-in identifier', kind: 'choice', choices: ['generic', 'reveal'],
+    hint: 'generic gives the same answer whether or not the client code, mobile or email belongs to '
+      + 'an account, so nobody can use the sign-in page to find out which ones exist. reveal says '
+      + '"no account found", which is friendlier to an investor who mistyped — and tells anyone '
+      + 'else the same thing. Default is generic.',
+    check: (v) => ['generic', 'reveal'].includes(String(v)) || 'Use generic or reveal'
+  },
   nse_header_row: {
     label: 'NSE file: include a header row', kind: 'bool',
     hint: 'BSE documents NO header row and we follow that. NSE\u2019s protocol lists the fields but '

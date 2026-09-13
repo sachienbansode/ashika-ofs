@@ -6,7 +6,8 @@
  */
 const express = require('express');
 const { SCHEMA, rows, one, query, tx } = require('../db/ofsAdapter');
-const { requirePage, requireEdit } = require('../middleware/pageAccess');
+const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAccess');
+const { maskRows } = require('../lib/pii');
 const audit = require('../lib/audit');
 const ld = require('../db/ldAdapter');
 const dbErr = require('../lib/dbErrors');
@@ -23,9 +24,15 @@ router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
          LEFT JOIN (SELECT client_ucc, sum(value) AS used FROM ${SCHEMA}.ofs_bid
                      WHERE status = 'Live' GROUP BY client_ucc) u ON u.client_ucc = m.client_ucc
         ORDER BY m.client_ucc`);
-    // A column of bare UCCs cannot be checked by eye. The name comes from LD in one
-    // round trip, not one per row.
-    res.json({ margins: await ld.enrich(r, 'client_ucc') });
+    /* A column of bare UCCs cannot be checked by eye, so the name comes from the
+     * client master in one round trip. enrich() also attaches PAN, mobile and
+     * email, and this was the only desk list that then sent them out with no
+     * mask — every other one runs maskRows. A margin screen needs a name; it has
+     * never needed a PAN. */
+    res.json({
+      margins: maskRows(await ld.enrich(r, 'client_ucc'), canViewPII(req, 'ofs-desk')),
+      pii_unmasked: canViewPII(req, 'ofs-desk')
+    });
   } catch (e) { dbErr.send(res, next, e); }
 });
 

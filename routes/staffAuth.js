@@ -164,7 +164,13 @@ router.post('/login', loginLimiter, async (req, res) => {
     // Always spend the bcrypt round, even for an unknown or password-less account.
     const ok = await bcrypt.compare(password, (user && user.password_hash) || DUMMY_HASH);
 
-    if (block === 'm365') {
+    /* "Use Microsoft 365" is a helpful message and an account oracle: it is
+     * returned before the password is consulted, so anyone can tell a real, active
+     * Ashika staff address from a made-up one, at ten guesses per quarter-hour,
+     * with no credential at all. The hint is worth keeping — it saves a support
+     * call — but only once the caller has proved they hold the password. Someone
+     * who knows the password is not learning anything from it. */
+    if (block === 'm365' && ok) {
       return res.status(403).json({ error: 'use_portal',
         message: 'This account signs in with Microsoft 365. Use the portal, then open the OFS desk from there.' });
     }

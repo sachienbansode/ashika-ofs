@@ -60,7 +60,14 @@ router.post('/start', startLimiter, async (req, res) => {
   //             if enumeration is the bigger worry.
   //
   // Masters -> Settings -> "Unknown sign-in identifier".
-  const reveal = String(cfg.client_login_unknown || 'reveal') === 'reveal';
+  /* Defaults to the GENERIC answer now. 'reveal' is friendlier — "no account for
+   * that mobile number" is exactly what an investor who mistyped needs — but as a
+   * default it hands an unauthenticated caller a yes/no oracle over Ashika's
+   * client base, and the per-identifier throttle cannot help: a miss inserts no
+   * challenge row, so the counter it reads never moves for exactly the requests
+   * being used to enumerate. The desk can turn it back on in Settings once they
+   * have weighed that. */
+  const reveal = String(cfg.client_login_unknown || 'generic') === 'reveal';
 
   // The generic answer. Every success path returns exactly this, so a caller cannot
   // learn whether an identifier belongs to a client.

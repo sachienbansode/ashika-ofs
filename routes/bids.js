@@ -100,6 +100,10 @@ router.post('/otp', requirePage(PAGE), requireEdit(PAGE), async (req, res, next)
 
     const r = await bidOtp.create({
       clientUcc: ucc, issueId: b.issue_id, action, bidId: b.bid_id,
+      // The terms the client is about to be SHOWN, pinned so the code cannot be
+      // spent on a different bid. `detail` is the sentence they read; this is the
+      // same bid in a form the server can compare.
+      terms: b.terms || null,
       requestedBy: 'Ashika OFS desk (' + (req.user.email || req.user.id) + ')',
       requestedByKind: 'desk',
       issueLabel: issue.symbol + (issue.company ? ' — ' + issue.company : ''),
@@ -122,7 +126,7 @@ async function markConfirmed(bidId, otpRef) {
 }
 
 /** Redeem, or explain. Returns null when the write may proceed. */
-async function confirmOrReject(req, res, { ucc, issueId, action, bidId }) {
+async function confirmOrReject(req, res, { ucc, issueId, action, bidId, terms }) {
   if (!(await otpRequired())) return null;
   const body = req.body || {};
   if (!body.otp_ref || !body.otp) {
@@ -134,7 +138,7 @@ async function confirmOrReject(req, res, { ucc, issueId, action, bidId }) {
     });
   }
   const v = await bidOtp.verify({ ref: body.otp_ref, code: String(body.otp).replace(/\D/g, ''),
-    clientUcc: ucc, issueId, action, bidId });
+    clientUcc: ucc, issueId, action, bidId, terms });
   if (!v.ok) {
     return res.status(401).json({ error: v.reason, message: bidOtp.message(v.reason),
       attempts_left: v.attemptsLeft });
@@ -157,7 +161,10 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
 
     // Validate FIRST, confirm second: a client should not be asked to approve a bid
     // that was never going to pass the margin or cut-off check anyway.
-    if (await confirmOrReject(req, res, { ucc: b.client_ucc, issueId: b.issue_id, action: 'place' })) return;
+    // `b` is the normalised bid about to be written, so the code is checked
+    // against the bid itself and not against what the request claims it is.
+    if (await confirmOrReject(req, res,
+      { ucc: b.client_ucc, issueId: b.issue_id, action: 'place', terms: b })) return;
 
     const r = await bids.insertBid(b, ctx, 'desk', req.user.email || req.user.id, ctx.client.branch);
     await markConfirmed(r.id, req.body && req.body.otp_ref);
@@ -184,7 +191,8 @@ router.put('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) 
     if (errs.length) return res.status(422).json({ error: 'validation_failed', errors: errs });
 
     if (await confirmOrReject(req, res,
-      { ucc: before.client_ucc, issueId: before.issue_id, action: 'modify', bidId: before.id })) return;
+      { ucc: before.client_ucc, issueId: before.issue_id, action: 'modify', bidId: before.id,
+        terms: b })) return;
 
     const r = await bids.updateBid(before, b, ctx, req.body.exch_order_no);
     await markConfirmed(r.id, req.body && req.body.otp_ref);
@@ -211,6 +219,16 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
     if (blocked && String(req.body && req.body.force) !== 'true') {
       return res.status(422).json({ error: 'window_closed', message: blocked });
     }
+    const catShut = bids.cancelWindowMessage(
+      await one(`SELECT symbol, status, hni_open, hni_close, ret_open, ret_close
+                   FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [before.issue_id]),
+      before.category);
+    /* Same second clock as the portal. The desk keeps its force override — it is
+     * the only party that can reconcile with the exchange by hand — but it must be
+     * a DECISION, not a gap, so the refusal happens first and names the window. */
+    if (catShut && String(req.body && req.body.force) !== 'true') {
+      return res.status(422).json({ error: 'window_closed', message: catShut });
+    }
 
     // Withdrawing a client's bid is as much theirs to agree to as placing one.
     if (await confirmOrReject(req, res,
@@ -224,7 +242,7 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
     // has switched it on in Settings.
     bidMail.sendBidConfirm(req, r, 'cancel', null);
     res.json({ bid: r });
-  } catch (e) { next(e); }
+  } catch (e) { dbErr.send(res, next, e); }
 });
 
 /** POST /api/bids/validate - dry-run for the UI, no write. */

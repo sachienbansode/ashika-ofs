@@ -1535,7 +1535,13 @@ async function sendBidOtp(action) {
       action: action,
       bid_id: STATE.editing ? STATE.editing.id : null,
       detail: inr($('#pbQty').value, 0) + ' shares at ' +
-              ($('#pbType').value === 'cutoff' ? 'cut-off' : rupee($('#pbPrice').value))
+              ($('#pbType').value === 'cutoff' ? 'cut-off' : rupee($('#pbPrice').value)),
+      /* The same bid, in a form the server can compare. `detail` is the sentence
+       * the client reads; `terms` is what the code is pinned to, so it cannot
+       * afterwards authorise a different quantity or price for the same client on
+       * the same issue. Taken from bidPayload so it is literally the bid that will
+       * be sent, not a second reading of the form that could differ from it. */
+      terms: bidPayload()
     } });
     OTP_STATE = { ref: r.ref, action: action, sent_to: r.sent_to };
     $('#pbOtpCode').disabled = false;
