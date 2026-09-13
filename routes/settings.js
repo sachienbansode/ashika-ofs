@@ -64,6 +64,15 @@ const EDITABLE = {
       + 'which is the record that matters if they later say they did not.',
     check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
   },
+  bid_email_confirm: {
+    label: 'Email an order confirmation', kind: 'bool',
+    hint: 'OFF by default. When on, every bid placed, changed or withdrawn sends a confirmation '
+      + 'to the CLIENT\u2019s registered email address, copied to whoever placed it \u2014 the back-office '
+      + 'user, the branch or the Authorised Partner. The client\u2019s address comes from the client '
+      + 'master, never from the request. Turn this on only once you are satisfied the addresses on '
+      + 'file are the ones you mean to write to: these go to real investors.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
   nse_header_row: {
     label: 'NSE file: include a header row', kind: 'bool',
     hint: 'BSE documents NO header row and we follow that. NSE\u2019s protocol lists the fields but '

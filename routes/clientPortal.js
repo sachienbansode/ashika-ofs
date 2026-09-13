@@ -4,7 +4,7 @@
  * a client can only ever read or write their own bids, never another account's.
  */
 const express = require('express');
-const { SCHEMA, rows, one } = require('../db/ofsAdapter');
+const { SCHEMA, rows, one, query } = require('../db/ofsAdapter');
 const { requireClient, requireSingleClient } = require('../middleware/clientAuth');
 const branches = require('../db/branchAdapter');
 const ba = require('../lib/branchAuth');
@@ -14,6 +14,7 @@ const settings = require('../lib/settings');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
 const notices = require('../lib/notices');
+const bidMail = require('../lib/bidMail');
 const dbErr = require('../lib/dbErrors');
 const bidOtp = require('../lib/bidOtp');
 const ld = require('../db/ldAdapter');
@@ -371,6 +372,10 @@ router.post('/bids', requireSingleClient, async (req, res, next) => {
 
     const r = await bids.insertBid(b, ctx, placedBy(req), placedById(req), ctx.client.branch);
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'place', ctx && ctx.issue);
     res.status(201).json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) {
     if (e && e.code === '23505') {
@@ -401,6 +406,10 @@ router.put('/bids/:id(\\d+)', requireSingleClient, async (req, res, next) => {
 
     const r = await bids.updateBid(before, b, ctx, null);
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'modify', ctx && ctx.issue);
     res.json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
@@ -419,6 +428,10 @@ router.delete('/bids/:id(\\d+)', requireSingleClient, async (req, res, next) => 
 
     const r = await bids.cancelBid(before, req.body && req.body.reason);
     await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'cancel', null);
     res.json({ bid: r });
   } catch (e) { next(e); }
 });
@@ -546,6 +559,10 @@ router.post('/branch/bids', async (req, res, next) => {
     await query(`UPDATE ${SCHEMA}.ofs_bid SET otp_verified = true, otp_ref = $2 WHERE id = $1`,
       [r.id, String(req.body.otp_ref)]).catch(() => {});
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'place', ctx && ctx.issue);
     res.status(201).json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) {
     if (e && e.code === '23505') {
@@ -585,6 +602,10 @@ router.put('/branch/bids/:id(\\d+)', async (req, res, next) => {
     await query(`UPDATE ${SCHEMA}.ofs_bid SET otp_verified = true, otp_ref = $2 WHERE id = $1`,
       [r.id, String(req.body.otp_ref)]).catch(() => {});
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'modify', ctx && ctx.issue);
     res.json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
@@ -604,6 +625,10 @@ router.delete('/branch/bids/:id(\\d+)', async (req, res, next) => {
 
     const r = await bids.cancelBid(before, req.body && req.body.reason);
     await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'cancel', null);
     res.json({ bid: r });
   } catch (e) { dbErr.send(res, next, e); }
 });

@@ -9,6 +9,7 @@ const { validateBid, bidValue, minPrice } = require('../lib/domain');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
 const notices = require('../lib/notices');
+const bidMail = require('../lib/bidMail');
 const dbErr = require('../lib/dbErrors');
 const bidOtp = require('../lib/bidOtp');
 const settings = require('../lib/settings');
@@ -162,6 +163,10 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
     await markConfirmed(r.id, req.body && req.body.otp_ref);
 
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'place', ctx && ctx.issue);
     res.status(201).json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
@@ -185,6 +190,10 @@ router.put('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) 
     await markConfirmed(r.id, req.body && req.body.otp_ref);
 
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'modify', ctx && ctx.issue);
     res.json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
@@ -210,6 +219,10 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
     const r = await bids.cancelBid(before, req.body && req.body.reason);
     await markConfirmed(r.id, req.body && req.body.otp_ref);
     await audit.log(req, 'cancel', 'ofs_bid', r.id, before, r);
+    // The confirmation is fire-and-forget: the bid is committed, and a mail
+    // problem must never reach the caller as a failed bid. Off unless the desk
+    // has switched it on in Settings.
+    bidMail.sendBidConfirm(req, r, 'cancel', null);
     res.json({ bid: r });
   } catch (e) { next(e); }
 });

@@ -3046,9 +3046,31 @@ async function loadSettings() {
   }
 }
 
+/**
+ * Settings that send real mail to real people, and so are confirmed before they
+ * are switched ON. Switching one OFF needs no confirmation — stopping is safe.
+ *
+ * This is a second pair of eyes, not a permission: the server does not know the
+ * difference, and anyone with the grant can still do it. What it prevents is the
+ * one-click version of the mistake, on a database whose client master holds live
+ * investor addresses.
+ */
+var CONFIRM_ON = {
+  bid_email_confirm:
+    'Switch ON order confirmation emails?\n\n' +
+    'From now on, every bid placed, changed or withdrawn will email the CLIENT at the ' +
+    'address held in the client master, and copy whoever placed it.\n\n' +
+    'These go to real investors. If this environment holds live client addresses and ' +
+    'you are testing, choose Cancel.'
+};
+
 async function saveSetting(key) {
   var el = $('[data-set="' + key + '"]');
   if (!el) return;
+  if (CONFIRM_ON[key] && String(el.value) === '1' && !window.confirm(CONFIRM_ON[key])) {
+    loadSettings();                   // put the control back where it was
+    return toast('Not changed', 'Order confirmation emails are still off.', 'warn');
+  }
   try {
     var r = await api('/settings', { method: 'PUT', body: { key: key, value: el.value } });
     if (r.unchanged) { toast('No change', key + ' is already ' + el.value); return; }
