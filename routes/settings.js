@@ -81,6 +81,27 @@ const EDITABLE = {
       + 'else the same thing. Default is generic.',
     check: (v) => ['generic', 'reveal'].includes(String(v)) || 'Use generic or reveal'
   },
+  export_email_enabled: {
+    label: 'Email the day\u2019s exchange files', kind: 'bool',
+    hint: 'ON by default. Sends the bid file for every issue that took bids today, one per issue '
+      + 'per exchange, to the address below. Files are built by the same code the Exchange files '
+      + 'screen downloads, so what arrives is what you would have downloaded. Nothing is uploaded '
+      + 'anywhere \u2014 this only emails.',
+    check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
+  },
+  export_email_time: {
+    label: 'Send the files at (IST)', kind: 'time',
+    hint: 'Default 15:16 \u2014 one minute after the 15:15 desk cut-off, so the day\u2019s book is '
+      + 'closed. Sent once a day; changing this after today\u2019s send has gone does not resend it.',
+    check: (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v) || 'Use HH:MM, 24-hour'
+  },
+  export_email_to: {
+    label: 'Send the files to', kind: 'text',
+    hint: 'Who receives the exchange files. One address, or several separated by commas. Leave '
+      + 'blank and nothing is sent, whatever the switch above says.',
+    check: (v) => v === '' || String(v).split(',').every((x) => /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(x.trim()))
+      || 'One email address, or several separated by commas'
+  },
   nse_header_row: {
     label: 'NSE file: include a header row', kind: 'bool',
     hint: 'BSE documents NO header row and we follow that. NSE\u2019s protocol lists the fields but '

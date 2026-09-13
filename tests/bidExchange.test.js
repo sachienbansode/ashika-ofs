@@ -17,7 +17,9 @@ const d = require('../lib/domain');
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
 test('the export filters on the exchange, for both preview and download', () => {
-  const src = read('routes/export.js');
+  // The builder moved to lib/exportBuild so the Exchange files screen and the
+  // scheduled email assemble one file from one function, not two that can drift.
+  const src = read('lib/exportBuild.js');
   assert.match(src, /function exchangeClause/);
   assert.match(src, /upper\(\$\{alias\}\.exchange\) = \$\$\{n\}/);
   // Every caller must pass it. A collect() without the exchange is the old bug.
@@ -28,17 +30,18 @@ test('the export filters on the exchange, for both preview and download', () => 
 });
 
 test('a bid with no exchange is included only where the issue leaves no choice', () => {
-  const src = read('routes/export.js');
+  const src = read('lib/exportBuild.js');
   // NULL falls back to the ISSUE's exchange — safe when that is NSE or BSE, and
   // deliberately matches nothing when it is BOTH.
   assert.match(src, /exchange IS NULL AND upper\(i\.exchange\) = /);
 });
 
 test('bids on a BOTH issue with no exchange are named, not silently dropped', () => {
-  const src = read('routes/export.js');
+  const src = read('lib/exportBuild.js');
+  // and the screen still reports them
+  assert.match(read('routes/export.js'), /unrouted: isExchange/);
   assert.match(src, /function unroutedBids/);
   assert.match(src, /upper\(i\.exchange\) = 'BOTH'/);
-  assert.match(src, /unrouted:/);
 });
 
 test('the database refuses BOTH on a bid, and backfills what it can', () => {

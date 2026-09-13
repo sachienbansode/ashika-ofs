@@ -494,20 +494,228 @@ var DESK_ONLY_TABS = ['export', 'masters'];
 var PARTNER_ONLY_TABS = [];
 var ALL_PANES = ['dash', 'book', 'place', 'clients', 'export', 'masters', 'rules'];
 
-function showTab(t) {
+/**
+ * Which section you are on survives a refresh.
+ *
+ * It lives in the URL hash rather than in storage: a refresh keeps it, the back
+ * button walks between sections the way a phone's back button is expected to, and
+ * a desk can send a colleague a link to the screen they are talking about. Storage
+ * would do the first of those and none of the others, and would quietly disagree
+ * with the address bar.
+ *
+ * replaceState, not pushState, when the tab is set programmatically — jumping from
+ * a dashboard card to the bid form should not leave a history entry that takes you
+ * back to a card you have already acted on.
+ */
+function showTab(t, fromHash) {
   if (PARTNER && DESK_ONLY_TABS.indexOf(t) >= 0) t = 'dash';
   if (!PARTNER && PARTNER_ONLY_TABS.indexOf(t) >= 0) t = 'dash';
+  if (!fromHash) {
+    try {
+      var want = '#' + t;
+      if (location.hash !== want) history.replaceState(null, '', want);
+    } catch (e) { /* a file:// or sandboxed context — the tab still switches */ }
+  }
   STATE.tab = t;
   $$('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
   ALL_PANES.forEach(function (k) {
     var pane = $('#pane-' + k);
     if (pane) pane.classList.toggle('hide', k !== t);
   });
+  syncTabBar();
   if (t === 'clients') loadClients(true);
   if (t === 'book') loadBook();
   if (t === 'export') { loadExportLog(); previewExport(); }
   if (t === 'masters') loadMasters();
   if (t === 'rules') renderRules($('#rulesBox'));
+}
+
+/* ============================================================= phone shell ===
+ *
+ * The same screens, arranged the way a phone is held: one slim bar at the top,
+ * the sections along the bottom under the thumb, and the middle left for work.
+ *
+ * Two rules shape all of it.
+ *
+ * There is ONE of every control. The header's Refresh button, auto-refresh
+ * select, clock and Sign out are MOVED into the sheet and moved back when the
+ * window grows — not hidden and duplicated. A second Refresh button that is
+ * wired to nothing, or a second auto-refresh select that disagrees with the
+ * first, is a worse bug than the layout it was meant to fix, and every listener
+ * bound in boot() keeps working because these are the same elements.
+ *
+ * The bottom bar is BUILT FROM the tabs, after the shell has removed the ones
+ * this session may not see. So a branch gets its five and never a sixth pointing
+ * at a desk screen, and adding a tab to the HTML puts it on the phone too
+ * without anyone remembering to.
+ */
+
+/* Four across the bottom is what fits a 390px screen and still reads. A desk has
+   seven sections, so the fourth slot becomes More. */
+var TABBAR_MAX = 4;
+
+/* Line icons, drawn rather than named, so there is no icon font to load and
+   nothing to go missing behind a CSP. Keyed by the tab's own data-tab. */
+var TAB_ICONS = {
+  dash:    '<path d="M3 12h5l2-7 3 14 2-7h5"/>',
+  book:    '<path d="M4 5h10a2 2 0 0 1 2 2v12H6a2 2 0 0 1-2-2z"/><path d="M16 7h4v12H6"/><path d="M7 9h6M7 12h6"/>',
+  place:   '<path d="M12 5v14M5 12h14"/>',
+  clients: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5a3 3 0 0 1 0 6"/><path d="M18 20a6 6 0 0 0-3-5"/>',
+  export:  '<path d="M12 4v11"/><path d="M8 11l4 4 4-4"/><path d="M4 19h16"/>',
+  masters: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/>',
+  rules:   '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 12h6M9 16h6"/>',
+  more:    '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'
+};
+
+function tabIcon(key) {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (TAB_ICONS[key] || TAB_ICONS.more) + '</svg>';
+}
+
+/* A bottom bar label has about nine characters. The desktop tab text is written
+   for a wider strip, so the long ones get a short form rather than an ellipsis. */
+var TAB_SHORT = { dash: 'Home', book: 'Bids', place: 'Place', clients: 'Clients',
+                  export: 'Files', masters: 'Masters', rules: 'Rules' };
+
+/** The section named in the address bar, if this session is allowed to see it. */
+function restoreTabFromHash() {
+  var t = String(location.hash || '').replace(/^#/, '').trim();
+  if (!t) return;
+  // Only a section that still exists for this session. A partner opening a
+  // bookmarked #masters gets the dashboard, not an empty pane.
+  var known = $$('#tabs button').some(function (b) { return b.dataset.tab === t; });
+  if (known) showTab(t, true);
+  else history.replaceState(null, '', '#' + (STATE.tab || 'dash'));
+}
+
+function buildTabBar() {
+  var bar = $('#tabbar');
+  if (!bar) return;
+  var tabs = $$('#tabs button');
+  if (!tabs.length) return;
+
+  var shown = tabs.slice(0, tabs.length > TABBAR_MAX ? TABBAR_MAX - 1 : TABBAR_MAX);
+  var rest = tabs.slice(shown.length);
+
+  bar.innerHTML = shown.map(function (b) {
+    var k = b.dataset.tab;
+    return '<button type="button" data-tab="' + esc(k) + '">' + tabIcon(k) +
+           '<span>' + esc(TAB_SHORT[k] || b.textContent.trim()) + '</span></button>';
+  }).join('') + (rest.length
+    ? '<button type="button" data-more="1">' + tabIcon('more') + '<span>More</span></button>'
+    : '');
+  bar.hidden = false;
+
+  // Delegated, because the bar is rebuilt whenever the session's tabs change.
+  if (!bar.dataset.bound) {
+    bar.dataset.bound = '1';
+    bar.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.more) return openMoreSheet();
+      closeSheets();
+      showTab(b.dataset.tab);
+    });
+  }
+  syncTabBar();
+}
+
+/** Keep the bar in step with whatever changed the tab — a button, a card, a jump. */
+function syncTabBar() {
+  var bar = $('#tabbar');
+  if (!bar) return;
+  var onBar = false;
+  $$('#tabbar button').forEach(function (b) {
+    var on = b.dataset.tab === STATE.tab;
+    if (on) onBar = true;
+    b.classList.toggle('on', on);
+  });
+  // A section reached from More is still the section you are in, so More lights up.
+  var more = bar.querySelector('[data-more]');
+  if (more) more.classList.toggle('on', !onBar);
+}
+
+/* ---- the two sheets ---- */
+
+function closeSheets() {
+  var sheet = $('#topSheet'), veil = $('#sheetVeil'), more = $('#topMore');
+  if (sheet) { sheet.hidden = true; sheet.innerHTML = ''; }
+  if (veil) veil.hidden = true;
+  if (more) more.setAttribute('aria-expanded', 'false');
+  restoreHeader();
+}
+
+/* The header's controls live in the sheet while it is open and in the header the
+   rest of the time. Moved, never copied — see the note at the top. */
+var HEADER_PARKED = [];
+
+function foldHeader() {
+  var sheet = $('#topSheet');
+  var header = $('header.top');
+  if (!sheet || !header) return;
+  HEADER_PARKED = [];
+  ['#btnRefresh', '#autoRefresh', '#refreshNote', '#clock', '.who', '#btnSignOut']
+    .forEach(function (sel) {
+      var el = header.querySelector(sel);
+      if (!el) return;
+      HEADER_PARKED.push({ el: el, next: el.nextSibling, parent: el.parentNode });
+      sheet.appendChild(el);
+    });
+}
+
+function restoreHeader() {
+  HEADER_PARKED.forEach(function (p) {
+    if (p.next && p.next.parentNode === p.parent) p.parent.insertBefore(p.el, p.next);
+    else p.parent.appendChild(p.el);
+  });
+  HEADER_PARKED = [];
+}
+
+function openTopSheet() {
+  var sheet = $('#topSheet'), veil = $('#sheetVeil'), btn = $('#topMore');
+  if (!sheet) return;
+  if (!sheet.hidden) return closeSheets();
+  sheet.innerHTML = '';
+  foldHeader();
+  sheet.hidden = false;
+  if (veil) veil.hidden = false;
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+}
+
+/** The sections that did not fit the bar. */
+function openMoreSheet() {
+  var sheet = $('#topSheet'), veil = $('#sheetVeil');
+  if (!sheet) return;
+  var tabs = $$('#tabs button');
+  var rest = tabs.slice(TABBAR_MAX - 1);
+  if (!sheet.hidden && sheet.dataset.kind === 'more') return closeSheets();
+  closeSheets();
+  sheet.dataset.kind = 'more';
+  sheet.innerHTML = rest.map(function (b) {
+    return '<button class="btn ghost" type="button" data-gotab="' + esc(b.dataset.tab) + '" ' +
+      'style="justify-content:flex-start;width:100%">' + esc(b.textContent.trim()) + '</button>';
+  }).join('');
+  sheet.hidden = false;
+  if (veil) veil.hidden = false;
+  sheet.querySelectorAll('[data-gotab]').forEach(function (b) {
+    b.addEventListener('click', function () { closeSheets(); showTab(b.dataset.gotab); });
+  });
+}
+
+function bindPhoneShell() {
+  bindIf('#topMore', 'click', function () {
+    var sheet = $('#topSheet');
+    if (sheet && !sheet.hidden && sheet.dataset.kind === 'more') { closeSheets(); return; }
+    if (sheet) sheet.dataset.kind = 'header';
+    openTopSheet();
+  });
+  bindIf('#sheetVeil', 'click', closeSheets);
+  // Escape closes, and so does growing the window past the phone layout — a sheet
+  // left open on a desktop would sit over the page with nothing to dismiss it.
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheets(); });
+  var mq = window.matchMedia('(max-width: 720px)');
+  var onChange = function () { closeSheets(); buildTabBar(); };
+  if (mq.addEventListener) mq.addEventListener('change', onChange);
+  else if (mq.addListener) mq.addListener(onChange);
 }
 
 /* ---------------- dashboard ---------------- */
@@ -1805,6 +2013,11 @@ function exportQuery(part) {
   var q = ['issue_id=' + encodeURIComponent($('#exIssue').value || 'all'),
            'category=' + encodeURIComponent($('#exCat').value),
            'include_cancelled=' + encodeURIComponent($('#exCanc').value)];
+  // An earlier day's file. Blank means every bid on the issue whenever it was
+  // placed, which is what reconciling a closed issue needs; a date narrows it to
+  // the bids created on that IST day, which is what rebuilding a past upload needs.
+  var on = $('#exAsOn') && $('#exAsOn').value;
+  if (on) q.push('as_on=' + encodeURIComponent(on));
   if (part) q.push('part=' + encodeURIComponent(part));
   return q.join('&');
 }
@@ -1971,6 +2184,34 @@ async function downloadFullExport() {
   } catch (e) {
     toast('Download failed', exportError(e), 'bad');
   } finally { btn.disabled = false; }
+}
+
+/**
+ * Send the day's exchange files now, rather than waiting for the scheduled time.
+ *
+ * A copy, not a replacement: the scheduled send still goes at its time with the
+ * closed book. Says so in the confirmation, because "I already emailed them" is
+ * otherwise an easy thing to believe about the wrong file.
+ */
+async function emailExportNow() {
+  var on = ($('#exAsOn') && $('#exAsOn').value) || '';
+  var when = on || 'today';
+  if (!window.confirm('Email the exchange files for ' + when + ' to the address set in Settings?\n\n' +
+      'The scheduled send still goes at its usual time with the day\'s closed book.')) return;
+  var btn = $('#exEmailNow');
+  if (btn) btn.disabled = true;
+  try {
+    var r = await api('/export/email', { method: 'POST', body: on ? { as_on: on } : {} });
+    if (!r.sent) {
+      toast('Not sent', r.error || 'The mail server refused it.', 'bad');
+    } else {
+      toast('Files emailed', r.files + ' file(s) sent to ' + r.to +
+        (r.problems ? ' · ' + r.problems + ' issue(s) could not be built' : ''), 'ok');
+    }
+    loadExportLog();
+  } catch (e) {
+    toast('Not sent', apiMessage(e), 'bad');
+  } finally { if (btn) btn.disabled = false; }
 }
 
 async function downloadExport(part) {
@@ -3742,6 +3983,11 @@ async function checkSession() {
         if (b) b.remove();
       });
     }
+    /* The bottom bar is built from whatever tabs survived the two sweeps above,
+       so a branch can never be shown a bar button pointing at a desk screen, and
+       a tab added to the HTML reaches the phone without anyone remembering to. */
+    buildTabBar();
+    restoreTabFromHash();
     return true;
   } catch (e) {
     if (e.status === 401) {
@@ -3843,6 +4089,7 @@ async function boot() {
   $('#exPreview').addEventListener('click', previewExport);
   $('#exDownload').addEventListener('click', function () { downloadExport(); });
   $('#exFull').addEventListener('click', downloadFullExport);
+  bindIf('#exEmailNow', 'click', emailExportNow);
   $('#exSummary').addEventListener('click', function (e) {
     var b = e.target.closest('[data-part]');
     if (b) downloadExport(b.dataset.part);
@@ -3951,12 +4198,25 @@ async function boot() {
     CL.offset = Math.max(0, CL.offset + (b.dataset.clpage === 'next' ? CL.limit : -CL.limit));
     loadClients();
   });
+  bindIf('#exAsOn', 'change', previewExport);
+  bindIf('#exToday', 'click', function () {
+    // IST, not the machine's timezone: the desk's day is what the filter means.
+    var ist = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata',
+      year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    $('#exAsOn').value = ist;
+    previewExport();
+  });
+  bindIf('#exAllDays', 'click', function () { $('#exAsOn').value = ''; previewExport(); });
+
   bindIf('#clientsTbl', 'click', function (e) {
     var b = e.target.closest('[data-bidfor]');
     if (b) bidForClient(b.dataset.bidfor);
   });
 
   $('#btnSignOut').addEventListener('click', signOut);
+  bindPhoneShell();
+  // Back and forward move between sections, and a pasted link opens on one.
+  window.addEventListener('hashchange', restoreTabFromHash);
 
   tickClock();
   setInterval(tickClock, 1000);

@@ -727,3 +727,118 @@ td.n.neg{color:var(--red);font-weight:650}
 .mg-neg{color:var(--red);font-weight:650}
 .mg-pos{color:var(--green);font-weight:650}
 #clTotals .tag{font-weight:500}
+
+/* ======================================================== the phone layout ===
+ * Below 720px this stops being a desktop page that has been squeezed and becomes
+ * an app: one slim bar at the top, the sections along the bottom where a thumb
+ * reaches, and the whole of the middle for the work.
+ *
+ * What it replaces: a header that took three rows and 280px of an 844px screen
+ * before any content appeared, and a tab strip whose last two tabs ran off the
+ * side with nothing to say they were there.
+ */
+@media (max-width: 720px) {
+
+  /* ---- the top bar: one row, always visible ---- */
+  header.top {
+    position: sticky; top: 0; z-index: 60;
+    display: flex; flex-wrap: nowrap; align-items: center; gap: 10px;
+    height: 54px; padding: 0 12px;
+    padding-top: env(safe-area-inset-top);
+    height: calc(54px + env(safe-area-inset-top));
+    border-bottom: 1px solid var(--line);
+  }
+  header.top img { height: 26px; }
+  header.top .brand { font-size: 11px; letter-spacing: .09em; white-space: nowrap; }
+  /* Everything else is in the sheet. The elements are MOVED there, not hidden and
+     duplicated, so there is only ever one of each control. */
+  header.top .clock,
+  header.top #btnRefresh,
+  header.top #autoRefresh,
+  header.top #refreshNote,
+  header.top .who,
+  header.top #btnSignOut { display: none; }
+  header.top .sp { flex: 1; }
+
+  .topmore {
+    display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    width: 44px; height: 44px; padding: 0 11px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--white); cursor: pointer; flex: 0 0 auto;
+  }
+  .topmore span { display: block; height: 2px; border-radius: 2px; background: var(--navy); }
+  .topmore[aria-expanded="true"] { background: var(--navy); }
+  .topmore[aria-expanded="true"] span { background: #fff; }
+
+  /* ---- the sheet the header folds into ---- */
+  .topsheet {
+    position: fixed; left: 0; right: 0; z-index: 59;
+    top: calc(54px + env(safe-area-inset-top));
+    background: var(--white); border-bottom: 1px solid var(--line);
+    box-shadow: 0 14px 28px rgba(27,42,78,.13);
+    padding: 13px 14px calc(14px + env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; gap: 11px;
+    max-height: calc(100vh - 54px - env(safe-area-inset-top)); overflow-y: auto;
+  }
+  .topsheet[hidden] { display: none; }
+  .topsheet .who { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+  .topsheet .clock,
+  .topsheet #refreshNote { font-size: 12px; color: var(--muted); }
+  .topsheet #btnRefresh,
+  .topsheet #btnSignOut,
+  .topsheet #autoRefresh { width: 100%; min-height: 44px; }
+  .topsheet .row { display: flex; gap: 9px; align-items: center; }
+  .topsheet .row > * { flex: 1; }
+  .sheet-veil { position: fixed; inset: 0; z-index: 58; background: rgba(16,24,40,.32); }
+  .sheet-veil[hidden] { display: none; }
+
+  /* ---- the sections, along the bottom ---- */
+  nav.tabs { display: none; }          /* the desktop strip; the bar below replaces it */
+
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    display: flex; align-items: stretch;
+    background: var(--white); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -2px 14px rgba(27,42,78,.07);
+  }
+  .tabbar[hidden] { display: none; }
+  .tabbar button {
+    flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; padding: 8px 2px 7px; min-height: 56px;
+    border: 0; background: transparent; cursor: pointer;
+    color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .01em;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tabbar button svg { width: 21px; height: 21px; stroke: currentColor; fill: none;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .tabbar button.on { color: var(--navy); }
+  .tabbar button.on svg { stroke-width: 2.1; }
+  .tabbar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* The bar sits over the page, so the page has to end above it. */
+  main { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
+  .app-foot { padding-bottom: calc(74px + env(safe-area-inset-bottom)); font-size: 10.5px; }
+  .toast { bottom: calc(70px + env(safe-area-inset-bottom)); }
+
+  /* ---- the middle: less frame, more content ---- */
+  main { padding-left: 10px; padding-right: 10px; }
+  section.pane { padding: 0; background: transparent; box-shadow: none; border: 0; }
+  section.pane > .card,
+  section.pane > .bar { margin-left: 0; margin-right: 0; }
+  .card { padding: 13px 13px 14px; border-radius: 12px; }
+
+  /* A filter bar on a phone is a stack of full-width rows, not a wrapped line.
+     "Show closed too" was breaking across three lines next to a bare checkbox. */
+  .bar { gap: 9px; }
+  .bar > label.inline { flex: 1 1 100%; justify-content: space-between; }
+  .bar > label.chk { flex: 1 1 100%; display: flex; align-items: center; gap: 10px;
+    min-height: 44px; }
+  .bar > label.chk span { flex: 1; }
+  .bar .tag { flex: 1 1 100%; }
+}
+
+/* The bottom bar is a phone idea. On anything wider the desktop strip is better:
+   it shows every section at once and does not cost 56px of every screen. */
+@media (min-width: 721px) { .tabbar { display: none !important; } }

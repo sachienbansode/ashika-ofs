@@ -119,3 +119,73 @@ test('the bid form itself fits a phone', () => {
   // And the margin card stacks.
   assert.match(css, /@media \(max-width:560px\)\{ \.mg-grid\{grid-template-columns:1fr\} \}/);
 });
+
+/* ---------------------------------------------------------------------------
+ * The phone shell, and staying where you were.
+ * ------------------------------------------------------------------------ */
+
+test('the phone gets a bottom bar and a one-row header, not a squeezed desktop', () => {
+  const css = read('public/backoffice/style.css');
+  assert.match(css, /@media \(max-width: 720px\) \{/);
+  assert.match(css, /\.tabbar \{\n\s*position: fixed; left: 0; right: 0; bottom: 0/);
+  assert.match(css, /nav\.tabs \{ display: none; \}/, 'the desktop strip must go on a phone');
+  // The header was three rows and 280px of an 844px screen before any content.
+  assert.match(css, /height: calc\(54px \+ env\(safe-area-inset-top\)\)/);
+  // The bar is fixed over the page, so the page has to end above it.
+  assert.match(css, /main \{ padding-bottom: calc\(70px \+ env\(safe-area-inset-bottom\)\); \}/);
+  // And it is a phone idea only.
+  assert.match(css, /@media \(min-width: 721px\) \{ \.tabbar \{ display: none !important; \} \}/);
+});
+
+test('the header folds by MOVING its controls, never by copying them', () => {
+  // Two Refresh buttons, one of them wired to nothing, would be a worse bug than
+  // the layout it was meant to fix — and every listener bound in boot() keeps
+  // working only because these are the same elements.
+  const src = read('public/backoffice/app.js');
+  assert.match(src, /function foldHeader\(\)/);
+  assert.match(src, /function restoreHeader\(\)/);
+  assert.match(src, /sheet\.appendChild\(el\)/, 'moved, not cloned');
+  assert.ok(!/cloneNode/.test(src), 'a cloned control is a control wired to nothing');
+  // Growing the window past the phone layout has to put them back and close up.
+  assert.match(src, /matchMedia\('\(max-width: 720px\)'\)/);
+  assert.match(src, /onChange = function \(\) \{ closeSheets\(\); buildTabBar\(\); \}/);
+});
+
+test('the bottom bar is built from the tabs this session actually has', () => {
+  const src = read('public/backoffice/app.js');
+  // Built AFTER the two sweeps that remove desk-only and partner-only tabs, so a
+  // branch can never get a bar button pointing at a desk screen.
+  const boot = src.slice(src.indexOf('PARTNER_ONLY_TABS.forEach'));
+  assert.match(boot.slice(0, 600), /buildTabBar\(\);/);
+  assert.match(src, /var tabs = \$\$\('#tabs button'\);/);
+  // Four across a 390px screen; the rest go behind More.
+  assert.match(src, /var TABBAR_MAX = 4;/);
+  assert.match(src, /openMoreSheet/);
+  // A section reached from More still lights More up, or the bar looks broken.
+  assert.match(src, /more\.classList\.toggle\('on', !onBar\)/);
+});
+
+test('a refresh keeps you on the section you were on', () => {
+  const app = read('public/backoffice/app.js');
+  assert.match(app, /history\.replaceState\(null, '', want\)/);
+  assert.match(app, /function restoreTabFromHash\(\)/);
+  assert.match(app, /window\.addEventListener\('hashchange', restoreTabFromHash\)/);
+  // A bookmarked section this session may not see falls back rather than showing
+  // an empty pane.
+  assert.match(app, /if \(known\) showTab\(t, true\);/);
+
+  const client = read('public/client/client.js');
+  assert.match(client, /function restoreCTabFromHash\(\)/);
+  assert.match(client, /history\.replaceState\(null, '', '#' \+ t\)/);
+  // …and it is applied when the investor lands in the app, not only on a click.
+  assert.match(client, /\/\/ A refresh lands back where they were[\s\S]{0,80}?restoreCTabFromHash\(\);/);
+});
+
+test('the rules link is bound once, not once per tab switch', () => {
+  // It used to be re-bound inside showCTab, so after four tab switches one click
+  // fired the toggle four times and the link looked broken.
+  const client = read('public/client/client.js');
+  const show = /function showCTab\([\s\S]*?\n}/.exec(client)[0];
+  assert.ok(!/addEventListener/.test(show), 'showCTab must not bind listeners');
+  assert.match(client, /function bindRulesLink\(\)[\s\S]{0,200}?if \(!rl \|\| rl\.dataset\.bound\) return;/);
+});

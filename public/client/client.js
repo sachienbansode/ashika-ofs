@@ -409,25 +409,28 @@ function enterApp() {
   $('#clientName').textContent = c.name || 'Client';
   $('#clientUcc').textContent = c.ucc || '';
   setStep(3);
+  // A refresh lands back where they were, not on Open issues.
+  restoreCTabFromHash();
   loadIssues();
   loadBids(0);
   if (S.timer) clearInterval(S.timer);
   S.timer = setInterval(function () { loadIssues(true); }, 15000);
 }
 
-function showCTab(t) {
+/**
+ * Which tab you are on survives a refresh — it lives in the URL hash.
+ *
+ * On a phone this is the difference between checking your bid and losing your
+ * place: the browser reloads a backgrounded tab on its own, and coming back to
+ * Open issues every time is its own small annoyance.
+ */
+function showCTab(t, fromHash) {
   S.tab = t;
-  var rl = $('#rulesLink');
-  if (rl) rl.addEventListener('click', function (e) {
-    e.preventDefault();
-    var box = $('#loginRules');
-    var open = !box.classList.contains('hide');
-    if (open) { box.classList.add('hide'); rl.textContent = 'Read the bidding rules'; return; }
-    renderRules(box);
-    box.classList.remove('hide');
-    rl.textContent = 'Hide the bidding rules';
-    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  });
+  if (!fromHash) {
+    try {
+      if (location.hash !== '#' + t) history.replaceState(null, '', '#' + t);
+    } catch (e) { /* nothing to do; the tab still switches */ }
+  }
 
   $$('#cTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.ctab === t); });
   ['issues', 'bids', 'allot', 'rules'].forEach(function (k) {
@@ -437,6 +440,35 @@ function showCTab(t) {
   if (t === 'bids') loadBids(0);
   if (t === 'allot') loadAllotments();
   if (t === 'rules') renderRules($('#rulesBox'));
+}
+
+/** The sign-in page's "read the bidding rules" toggle. Bound ONCE: it used to be
+ *  re-bound inside showCTab, so after four tab switches one click fired the toggle
+ *  four times and it looked like the link had stopped working. */
+function bindRulesLink() {
+  var rl = $('#rulesLink');
+  if (!rl || rl.dataset.bound) return;
+  rl.dataset.bound = '1';
+  rl.addEventListener('click', function (e) {
+    e.preventDefault();
+    var box = $('#loginRules');
+    var open = !box.classList.contains('hide');
+    if (open) { box.classList.add('hide'); rl.textContent = 'Read the bidding rules'; return; }
+    renderRules(box);
+    box.classList.remove('hide');
+    rl.textContent = 'Hide the bidding rules';
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+}
+
+/** The tab named in the address bar, if it is one this page has. */
+function restoreCTabFromHash() {
+  var t = String(location.hash || '').replace(/^#/, '').trim();
+  if (!t) return false;
+  var known = $$('#cTabs button').some(function (b) { return b.dataset.ctab === t; });
+  if (!known) return false;
+  showCTab(t, true);
+  return true;
 }
 
 function chipFor(st) {
@@ -1022,6 +1054,9 @@ async function boot() {
       if (price.disabled) price.value = '';
     }
   });
+
+  bindRulesLink();
+  window.addEventListener('hashchange', restoreCTabFromHash);
 
   setInterval(tickClocks, 1000);
 

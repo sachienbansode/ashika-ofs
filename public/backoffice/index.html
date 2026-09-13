@@ -29,9 +29,27 @@
   <span class="tag" id="refreshNote" title="When the figures on screen were last read">—</span>
   <div class="who"><b id="whoName">—</b><span id="whoRole"></span></div>
   <button class="mini hide" id="btnSignOut">Sign out</button>
+
+  <!-- Phone only. The header carries seven controls, which on a 390px screen took
+       three rows and 280px before any content appeared. Below 720px they collapse
+       behind this button and the bar becomes one 52px row. -->
+  <button class="topmore" id="topMore" aria-label="Menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
 </header>
 
+<!-- What the header hides on a phone. Not a copy of those controls — the same
+     elements are moved in here by boot() and moved back if the window grows, so
+     there is one Refresh button and one auto-refresh select, not two that can
+     disagree. -->
+<div class="topsheet" id="topSheet" hidden></div>
+<div class="sheet-veil" id="sheetVeil" hidden></div>
+
 <div id="gate" class="hide"></div>
+
+<!-- Built from the tabs below, after the shell has removed the ones this session
+     may not see. Phone only; see buildTabBar(). -->
+<nav class="tabbar" id="tabbar" hidden></nav>
 
 <nav class="tabs" id="tabs">
   <button data-tab="dash" class="on">Dashboard</button>
@@ -204,10 +222,19 @@
       <select id="exIssue"></select>
       <select id="exCat"><option value="all">All categories</option><option value="Retail">Retail</option><option value="HNI">HNI</option></select>
       <select id="exCanc"><option value="0">Exclude cancelled</option><option value="1">Include cancelled (C rows)</option></select>
+      <!-- An earlier day's file. The server has always taken an as-on date — the
+           same one the bid book uses, compared in IST — but this screen never
+           offered it, so the desk could only ever build today's. Blank means
+           every bid on the issue, whenever it was placed. -->
+      <label class="inline"><span>As on</span>
+        <input type="date" id="exAsOn" title="Bids placed on this date (IST). Leave blank for all."></label>
+      <button class="mini" id="exToday" type="button">Today</button>
+      <button class="mini" id="exAllDays" type="button">All days</button>
       <button class="btn ghost" id="exPreview">Preview</button>
       <button class="btn" id="exDownload">Download file</button>
       <div class="sp"></div>
       <button class="btn ghost" id="exFull" title="Every field including who placed each bid and when. Not an exchange file.">Download all (audit)</button>
+      <button class="mini" id="exEmailNow" data-grant="ofs-masters" title="Send today's files to the address set in Settings, now, without waiting for the scheduled time.">Email files now</button>
     </div>
     <div class="note">Column order is provisional. Pin the exact layout from the NSE OFS bulk-upload spec and BSE Notice 20120727-26 (3.3.4) on the member portals before go-live — see <code>lib/exchange/nse.js</code> and <code>lib/exchange/bse.js</code>.</div>
     <div id="exSummary"></div>
