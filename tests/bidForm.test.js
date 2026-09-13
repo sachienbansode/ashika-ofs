@@ -29,7 +29,7 @@ for (const n of ['cutoffAllowed']) {
 }
 const F = Object.assign({ cutoffAllowed: ctx.cutoffAllowed }, ctx.OFS_BIDMATH);
 
-const ISSUE = { symbol: 'COALINDIA', floor_price: 400, cut_price_min: 395, tick: 0.05, lot: 1, cutoff_flag: true };
+const ISSUE = { symbol: 'COALINDIA', exchange: 'BSE', floor_price: 400, cut_price_min: 395, tick: 0.05, lot: 1, cutoff_flag: true };
 const CFG = { retail_cap: 200000, hni_min: 200000 };
 
 test('cut-off is refused for HNI, always', () => {
@@ -46,7 +46,7 @@ test('the form and the server agree on the minimum price', () => {
     assert.equal(F.minPriceFor(ISSUE, cat), domain.minPrice(ISSUE, cat),
       'form and lib/domain disagree for ' + cat);
   }
-  const noFloor = { floor_price: null, cut_price_min: null, tick: 0.05, lot: 1 };
+  const noFloor = { exchange: 'BSE', floor_price: null, cut_price_min: null, tick: 0.05, lot: 1 };
   assert.equal(F.minPriceFor(noFloor, 'Retail'), domain.minPrice(noFloor, 'Retail'));
 });
 
@@ -85,7 +85,7 @@ test('the suggested retail bid fits the cap; the suggested HNI bid clears the fl
 });
 
 test('an issue with no published floor gets no suggestion rather than a made-up one', () => {
-  const noFloor = { floor_price: null, cut_price_min: null, tick: 0.05, lot: 1 };
+  const noFloor = { exchange: 'BSE', floor_price: null, cut_price_min: null, tick: 0.05, lot: 1 };
   assert.equal(F.suggestedBid(noFloor, 'Retail', CFG), null);
   assert.equal(F.suggestedBid(noFloor, 'HNI', CFG), null);
 });
@@ -95,7 +95,7 @@ test('a suggestion always survives the server\'s own validation', () => {
     const sug = F.suggestedBid(ISSUE, cat, CFG);
     const ctx = { settings: CFG, client: { found: true, active: true },
                   availableMargin: 1e9, marginUsed: 0, usedValueThisIssue: 0, hasLiveBid: false };
-    const bid = { client_ucc: 'X', category: cat, qty: sug.qty, price: sug.price, is_cutoff: false };
+    const bid = { client_ucc: 'X', exchange: 'BSE', category: cat, qty: sug.qty, price: sug.price, is_cutoff: false };
     const open = Object.assign({}, ISSUE, {
       status: 'Auto',
       hni_open: new Date(Date.now() - 3600e3), hni_close: new Date(Date.now() + 3600e3),
@@ -149,7 +149,9 @@ test('the default the form picks is one the server will accept', () => {
 test('the desk form preselects the default instead of leaving "Choose…"', () => {
   // The blank option was the bug: the screen asked for a choice, the person did
   // not notice it, and Validate refused a bid that was otherwise fine.
-  assert.match(SRC, /ex\.value = wantedEx === 'NSE' \|\| wantedEx === 'BSE' \? wantedEx : BIDMATH\.defaultExchange\(i\);/);
+  assert.match(SRC, /ex\.value = usable\.indexOf\(wantedEx\) >= 0 \? wantedEx : BIDMATH\.defaultExchange\(i, STATE\.settings\);/);
+  // And where only one exchange is usable there is no dropdown to get wrong.
+  assert.match(SRC, /} else if \(usable\.length === 1\) \{/);
   assert.ok(!/<option value="">Choose…<\/option>/.test(SRC), 'the blank exchange option is gone');
   // An existing bid's own exchange must still win over the default, or modifying
   // a bid would quietly move it to the other exchange.

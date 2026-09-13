@@ -91,7 +91,7 @@ test('only well-formed holiday dates count', () => {
 test('a bid outside the session is rejected by validateBid', () => {
   const domain = require('../lib/domain');
   const issue = {
-    symbol: 'ABC', isin: 'INE001A01001', lot: 1, tick: 0.05,
+    symbol: 'ABC', isin: 'INE001A01001', exchange: 'BSE', lot: 1, tick: 0.05,
     floor_price: 100, cut_price_min: 100, cutoff_flag: true,
     hni_open: at('04:00'), hni_close: at('10:00'),
     ret_open: at('04:00'), ret_close: at('10:00')

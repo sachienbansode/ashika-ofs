@@ -35,13 +35,18 @@ function lift(names, ctx) {
   return ctx;
 }
 
-function ctxWith(market) {
-  const ctx = vm.createContext({ STATE: { market } });
+function ctxWith(market, settings) {
+  // canBidNow also asks whether the desk is live on this issue's exchange, so the
+  // shared module has to be present exactly as it is in the page.
+  const ctx = vm.createContext({ STATE: { market, settings: settings || {} }, Math, Number, String, isFinite });
+  ctx.window = ctx;
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public/shared/bidmath.js'), 'utf8'), ctx);
+  ctx.BIDMATH = ctx.OFS_BIDMATH;
   return lift(['isBiddable', 'marketShut', 'canBidNow', 'timeLeft'], ctx);
 }
 
-const OPEN_RETAIL = { status: 'Auto', ret_status: 'Open', hni_status: 'Closed' };
-const UPCOMING = { status: 'Auto', ret_status: 'Upcoming', hni_status: 'Closed' };
+const OPEN_RETAIL = { symbol: 'COALINDIA', exchange: 'BOTH', status: 'Auto', ret_status: 'Open', hni_status: 'Closed' };
+const UPCOMING = { symbol: 'COALINDIA', exchange: 'BOTH', status: 'Auto', ret_status: 'Upcoming', hni_status: 'Closed' };
 const SHUT = { open: false, reason: 'after_cutoff', effective_close: '15:15',
   message: 'The desk cut-off of 15:15 IST has passed. No further bids are accepted today.' };
 
@@ -60,7 +65,7 @@ test('the bid button closes at the desk cut-off, and says why', () => {
 
   // A window that has not opened is not biddable now either, however open the desk.
   assert.equal(ctxWith({ open: true }).canBidNow(UPCOMING), false);
-  assert.equal(ctxWith({ open: true }).canBidNow({ status: 'Suspended', ret_status: 'Open' }), false);
+  assert.equal(ctxWith({ open: true }).canBidNow({ exchange: 'BOTH', status: 'Suspended', ret_status: 'Open' }), false);
 });
 
 test('time left reads the way a person would say it', () => {
@@ -101,4 +106,16 @@ test('the server is what decides the session, not the browser clock', () => {
   // any zone, so the browser must never work this out for itself.
   assert.ok(!/getTimezoneOffset|new Date\(\)\.getHours\(\)/.test(SRC),
     'no local-clock trading decisions in the front end');
+});
+
+test('an issue on an exchange the desk is not live on cannot be bid on now', () => {
+  // The offer is genuinely open, so the dashboard still counts it — but the button
+  // would lead straight to a refusal, so it closes and the card says why.
+  const nseOnly = Object.assign({}, OPEN_RETAIL, { exchange: 'NSE' });
+  assert.equal(ctxWith({ open: true }, { allowed_exchanges: 'NSE,BSE' }).canBidNow(nseOnly), true);
+  assert.equal(ctxWith({ open: true }, { allowed_exchanges: 'BSE' }).canBidNow(nseOnly), false);
+  // An offer on both is still biddable with one exchange enabled — it goes there.
+  assert.equal(ctxWith({ open: true }, { allowed_exchanges: 'BSE' }).canBidNow(OPEN_RETAIL), true);
+  // And it stays OPEN either way: the count of open issues is not ours to change.
+  assert.equal(ctxWith(null, { allowed_exchanges: 'BSE' }).isBiddable(nseOnly), true);
 });

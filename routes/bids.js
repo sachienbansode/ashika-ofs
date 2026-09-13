@@ -8,6 +8,7 @@ const { maskRows } = require('../lib/pii');
 const { validateBid, bidValue, minPrice } = require('../lib/domain');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
+const notices = require('../lib/notices');
 const dbErr = require('../lib/dbErrors');
 const bidOtp = require('../lib/bidOtp');
 const settings = require('../lib/settings');
@@ -161,7 +162,7 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
     await markConfirmed(r.id, req.body && req.body.otp_ref);
 
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
-    res.status(201).json({ bid: r });
+    res.status(201).json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
 
@@ -184,7 +185,7 @@ router.put('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) 
     await markConfirmed(r.id, req.body && req.body.otp_ref);
 
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
-    res.json({ bid: r });
+    res.json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
 

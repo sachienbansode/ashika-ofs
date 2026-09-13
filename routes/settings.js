@@ -40,6 +40,17 @@ const EDITABLE = {
     hint: '1 blocks a bid above the client’s free margin. 0 warns only — the desk then carries the risk.',
     check: (v) => ['0', '1'].includes(String(v)) || 'Use 0 or 1'
   },
+  allowed_exchanges: {
+    label: 'Exchanges we are live on', kind: 'choice', choices: ['NSE,BSE', 'BSE', 'NSE'],
+    hint: 'Where this desk can actually upload an OFS file. NSE e-OFS and the BSE OFS module are '
+      + 'separate enablements. Set this to one exchange and: offers listed only on the other one '
+      + 'stop accepting bids and say so; an offer on both is still biddable and goes to the enabled '
+      + 'exchange; and the exchange dropdown on every bid screen — back office, AP and investor — '
+      + 'shows only what is enabled. Bids already placed are not changed.',
+    check: (v) => /^(NSE|BSE)(,(NSE|BSE))?$/.test(String(v).toUpperCase()) &&
+      new Set(String(v).toUpperCase().split(',')).size === String(v).split(',').length
+      || 'NSE, BSE or NSE,BSE'
+  },
   margin_type: {
     label: 'Margin type in the exchange file', kind: 'choice', choices: ['1', '2'],
     hint: '1 = 0% margin (institutional), 2 = 100% upfront. BSE OFS guidelines, bulk-bid field 8.',

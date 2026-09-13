@@ -7,6 +7,14 @@ var $$ = function (s, r) { return Array.prototype.slice.call((r || document).que
 
 var S = { ref: null, choose: null, resendAt: 0, timer: null, tab: 'issues', client: null };
 
+/* What an accepted bid is, and is not. The server sends this back with every
+ * accepted bid (lib/notices); this is the fallback for an older server, and a test
+ * checks the two say the same thing word for word. */
+var BID_ACCEPTED_NOTE =
+  'This bid is recorded with the OFS desk. It is subject to the margin available ' +
+  'at the time the bid is submitted to the exchange, and to acceptance by the ' +
+  'exchange.';
+
 /* ---------------- helpers ---------------- */
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -483,6 +491,14 @@ function bidBox(i, mine, retOpen, hniOpen) {
   if (!retOpen && !hniOpen) {
     return '<div class="note" style="margin-top:11px">Bidding is closed for this offer.</div>';
   }
+  /* An offer listed only on an exchange the desk is not live on. The offer is
+   * real and stays on the screen — the client may have read about it — but there
+   * is no form, because filling one in would end in a refusal. The server refuses
+   * it too; this is so nobody has to find that out by trying. */
+  if (!OFS_BIDMATH.issueTradable(i, SETTINGS)) {
+    return '<div class="note warn" style="margin-top:11px">' +
+      esc(OFS_BIDMATH.notTradableMessage(i, SETTINGS)) + '</div>';
+  }
   var id = i.id;
   var cats = [];
   if (retOpen) cats.push('Retail');
@@ -537,14 +553,17 @@ function bidBox(i, mine, retOpen, hniOpen) {
  * defaults to, and can be changed here.
  */
 function exchangeField(i, mine) {
-  var on = String(i.exchange || '').toUpperCase();
-  var pick = (mine && mine.exchange) || OFS_BIDMATH.defaultExchange(i);
-  if (on !== 'BOTH') {
+  // Where the offer is listed, narrowed by where the desk is live. One usable
+  // exchange is not a choice, so it is shown rather than asked.
+  var usable = OFS_BIDMATH.exchangesFor(i, SETTINGS);
+  var pick = (mine && mine.exchange && usable.indexOf(mine.exchange) >= 0)
+    ? mine.exchange : OFS_BIDMATH.defaultExchange(i, SETTINGS);
+  if (usable.length < 2) {
     return '<label class="bb-f"><span>Exchange</span>' +
-      '<input type="text" value="' + esc(on || '—') + '" data-bf="exch" readonly></label>';
+      '<input type="text" value="' + esc(usable[0] || '—') + '" data-bf="exch" readonly></label>';
   }
   return '<label class="bb-f"><span>Exchange</span><select data-bf="exch">' +
-    ['NSE', 'BSE'].map(function (x) {
+    usable.map(function (x) {
       return '<option value="' + x + '"' + (x === pick ? ' selected' : '') + '>' + x + '</option>';
     }).join('') + '</select></label>';
 }
@@ -570,7 +589,7 @@ function fillSuggested(box) {
   g('price').value = sug.price;
   g('qty').value = sug.qty;
   var ex = g('exch');
-  if (ex && ex.tagName === 'SELECT' && !ex.value) ex.value = OFS_BIDMATH.defaultExchange(i);
+  if (ex && ex.tagName === 'SELECT' && !ex.value) ex.value = OFS_BIDMATH.defaultExchange(i, SETTINGS);
   showVerdict(box, '', [sug.why, 'Check it before you place it — you can change any of it.']);
 }
 
@@ -633,14 +652,24 @@ async function submitBid(box, otp) {
   if (otp) { body.otp_ref = otp.ref; body.otp = otp.code; }
   btn.disabled = true;
   try {
-    if (editing) {
-      await api(bidBase() + '/' + editing.id, { method: 'PUT', body: body });
-      toast('Bid updated', 'Your bid has been changed.', 'ok');
-    } else {
-      await api(bidBase(), { method: 'POST', body: body });
-      toast('Bid placed', 'Your bid is with the desk.', 'ok');
-    }
+    var r = editing
+      ? await api(bidBase() + '/' + editing.id, { method: 'PUT', body: body })
+      : await api(bidBase(), { method: 'POST', body: body });
+    toast(editing ? 'Bid updated' : 'Bid placed',
+      (r.bid && r.bid.ref ? r.bid.ref + ' — ' : '') + 'your bid is with the OFS desk.', 'ok');
     await loadIssues();
+    /* loadIssues rebuilds every card, so the confirmation is written AFTER it —
+     * into the fresh box, not the one that was just replaced. It stays on the
+     * screen rather than fading with the toast, because the condition on it is
+     * the part the client has to keep: the bid is with the desk, and the exchange
+     * blocks margin when the file reaches it, not when this form was filled. */
+    var fresh = document.querySelector('.bidbox[data-bid-issue="' + body.issue_id + '"]');
+    if (fresh) {
+      showVerdict(fresh, 'ok', [
+        (editing ? 'Bid updated' : 'Bid placed') + (r.bid && r.bid.ref ? ' — ' + r.bid.ref : '') + '.',
+        (r && r.notice) || BID_ACCEPTED_NOTE
+      ]);
+    }
   } catch (e) {
     if (e.status === 401) return sessionLost();
     if (e.status === 428 && e.body && e.body.error === 'otp_required') {

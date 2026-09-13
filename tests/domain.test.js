@@ -163,7 +163,9 @@ test('a bid may be modified up to the cut-off and not after', () => {
               market_days: '1-5', trading_holidays: '', enforce_margin: '0' };
   const at = (utc) => new Date('2026-09-01T' + utc + ':00Z');   // a Tuesday
   const issue = {
-    symbol: 'ABC', lot: 1, tick: 0.05, floor_price: 100, cut_price_min: 100,
+    // ofs_issue.exchange is NOT NULL with a CHECK on NSE/BSE/BOTH, so a fixture
+    // without one is a shape the database cannot produce.
+    symbol: 'ABC', exchange: 'BSE', lot: 1, tick: 0.05, floor_price: 100, cut_price_min: 100,
     cutoff_flag: true,
     hni_open: at('03:45'), hni_close: at('10:00'),
     ret_open: at('03:45'), ret_close: at('10:00')
@@ -223,7 +225,7 @@ test('a Suspended issue refuses every bid, in both categories', () => {
  * Number(undefined) || 0, which turned "unknown" into a floor of zero.
  * ----------------------------------------------------------------------- */
 const NO_FLOOR = {
-  symbol: 'XYZ', lot: 1, tick: 0.05,
+  symbol: 'XYZ', exchange: 'BSE', lot: 1, tick: 0.05,
   floor_price: null, cut_price_min: null, cutoff_flag: true,
   hni_open: new Date('2026-09-01T03:45:00Z'), hni_close: new Date('2026-09-01T10:00:00Z'),
   ret_open: new Date('2026-09-01T03:45:00Z'), ret_close: new Date('2026-09-01T10:00:00Z')

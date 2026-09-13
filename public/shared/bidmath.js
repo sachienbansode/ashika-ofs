@@ -95,15 +95,67 @@
    * where Ashika's OFS flow runs today; the desk can still change it per bid.
    */
   var DEFAULT_EXCHANGE = 'BSE';
-  function defaultExchange(issue) {
-    var e = String((issue && issue.exchange) || '').trim().toUpperCase();
-    if (e === 'NSE' || e === 'BSE') return e;
-    return e === 'BOTH' ? DEFAULT_EXCHANGE : '';
+
+  /**
+   * Which exchanges this desk is live on, from the desk's own setting.
+   *
+   * NSE e-OFS and the BSE OFS module are separate enablements and either can be
+   * pending, so the back office says which are usable. This MIRRORS
+   * lib/domain.allowedExchanges — deliberately, and a test compares the two against
+   * the same inputs. An unreadable or absent value means both, because a setting
+   * nobody has touched must not be the thing that silently stops trading.
+   */
+  function allowedExchanges(cfg) {
+    var raw = String((cfg || {}).allowed_exchanges || '').toUpperCase();
+    var out = [];
+    raw.split(/[^A-Z]+/).forEach(function (x) {
+      if ((x === 'NSE' || x === 'BSE') && out.indexOf(x) < 0) out.push(x);
+    });
+    return out.length ? out : ['NSE', 'BSE'];
+  }
+
+  /** Where a bid on THIS issue may go: where it is listed, narrowed by where we are live. */
+  function exchangesFor(issue, cfg) {
+    var on = String((issue && issue.exchange) || '').trim().toUpperCase();
+    var listed = on === 'BOTH' ? ['NSE', 'BSE'] : (on === 'NSE' || on === 'BSE') ? [on] : [];
+    var ok = allowedExchanges(cfg);
+    return listed.filter(function (x) { return ok.indexOf(x) >= 0; });
+  }
+
+  /** Can a bid be placed on this issue at all? */
+  function issueTradable(issue, cfg) { return exchangesFor(issue, cfg).length > 0; }
+
+  /** Why not, in words a client can read. No internal names. */
+  function notTradableMessage(issue, cfg) {
+    if (issueTradable(issue, cfg)) return '';
+    var on = String((issue && issue.exchange) || '').trim().toUpperCase();
+    var sym = (issue && issue.symbol) || 'This offer';
+    if (!on) return sym + ' has no exchange set yet, so bids cannot be accepted for it.';
+    return sym + ' is offered on ' + on + ' only, and bids are not being accepted on ' +
+      on + ' at present. Please contact the OFS desk.';
+  }
+
+  /**
+   * Which exchange the form should start on.
+   *
+   * One usable exchange means there is nothing to choose and the form says so.
+   * Two means somebody must choose, because a bid that reached neither file would
+   * not be submitted and one that reached both would be submitted twice — so the
+   * form picks BSE rather than leaving it blank and refusing on validate. The desk
+   * can still change it per bid.
+   */
+  function defaultExchange(issue, cfg) {
+    var usable = exchangesFor(issue, cfg);
+    if (!usable.length) return '';
+    if (usable.length === 1) return usable[0];
+    return usable.indexOf(DEFAULT_EXCHANGE) >= 0 ? DEFAULT_EXCHANGE : usable[0];
   }
 
   w.OFS_BIDMATH = {
     minPriceFor: minPriceFor, minQtyFor: minQtyFor, maxRetailQty: maxRetailQty,
     suggestedBid: suggestedBid, defaultExchange: defaultExchange,
+    allowedExchanges: allowedExchanges, exchangesFor: exchangesFor,
+    issueTradable: issueTradable, notTradableMessage: notTradableMessage,
     DEFAULT_EXCHANGE: DEFAULT_EXCHANGE
   };
 }(window));

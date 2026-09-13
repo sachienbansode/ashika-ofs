@@ -13,6 +13,7 @@ const { issueStatus, catStatus, minPrice, validateBid, openOnDay, issueOpenOnDay
 const settings = require('../lib/settings');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
+const notices = require('../lib/notices');
 const dbErr = require('../lib/dbErrors');
 const bidOtp = require('../lib/bidOtp');
 const ld = require('../db/ldAdapter');
@@ -110,7 +111,11 @@ router.get('/issues', async (req, res, next) => {
     res.json({
       server_time: now.toISOString(),
       actor: whoAmI(req),
-      settings: { retail_cap: s.retail_cap, hni_min: s.hni_min, daily_cutoff: s.daily_cutoff },
+      // allowed_exchanges rides along so the bid box offers only exchanges this
+      // desk can upload to, and hides the form entirely for an offer listed only
+      // on one we are not live on. The SERVER still refuses either way.
+      settings: { retail_cap: s.retail_cap, hni_min: s.hni_min, daily_cutoff: s.daily_cutoff,
+                  allowed_exchanges: s.allowed_exchanges },
       issues: list.map((i) => Object.assign({}, i, {
         status_label: issueStatus(i, now),
         ret_status: catStatus(i, 'Retail', now),
@@ -366,7 +371,7 @@ router.post('/bids', requireSingleClient, async (req, res, next) => {
 
     const r = await bids.insertBid(b, ctx, placedBy(req), placedById(req), ctx.client.branch);
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
-    res.status(201).json({ bid: r });
+    res.status(201).json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) {
     if (e && e.code === '23505') {
       return res.status(409).json({ error: 'duplicate_live_bid',
@@ -396,7 +401,7 @@ router.put('/bids/:id(\\d+)', requireSingleClient, async (req, res, next) => {
 
     const r = await bids.updateBid(before, b, ctx, null);
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
-    res.json({ bid: r });
+    res.json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
 
@@ -541,7 +546,7 @@ router.post('/branch/bids', async (req, res, next) => {
     await query(`UPDATE ${SCHEMA}.ofs_bid SET otp_verified = true, otp_ref = $2 WHERE id = $1`,
       [r.id, String(req.body.otp_ref)]).catch(() => {});
     await audit.log(req, 'place', 'ofs_bid', r.id, null, r);
-    res.status(201).json({ bid: r });
+    res.status(201).json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) {
     if (e && e.code === '23505') {
       return res.status(409).json({ error: 'duplicate_live_bid',
@@ -580,7 +585,7 @@ router.put('/branch/bids/:id(\\d+)', async (req, res, next) => {
     await query(`UPDATE ${SCHEMA}.ofs_bid SET otp_verified = true, otp_ref = $2 WHERE id = $1`,
       [r.id, String(req.body.otp_ref)]).catch(() => {});
     await audit.log(req, 'modify', 'ofs_bid', r.id, before, r);
-    res.json({ bid: r });
+    res.json({ bid: r, notice: notices.BID_ACCEPTED });
   } catch (e) { dbErr.send(res, next, e); }
 });
 

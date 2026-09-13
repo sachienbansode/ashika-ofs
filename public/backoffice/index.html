@@ -37,8 +37,8 @@
   <button data-tab="dash" class="on">Dashboard</button>
   <button data-tab="book">Bid book</button>
   <button data-tab="place">Place bid</button>
-  <!-- A branch's own book of clients. The desk has no equivalent and needs none —
-       it can reach any UCC — so this tab is removed for a staff session. -->
+  <!-- Clients: a branch's own book, or the desk's search across all of them.
+       Same screen, different scope, decided by the server. -->
   <button data-tab="clients" id="tabClients">Clients</button>
   <button data-tab="export">Exchange files</button>
   <button data-tab="masters">Masters</button>
@@ -46,6 +46,12 @@
 </nav>
 
 <main>
+
+  <!-- The last bid placed or modified, and the condition attached to it. It sits
+       above every pane and stays until the next action, because a modify jumps
+       straight to the bid book and a six-second toast is not where a standing
+       condition belongs. -->
+  <div id="bidDone" class="hide"></div>
 
   <!-- ---------------- Dashboard ---------------- -->
   <section class="pane" id="pane-dash">

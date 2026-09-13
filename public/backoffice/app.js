@@ -535,6 +535,11 @@ function issueCard(i) {
   var canBid = canBidNow(i);
   var blockedWhy = !canBid
     ? (i.status && i.status !== 'Auto' ? 'This issue is ' + String(i.status).toLowerCase() + '.'
+      // Checked before the session: an issue we cannot upload to is blocked all
+      // day, and "the desk cut-off has passed" would send someone looking for the
+      // wrong problem tomorrow morning.
+      : !BIDMATH.issueTradable(i, STATE.settings)
+        ? BIDMATH.notTradableMessage(i, STATE.settings)
       : shut ? (shut.message || 'Bidding is closed right now.')
       : i.ret_status === 'Upcoming' || i.hni_status === 'Upcoming'
         ? 'The window has not opened yet.'
@@ -770,9 +775,15 @@ function fillIssueSelects() {
 
   var pb = $('#pbIssue');
   if (pb) {
-    // Only what can actually be bid on. Offering a closed issue and then refusing
-    // the bid wastes the one thing a desk has none of during a window.
-    var live = STATE.issues.filter(isBiddable);
+    /* Only what can actually be bid on. Offering a closed issue and then refusing
+     * the bid wastes the one thing a desk has none of during a window — and the
+     * same is true of an issue listed only on an exchange we are not live on, so
+     * the desk's Exchanges-we-are-live-on setting filters this list too. Such an
+     * issue stays visible on the dashboard and in the book: it IS open, we just
+     * cannot send a bid for it, and the card says which. */
+    var live = STATE.issues.filter(function (i) {
+      return isBiddable(i) && BIDMATH.issueTradable(i, STATE.settings);
+    });
     var c = STATE.editing ? String(STATE.editing.issue_id) : pb.value;
     // An issue being modified stays selectable even if its window just closed,
     // otherwise the form silently jumps to a different issue mid-edit.
@@ -813,6 +824,9 @@ function marketShut() {
 function canBidNow(i) {
   if (!isBiddable(i)) return false;
   if (marketShut()) return false;
+  // Nor can we bid on an exchange we are not live on. The issue stays on the
+  // dashboard — it is genuinely open — but the button would lead to a refusal.
+  if (!BIDMATH.issueTradable(i, STATE.settings)) return false;
   // Upcoming is not biddable now either — it is biddable later today, and saying
   // "Bid on this issue" over a window that has not opened is the same lie.
   return i.ret_status === 'Open' || i.hni_status === 'Open';
@@ -1313,6 +1327,14 @@ function cutoffAllowed(issue, category) {
  */
 var BIDMATH = window.OFS_BIDMATH;
 
+/* What an accepted bid is, and is not. The server sends this with every accepted
+ * bid (lib/notices) and that is what gets shown; this is the fallback for an older
+ * server, and a test checks the two say the same thing. */
+var BID_ACCEPTED_NOTE =
+  'This bid is recorded with the OFS desk. It is subject to the margin available ' +
+  'at the time the bid is submitted to the exchange, and to acceptance by the ' +
+  'exchange.';
+
 /** Recompute everything derived from the current form state. */
 function refreshBidForm() {
   var i = selectedIssue();
@@ -1330,24 +1352,35 @@ function refreshBidForm() {
   var ex = $('#pbExch');
   var on = String((i && i.exchange) || '').toUpperCase();
   var wantedEx = ex.value;
-  if (on === 'NSE' || on === 'BSE') {
-    ex.innerHTML = '<option value="' + on + '">' + on + '</option>';
-    ex.value = on;
+  // Where this issue is listed, narrowed by where the desk is live. With both
+  // exchanges enabled this behaves exactly as it always did.
+  var usable = i ? BIDMATH.exchangesFor(i, STATE.settings) : [];
+  if (!i) {
+    ex.innerHTML = '<option value="">—</option>';
     ex.disabled = true;
-    $('#pbExchHint').textContent = i.symbol + ' is offered on ' + on + ' only.';
-  } else if (on === 'BOTH') {
+    $('#pbExchHint').textContent = '';
+  } else if (!usable.length) {
+    ex.innerHTML = '<option value="">—</option>';
+    ex.disabled = true;
+    $('#pbExchHint').textContent = BIDMATH.notTradableMessage(i, STATE.settings);
+  } else if (usable.length === 1) {
+    // Nothing to choose — either the issue is on one exchange, or only one of the
+    // two is enabled. Either way the field states the answer rather than asking.
+    ex.innerHTML = '<option value="' + usable[0] + '">' + usable[0] + '</option>';
+    ex.value = usable[0];
+    ex.disabled = true;
+    $('#pbExchHint').textContent = on === 'BOTH'
+      ? i.symbol + ' is offered on NSE and BSE; bids are being accepted on ' + usable[0] + '.'
+      : i.symbol + ' is offered on ' + on + ' only.';
+  } else {
     ex.innerHTML = '<option value="NSE">NSE</option><option value="BSE">BSE</option>';
     // Somebody must choose, so the form chooses — leaving it blank only moved the
     // refusal to Validate. BIDMATH.defaultExchange is that choice, and it is the
     // same one the client portal makes.
-    ex.value = wantedEx === 'NSE' || wantedEx === 'BSE' ? wantedEx : BIDMATH.defaultExchange(i);
+    ex.value = usable.indexOf(wantedEx) >= 0 ? wantedEx : BIDMATH.defaultExchange(i, STATE.settings);
     ex.disabled = false;
     $('#pbExchHint').textContent = 'On both exchanges — this bid goes to ' + ex.value +
       ', and only that file will carry it. Change it here if you want the other one.';
-  } else {
-    ex.innerHTML = '<option value="">—</option>';
-    ex.disabled = true;
-    $('#pbExchHint').textContent = '';
   }
 
   var typeSel = $('#pbType');
@@ -1531,10 +1564,14 @@ async function placeBid(withOtp) {
     hideBidOtp();
     toast(editing ? 'Bid modified' : 'Bid placed',
       r.bid.ref + ' · ' + inr(r.bid.qty, 0) + ' shares · ' + rupee(r.bid.value, 0), 'ok');
+
     $('#pbPlace').disabled = true;
     $('#pbQty').value = ''; $('#pbPrice').value = '';
     refreshBidForm();
     if (editing) { endModify(); showTab('book'); }
+    // After endModify and the tab switch, both of which clear the form's own
+    // result box — the confirmation has to outlive them.
+    showBidDone(r, editing);
     loadDash();
   } catch (e) {
     if (e.status === 428 && e.body && e.body.error === 'otp_required') {
@@ -1552,8 +1589,49 @@ async function placeBid(withOtp) {
   }
 }
 
+/**
+ * The confirmation for a bid that was accepted.
+ *
+ * It is a BANNER, above the panes, not a toast and not the form's result box.
+ * Three reasons, all learned the hard way:
+ *
+ *   a modify jumps to the bid book, and endModify() clears the form's box on the
+ *   way, so anything written there is gone before it is read;
+ *   a toast clears itself after six seconds, and the desk reads this back to the
+ *   client on the phone, which takes longer than that;
+ *   the condition matters. This bid is in OUR book. The exchange blocks margin
+ *   when the file is uploaded, against whatever the client has at that moment —
+ *   not against the margin we checked when the form was filled. Saying so at the
+ *   time is the difference between a condition and an excuse.
+ */
+function showBidDone(r, editing) {
+  var el = $('#bidDone');
+  if (!el || !r || !r.bid) return;
+  var b = r.bid;
+  el.className = 'note good';
+  el.innerHTML =
+    '<b>' + esc(editing ? 'Bid modified' : 'Bid placed') + ' — ' + esc(b.ref) + '</b>' +
+    '<button class="mini" id="bidDoneX" type="button" style="float:right">Dismiss</button>' +
+    '<div style="margin-top:4px">' +
+      esc(b.client_ucc || '') + ' · ' + inr(b.qty, 0) + ' shares · ' +
+      (b.is_cutoff ? 'cut-off' : rupee(b.price, 2)) + ' · ' + rupee(b.value, 0) +
+      (b.exchange ? ' · ' + esc(b.exchange) : '') +
+    '</div>' +
+    '<div class="sub" style="margin-top:6px">' + esc(r.notice || BID_ACCEPTED_NOTE) + '</div>';
+  var x = $('#bidDoneX');
+  if (x) x.addEventListener('click', function () { clearBidDone(); });
+}
+
+function clearBidDone() {
+  var el = $('#bidDone');
+  if (!el) return;
+  el.className = 'hide';
+  el.innerHTML = '';
+}
+
 /* ---- modify an existing bid: the place-bid form doubles as the edit form ---- */
 function startModify(id) {
+  clearBidDone();
   var bid = STATE.book.filter(function (x) { return String(x.id) === String(id); })[0];
   if (!bid) { toast('Not found', 'Reload the bid book and try again.', 'bad'); return; }
   STATE.editing = bid;
@@ -1599,6 +1677,13 @@ function bidOnIssue(id) {
   var shut = marketShut();
   if (shut) {
     toast('Bidding is closed', shut.message || 'The desk is not accepting bids right now.', 'warn');
+    return;
+  }
+  // Same for an issue on an exchange we are not live on — the issue is not even
+  // on the place-bid list, so jumping there would land on a different one.
+  var jump = (STATE.issues || []).filter(function (x) { return String(x.id) === String(id); })[0];
+  if (jump && !BIDMATH.issueTradable(jump, STATE.settings)) {
+    toast('Not available', BIDMATH.notTradableMessage(jump, STATE.settings), 'warn');
     return;
   }
   endModify();
