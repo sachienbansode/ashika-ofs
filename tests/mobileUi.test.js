@@ -123,8 +123,9 @@ test('every stacked table labels its cells, or the cards are a column of bare nu
       'the investor tables do not label ' + label);
   }
   // Each stacked table needs one heading cell, or every card opens with a label.
-  assert.equal((app.match(/class="m rowhead"|class="m rowhead"/g) || []).length, 2,
-    'the desk tables need a heading cell each');
+  // Clients, the bid book, and the Place bid page's existing-bids table.
+  assert.equal((app.match(/class="m rowhead"/g) || []).length, 3,
+    'every stacked desk table needs a heading cell');
   assert.match(client, /class="m rowhead"/);
   assert.match(client, /class="rowhead"/);
 });
@@ -209,4 +210,58 @@ test('the rules link is bound once, not once per tab switch', () => {
   const show = /function showCTab\([\s\S]*?\n}/.exec(client)[0];
   assert.ok(!/addEventListener/.test(show), 'showCTab must not bind listeners');
   assert.match(client, /function bindRulesLink\(\)[\s\S]{0,200}?if \(!rl \|\| rl\.dataset\.bound\) return;/);
+});
+
+test('a phone screen cannot be dragged sideways, whatever leaks', () => {
+  // One forgotten wide element is all it takes, and a page that pans left and
+  // right is the most broken-looking thing a layout can do. Individual leaks are
+  // still fixed as they are found; this makes the class impossible.
+  const theme = read('public/shared/theme.css');
+  assert.match(theme, /@media \(max-width: 720px\) \{\n\s*html \{ overflow-x: clip; \}/);
+  assert.match(theme, /body \{ overflow-x: clip; max-width: 100%; \}/);
+  // clip, NOT hidden: overflow-x:hidden makes the element a scroll container and
+  // silently kills position:sticky on everything inside it — the sticky header
+  // and the place-bid side panel both depend on it.
+  assert.ok(!/html \{ overflow-x: hidden/.test(theme), 'hidden would break every sticky element');
+  // A reference or an email with no spaces must not be able to push the page wide.
+  assert.match(theme, /overflow-wrap: anywhere/);
+  // And the containers that legitimately scroll sideways still do.
+  assert.match(read('public/backoffice/style.css'), /\.wrap\{overflow-x:auto;-webkit-overflow-scrolling:touch\}/);
+});
+
+test('the Place bid page’s existing-bids table stacks too', () => {
+  // Measured at 794px inside a 375px screen: nine columns and a 29-character
+  // reference, as a BARE <table>, so it inherited .wrap table{min-width:max-content}
+  // and the desk had to drag it sideways to reach Modify — the only reason the
+  // table is on that screen at all.
+  const app = read('public/backoffice/app.js');
+  const block = app.slice(app.indexOf("var box = $('#pbExisting');"));
+  assert.match(block.slice(0, 3000), /<table class="fit stack">/,
+    'the existing-bids table is still a bare table');
+  for (const label of ['Exchange', 'Category', 'Qty', 'Price', 'Value', 'Status']) {
+    assert.ok(block.indexOf('data-label="' + label + '"') >= 0,
+      'the existing-bids table does not label ' + label);
+  }
+  assert.match(block.slice(0, 3000), /class="m rowhead"/, 'it needs a card heading');
+  assert.match(block.slice(0, 3000), /<td class="act">/, 'Modify/Withdraw must be the actions row');
+});
+
+test('no rendered table is left as a bare wide table on a phone', () => {
+  // Every table the desk reads on a phone either stacks or lives in its own
+  // horizontal scroller by design. The ones that scroll are deliberate: an
+  // exchange-file preview and an audit diff ARE grids, and reading them across is
+  // the point.
+  const app = read('public/backoffice/app.js');
+  const bare = (app.match(/<div class="wrap"><table>/g) || []).length;
+  assert.ok(bare <= 5, bare + ' bare wide tables remain; the reader-facing ones must stack');
+  // The two tables a desk uses most on a phone are not among them.
+  assert.match(app, /<table class="fit stack"><thead><tr><th>Ref<\/th>/);
+});
+
+test('the row actions sit side by side, not two full-width buttons on two lines', () => {
+  const theme = read('public/shared/theme.css');
+  assert.match(theme, /table\.stack td\.act \{ display: flex; gap: 8px;/);
+  assert.match(theme, /table\.stack td\.act::before \{ content: none; \}/,
+    'the actions cell must not print an empty label');
+  assert.match(theme, /table\.stack td\.act \.mini, table\.stack td\.act \.btn \{ flex: 1; min-height: 38px; \}/);
 });

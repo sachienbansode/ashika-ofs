@@ -1970,18 +1970,25 @@ async function loadExistingBids() {
     }
     box.innerHTML =
       '<div class="legend">' + rows.length + ' bid(s)' + (ucc ? ' for ' + esc(ucc) : ' on this issue') + '</div>' +
-      '<div class="wrap"><table><thead><tr><th>Ref</th><th>UCC</th><th>Exch</th><th>Cat</th>' +
+      /* fit + stack. As a bare <table> this inherited .wrap table{min-width:max-content}
+       * and measured 794px on a 375px screen — nine columns and a 29-character
+       * reference — so the desk had to drag it sideways to reach Modify, which is
+       * the only reason the table is on this screen at all. */
+      '<div class="wrap"><table class="fit stack"><thead><tr><th>Ref</th><th class="hide-stack">UCC</th>' +
+      '<th>Exch</th><th>Cat</th>' +
       '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th><th>Status</th><th></th></tr></thead><tbody>' +
       rows.map(function (b) {
-        return '<tr><td class="m">' + esc(b.ref) + '</td>' +
-          '<td class="m">' + esc(b.client_ucc) + '</td>' +
-          '<td>' + esc(b.exchange || '—') + '</td>' +
-          '<td><span class="tag ' + (b.category === 'Retail' ? 'ret' : 'hni') + '">' + esc(b.category) + '</span></td>' +
-          '<td class="n">' + inr(b.qty, 0) + '</td>' +
-          '<td class="n">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
-          '<td class="n">' + inr(b.value, 0) + '</td>' +
-          '<td><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
-          '<td>' + (b.status === 'Cancelled' ? '' :
+        return '<tr><td class="m rowhead"><b>' + esc(b.client_ucc) + '</b>' +
+            '<span class="sub"> · ' + esc(b.ref) + '</span></td>' +
+          '<td class="m hide-stack">' + esc(b.client_ucc) + '</td>' +
+          '<td data-label="Exchange">' + esc(b.exchange || '—') + '</td>' +
+          '<td data-label="Category"><span class="tag ' + (b.category === 'Retail' ? 'ret' : 'hni') + '">' +
+            esc(b.category) + '</span></td>' +
+          '<td class="n" data-label="Qty">' + inr(b.qty, 0) + '</td>' +
+          '<td class="n" data-label="Price">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
+          '<td class="n" data-label="Value">' + inr(b.value, 0) + '</td>' +
+          '<td data-label="Status"><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
+          '<td class="act">' + (b.status === 'Cancelled' ? '' :
             '<button class="mini" data-edit="' + b.id + '">Modify</button> ' +
             '<button class="mini" data-cancel="' + b.id + '">Withdraw</button>') + '</td></tr>';
       }).join('') + '</tbody></table></div>';

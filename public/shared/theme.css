@@ -231,8 +231,11 @@ table.tbl th.n{font-family:var(--sans)}
   table.stack td:not([data-label])::before { content: none; }
   table.stack td.rowhead { display: block; padding-bottom: 7px; margin-bottom: 5px;
     border-bottom: 1px solid var(--hair, #eef1f5); font-size: 14px; }
-  table.stack td.act { display: block; padding-top: 9px; text-align: left !important; }
-  table.stack td.act .mini, table.stack td.act .btn { width: 100%; }
+  /* The row's actions, side by side and thumb-sized, rather than two full-width
+     buttons on two lines. */
+  table.stack td.act { display: flex; gap: 8px; padding-top: 10px; text-align: left !important; }
+  table.stack td.act::before { content: none; }
+  table.stack td.act .mini, table.stack td.act .btn { flex: 1; min-height: 38px; }
   table.stack .empty { text-align: center; }
 }
 
@@ -240,3 +243,30 @@ table.tbl th.n{font-family:var(--sans)}
 @media (max-width: 620px) { table.stack td.hide-stack, table.stack th.hide-stack { display: none; } }
 /* …and on a wide screen the heading cell is just the first column again. */
 @media (min-width: 621px) { table.stack td.rowhead .sub { display: none; } }
+
+
+/* =================================================== no sideways pan, ever ===
+ * A phone screen that can be dragged left and right is the single most broken-
+ * looking thing a layout can do, and it only takes ONE element — a wide table
+ * somebody forgot to wrap, a long unbroken reference, a min-width in a grid track
+ * — to cause it. Those get fixed individually as they are found; this makes the
+ * whole class impossible.
+ *
+ * `clip`, not `hidden`. overflow-x:hidden turns the element into a scroll
+ * container, which silently kills `position: sticky` on everything inside it —
+ * the place-bid side panel, the sticky header. `clip` does not, so nothing else
+ * in the page has to change.
+ *
+ * This does NOT hide a genuine overflow problem: the content that overflows is
+ * still cut off and still looks wrong, so it is still reported. It only stops the
+ * viewport being draggable while that is true. Anything that legitimately needs to
+ * scroll sideways — a nine-column exchange file preview, the audit trail — sits in
+ * its own .wrap with overflow-x:auto and is unaffected, because that is a scroll
+ * container of its own.
+ */
+@media (max-width: 720px) {
+  html { overflow-x: clip; }
+  body { overflow-x: clip; max-width: 100%; }
+  /* A reference, a UCC or an email with no spaces in it cannot push the page wide. */
+  td.m, .m, .sub, .fh, .note { overflow-wrap: anywhere; }
+}
