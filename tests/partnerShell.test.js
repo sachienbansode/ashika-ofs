@@ -218,7 +218,9 @@ test('Clients is one tab on both shells, over two different scopes', () => {
   assert.match(SRC, /function renderClientTotals/);
   // Its controls live in a partner-only pane, so they are bound through a null
   // check — the whole point of the boot() lesson above.
-  assert.match(SRC, /var bindIf = function \(sel, ev, fn\)/);
+  // A hoisted declaration now, not a var assignment — see the bindIf test in
+  // mobileUi for the two boot()-killing bugs that forced the change.
+  assert.match(SRC, /^function bindIf\(sel, ev, fn\) \{$/m);
   assert.match(SRC, /bindIf\('#clientsTbl', 'click'/);
   // And the row button carries the UCC into the real form rather than a copy.
   assert.match(SRC, /function bidForClient\(ucc\)/);

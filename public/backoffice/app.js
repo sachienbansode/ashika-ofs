@@ -1543,6 +1543,26 @@ function cutoffAllowed(issue, category) {
  */
 var BIDMATH = window.OFS_BIDMATH;
 
+/**
+ * Bind a listener only if the element is on the page.
+ *
+ * A FUNCTION DECLARATION at module scope, deliberately. It used to be
+ * `var bindIf = function …` declared part-way down boot(), which meant a call
+ * placed above that line got the hoisted `undefined` and threw "bindIf is not a
+ * function" — killing boot() before loadDash() ever ran, so every dropdown on
+ * every screen came up empty with nothing on the page to say why. That has now
+ * happened twice, from two different edits, because nothing about the old shape
+ * made the ordering visible. A declaration is hoisted with its body, so the order
+ * of calls inside boot() cannot matter again.
+ *
+ * The null check itself is the other half: a control that belongs to a pane this
+ * session does not have must never stop the rest of the page from working.
+ */
+function bindIf(sel, ev, fn) {
+  var el = $(sel);
+  if (el) el.addEventListener(ev, fn);
+}
+
 /* What an accepted bid is, and is not. The server sends this with every accepted
  * bid (lib/notices) and that is what gets shown; this is the fallback for an older
  * server, and a test checks the two say the same thing. */
@@ -4193,9 +4213,6 @@ async function boot() {
     if (e.key === 'Enter' && e.target.dataset && e.target.dataset.set) saveSetting(e.target.dataset.set);
   });
 
-  // My clients is a partner-only pane. Bind through a null check rather than
-  // assuming: an element that is not on the page must never stop boot().
-  var bindIf = function (sel, ev, fn) { var el = $(sel); if (el) el.addEventListener(ev, fn); };
   bindIf('#clGo', 'click', function () { loadClients(true); });
   bindIf('#clClear', 'click', function () { $('#clQ').value = ''; loadClients(true); });
   bindIf('#clQ', 'keydown', function (e) { if (e.key === 'Enter') loadClients(true); });

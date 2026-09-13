@@ -265,3 +265,50 @@ test('the row actions sit side by side, not two full-width buttons on two lines'
     'the actions cell must not print an empty label');
   assert.match(theme, /table\.stack td\.act \.mini, table\.stack td\.act \.btn \{ flex: 1; min-height: 38px; \}/);
 });
+
+/* ---------------------------------------------------------------------------
+ * boot() must survive its own ordering.
+ * ------------------------------------------------------------------------ */
+
+test('bindIf is hoisted, so no call site can run before it exists', () => {
+  /* The bug this pins, twice over. bindIf was `var bindIf = function …` declared
+   * part-way down boot(). A call placed ABOVE that line got the hoisted
+   * `undefined` and threw "bindIf is not a function", which killed boot() before
+   * loadDash() — so #pbIssue, #bkIssue and #exIssue were never filled and every
+   * dropdown on every screen came up blank, with nothing on the page saying why.
+   *
+   * Verified in a browser against the live shell: boot threw, and pbIssue,
+   * bkIssue, exIssue and pbExch all came back with 0 options.
+   *
+   * A function declaration is hoisted with its body, so ordering cannot bite
+   * again. This test fails if anyone turns it back into an assignment. */
+  const src = read('public/backoffice/app.js');
+  assert.match(src, /^function bindIf\(sel, ev, fn\) \{$/m,
+    'bindIf must be a hoisted function declaration, not a var assignment');
+  // ^\s*var, so the description of the old shape in bindIf's own comment (which
+  // starts with " * ") does not trip this.
+  assert.ok(!/^\s*var bindIf\s*=/m.test(src),
+    'bindIf is an assignment again — ordering can kill boot()');
+
+  // And it must live OUTSIDE boot(), or hoisting only helps within it.
+  const bootAt = src.indexOf('\nasync function boot(');
+  assert.ok(src.indexOf('\nfunction bindIf(') < bootAt,
+    'bindIf must be declared at module scope, above boot()');
+});
+
+test('every helper boot() calls is defined before boot can run', () => {
+  // The general form of the same bug: boot() calling something that is only
+  // assigned later. Function declarations are safe; `var x = function` is not.
+  const src = read('public/backoffice/app.js');
+  const boot = src.slice(src.indexOf('\nasync function boot('));
+  const called = new Set();
+  for (const m of boot.matchAll(/(?:^|[^.\w$])([a-z][\w$]*)\s*\(/g)) called.add(m[1]);
+
+  const lateVars = [];
+  for (const m of src.matchAll(/\n\s*var ([a-z][\w$]*)\s*=\s*function\b/g)) {
+    if (called.has(m[1])) lateVars.push(m[1]);
+  }
+  assert.deepEqual(lateVars, [],
+    'boot() calls ' + lateVars.join(', ') + ', which are var-assigned functions — ' +
+    'move them to function declarations so a call cannot precede the assignment');
+});
