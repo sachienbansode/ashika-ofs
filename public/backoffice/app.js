@@ -959,23 +959,30 @@ async function loadClients(reset) {
     renderClientTotals(d);
 
     $('#clientsTbl').innerHTML = list.length ? (
-      '<thead><tr><th>UCC</th><th>Client</th><th>Category</th><th>Status</th>' +
+      '<thead><tr><th>UCC</th><th class="hide-stack">Client</th><th>Category</th><th>Status</th>' +
       '<th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
       '<th></th></tr></thead><tbody>' +
       list.map(function (c) {
         var free = Number(c.free_margin) || 0;
         var used = Number(c.margin_used) || 0;
-        return '<tr><td class="m">' + esc(c.ucc) + '</td>' +
-          '<td>' + esc(c.name || c.client_name || '—') + '</td>' +
-          '<td>' + esc(c.category || '—') + '</td>' +
-          '<td><span class="chip ' + (c.active ? 'open' : 'closed') + '">' +
+        /* data-label is what the stacked phone layout prints beside each value —
+         * see table.stack in shared/theme.css. Eight columns cannot be read
+         * across a 390px screen, so under 620px each row becomes a card and each
+         * cell says what it is. The UCC and name are the card's heading and carry
+         * no label, because a card headed "UCC  S247683" reads worse than one
+         * headed "S247683". */
+        return '<tr><td class="m rowhead"><b>' + esc(c.ucc) + '</b>' +
+            '<span class="sub"> · ' + esc(c.name || c.client_name || '—') + '</span></td>' +
+          '<td class="hide-stack">' + esc(c.name || c.client_name || '—') + '</td>' +
+          '<td data-label="Category">' + esc(c.category || '—') + '</td>' +
+          '<td data-label="Status"><span class="chip ' + (c.active ? 'open' : 'closed') + '">' +
             (c.active ? 'Active' : 'Inactive') + '</span></td>' +
-          '<td class="n">' + inr(c.available_margin, 0) + '</td>' +
+          '<td class="n" data-label="Available">' + inr(c.available_margin, 0) + '</td>' +
           // Used is only interesting when there is something behind it, and the
           // bid count is what makes the figure checkable against the book.
-          '<td class="n">' + (used ? inr(used, 0) +
+          '<td class="n" data-label="Used">' + (used ? inr(used, 0) +
             '<span class="sub"> · ' + inr(c.live_bids, 0) + ' bid(s)</span>' : '—') + '</td>' +
-          '<td class="n ' + (free < 0 ? 'neg' : free > 0 ? 'mg-pos' : '') + '">' +
+          '<td class="n ' + (free < 0 ? 'neg' : free > 0 ? 'mg-pos' : '') + '" data-label="Free">' +
             inr(free, 0) + '</td>' +
           // Only an active client may be bid for, so an inactive row says so rather
           // than offering a button that leads straight to a refusal.
@@ -1151,17 +1158,18 @@ async function loadBook() {
       '<th>Status</th><th></th></tr></thead><tbody>' +
       page.map(function (x) {
         return '<tr data-bid="' + x.id + '">' +
-          '<td class="m">' + esc(x.ref) +
-            '<div class="sub">' + esc(x.symbol || '') + '</div></td>' +
-          '<td>' + esc(x.client_name || x.client_ucc) +
+          '<td class="m rowhead"><b>' + esc(x.symbol || '') + '</b>' +
+            '<div class="sub">' + esc(x.ref) + '</div></td>' +
+          '<td data-label="Client">' + esc(x.client_name || x.client_ucc) +
             '<div class="sub m">' + esc(x.client_ucc) +
             (x.pan ? ' · ' + esc(x.pan) : '') + '</div></td>' +
-          '<td class="m">' + esc(x.branch_code || '—') + '</td>' +
-          '<td><span class="tag ' + (x.category === 'Retail' ? 'ret' : 'hni') + '">' + esc(x.category) + '</span></td>' +
-          '<td class="n">' + inr(x.qty, 0) + '</td>' +
-          '<td class="n">' + (x.is_cutoff ? 'Cut-off' : inr(x.price, 2)) + '</td>' +
-          '<td class="n">' + inr(x.value, 0) + '</td>' +
-          '<td><span class="st ' + statusCls(x.status) + '">' + esc(x.status) + '</span>' +
+          '<td class="m" data-label="Branch">' + esc(x.branch_code || '—') + '</td>' +
+          '<td data-label="Category"><span class="tag ' + (x.category === 'Retail' ? 'ret' : 'hni') + '">' +
+            esc(x.category) + '</span></td>' +
+          '<td class="n" data-label="Qty">' + inr(x.qty, 0) + '</td>' +
+          '<td class="n" data-label="Price">' + (x.is_cutoff ? 'Cut-off' : inr(x.price, 2)) + '</td>' +
+          '<td class="n" data-label="Value">' + inr(x.value, 0) + '</td>' +
+          '<td data-label="Status"><span class="st ' + statusCls(x.status) + '">' + esc(x.status) + '</span>' +
             '<div class="sub">by ' + esc(placedByLabel(x.placed_by)) + '</div></td>' +
           '<td class="act">' + (x.status === 'Cancelled' ? '' :
             '<button class="mini" data-edit="' + x.id + '">Modify</button> ' +

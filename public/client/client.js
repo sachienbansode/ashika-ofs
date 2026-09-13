@@ -818,30 +818,31 @@ async function loadBids(offset) {
       ? from + '–' + to + ' of ' + BIDS_PAGE.total + ' bid(s)' : 'no bids yet';
 
     $('#myBidsTbl').innerHTML = b.length ? (
-      '<thead><tr><th>Ref</th><th>Scrip</th>' +
+      '<thead><tr><th>Ref</th><th class="hide-stack">Scrip</th>' +
       (branch ? '<th>Client</th><th>Placed by</th>' : '') +
       '<th>Category</th>' +
       '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th>' +
       '<th>Status</th><th>Placed</th></tr></thead><tbody>' +
       b.map(function (x) {
-        return '<tr><td class="m">' + esc(x.ref) + '</td>' +
-          '<td><b>' + esc(x.symbol || '') + '</b></td>' +
+        return '<tr><td class="m rowhead"><b>' + esc(x.symbol || '') + '</b>' +
+            '<span class="sub"> · ' + esc(x.ref) + '</span></td>' +
+          '<td class="hide-stack"><b>' + esc(x.symbol || '') + '</b></td>' +
           (branch
-            ? '<td class="m">' + esc(x.client_ucc) +
+            ? '<td class="m" data-label="Client">' + esc(x.client_ucc) +
               (x.client_name ? '<br><span class="cd">' + esc(x.client_name) + '</span>' : '') + '</td>' +
               // Whether the CLIENT placed it or the branch did is the distinction an
               // AP most needs when deciding whether to act.
-              '<td><span class="chip ' + (x.placed_by === 'client' ? 'open' : 'grey') + '">' +
+              '<td data-label="Placed by"><span class="chip ' + (x.placed_by === 'client' ? 'open' : 'grey') + '">' +
                 esc(placedByLabel(x.placed_by)) + '</span></td>'
             : '') +
-          '<td><span class="chip ' + (x.category === 'Retail' ? 'retail' : 'hni') + '">' +
+          '<td data-label="Category"><span class="chip ' + (x.category === 'Retail' ? 'retail' : 'hni') + '">' +
             esc(x.category) + '</span></td>' +
-          '<td class="n">' + inr(x.qty, 0) + '</td>' +
-          '<td class="n">' + (x.is_cutoff ? 'Cut-off' : inr(x.price, 2)) + '</td>' +
-          '<td class="n">' + inr(x.value, 0) + '</td>' +
-          '<td><span class="chip ' + (x.status === 'Live' ? 'open' : x.status === 'Cancelled' ? 'grey' : 'soon') +
+          '<td class="n" data-label="Qty">' + inr(x.qty, 0) + '</td>' +
+          '<td class="n" data-label="Price">' + (x.is_cutoff ? 'Cut-off' : inr(x.price, 2)) + '</td>' +
+          '<td class="n" data-label="Value">' + inr(x.value, 0) + '</td>' +
+          '<td data-label="Status"><span class="chip ' + (x.status === 'Live' ? 'open' : x.status === 'Cancelled' ? 'grey' : 'soon') +
             '">' + esc(x.status) + '</span></td>' +
-          '<td class="m">' + dt(x.created_at) + '</td></tr>';
+          '<td class="m" data-label="Placed">' + dt(x.created_at) + '</td></tr>';
       }).join('') + '</tbody>'
     ) : '<tbody><tr><td class="tbl-empty">' +
         (branch ? 'No bids for your clients yet.' : 'You have not placed a bid yet.') +
@@ -917,12 +918,12 @@ async function loadAllotments() {
       '<thead><tr><th>Scrip</th><th class="n">Allotted</th><th class="n">Price</th>' +
       '<th class="n">Value</th><th>Date</th></tr></thead><tbody>' +
       a.map(function (x) {
-        return '<tr><td><b>' + esc(x.symbol || '') + '</b><br>' +
+        return '<tr><td class="rowhead"><b>' + esc(x.symbol || '') + '</b><br>' +
           '<span class="cd" style="font-size:11px;color:var(--muted)">' + esc(x.company || '') + '</span></td>' +
-          '<td class="n">' + inr(x.allot_qty, 0) + '</td>' +
-          '<td class="n">' + (x.allot_price == null ? '—' : inr(x.allot_price, 2)) + '</td>' +
-          '<td class="n">' + inr(x.allot_value, 0) + '</td>' +
-          '<td class="m">' + dt(x.allotted_at) + '</td></tr>';
+          '<td class="n" data-label="Allotted">' + inr(x.allot_qty, 0) + '</td>' +
+          '<td class="n" data-label="Price">' + (x.allot_price == null ? '—' : inr(x.allot_price, 2)) + '</td>' +
+          '<td class="n" data-label="Value">' + inr(x.allot_value, 0) + '</td>' +
+          '<td class="m" data-label="Date">' + dt(x.allotted_at) + '</td></tr>';
       }).join('') + '</tbody>'
     ) : '<tbody><tr><td class="tbl-empty">No allotments yet. ' +
         'Results appear here once the exchange file has been processed.</td></tr></tbody>';

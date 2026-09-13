@@ -152,3 +152,86 @@ table.tbl th.n{font-family:var(--sans)}
 .toast b{display:block;font-size:13px;margin-bottom:2px}
 .toast p{margin:0;font-size:11.5px;color:var(--muted)}
 @keyframes drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+
+/* ============================================================ touch devices ==
+ * The zoom nobody asked for.
+ *
+ * iOS Safari zooms the whole page in when a form control smaller than 16px takes
+ * focus, and it does NOT zoom back out when the field is left. On the bid form
+ * that is genuinely disorienting: you tap Quantity, the page jumps to 130%, and
+ * the Validate button you were heading for is now off the side of the screen. It
+ * reads as a broken layout, and the usual reaction is to pinch it back — which is
+ * why this looks like a zoom problem rather than a font-size one.
+ *
+ * The cure is the font size, not a locked viewport. `user-scalable=no` and
+ * `maximum-scale=1` do not fix it — iOS Safari has ignored both since iOS 10,
+ * precisely because sites used them this way — and on Android they take away
+ * pinch-zoom from anyone who needs it to read. So: 16px on every focusable
+ * control, and pinch-zoom left alone.
+ *
+ * !important because the rule has to beat component styles that legitimately set
+ * a smaller size for the desktop layout (.bb-f input at 14px, the back office's
+ * compact filter bars). Those are correct with a mouse and wrong with a thumb, and
+ * this is a platform behaviour guard rather than a styling preference.
+ *
+ * Keyed on a coarse pointer rather than a width: a 1024px tablet held in two hands
+ * has the same problem as a 390px phone, and a narrow desktop window does not.
+ */
+@media (hover: none) and (pointer: coarse) {
+  input, select, textarea, button { font-size: 16px !important; }
+
+  /* Two exceptions, both deliberate. The one-time-code boxes are already far
+     larger than 16px, and shrinking them to it would make the code harder to
+     read, not easier. */
+  .otpbox input, .otp { font-size: 21px !important; }
+
+  /* A thumb is about 9mm across. Anything it has to hit gets 44px, which is the
+     figure both platforms' own guidelines settle on. */
+  button, .btn, .mini, a.btn, [role="button"], nav.tabs button, select {
+    min-height: 44px;
+  }
+  .mini { min-height: 38px; }        /* inline row actions: smaller, still hittable */
+
+  /* Checkboxes and radios are drawn at the font size on iOS and end up tiny. */
+  input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
+}
+
+/* ---------- tables that have to survive a phone ----------
+ * A table with eight columns cannot be made narrow enough to read on a 390px
+ * screen; it can only be made to scroll, which hides the columns that matter, or
+ * be turned into something that is no longer a table. `table.stack` does the
+ * second: under 620px every row becomes a card and every cell carries its own
+ * label, taken from data-label on the cell.
+ *
+ * Applied per table rather than to all of them — the audit trail and the exchange
+ * file preview genuinely are grids, and reading them across is the point. */
+@media (max-width: 620px) {
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: auto; }
+  table.stack thead, table.stack tfoot { display: none; }
+  table.stack { min-width: 0 !important; font-size: 13px; }
+  table.stack tr {
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 13px; margin: 0 0 10px; background: #fff;
+  }
+  table.stack td {
+    border: 0; padding: 3px 0; text-align: left !important;
+    display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+  }
+  table.stack td::before {
+    content: attr(data-label);
+    color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .04em; flex: 0 0 auto;
+  }
+  /* A cell with no label is a heading or an action row: it gets the full width. */
+  table.stack td:not([data-label])::before { content: none; }
+  table.stack td.rowhead { display: block; padding-bottom: 7px; margin-bottom: 5px;
+    border-bottom: 1px solid var(--hair, #eef1f5); font-size: 14px; }
+  table.stack td.act { display: block; padding-top: 9px; text-align: left !important; }
+  table.stack td.act .mini, table.stack td.act .btn { width: 100%; }
+  table.stack .empty { text-align: center; }
+}
+
+/* A column the stacked layout drops because the card's heading already says it. */
+@media (max-width: 620px) { table.stack td.hide-stack, table.stack th.hide-stack { display: none; } }
+/* …and on a wide screen the heading cell is just the first column again. */
+@media (min-width: 621px) { table.stack td.rowhead .sub { display: none; } }
