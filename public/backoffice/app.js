@@ -1138,31 +1138,32 @@ async function loadClients(reset) {
   if (reset) CL.offset = 0;
   CL.q = (($('#clQ') && $('#clQ').value) || '').trim();
   try {
-    // The desk's endpoint searches and caps by limit; the partner's pages. Ask for
-    // what each understands rather than sending both and hoping they are ignored.
-    var qs = PARTNER
-      ? '?limit=' + CL.limit + '&offset=' + CL.offset + (CL.q ? '&q=' + encodeURIComponent(CL.q) : '')
-      : '?limit=100' + (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
+    /* One paged request for both shells. The desk's endpoint used to be a capped
+     * search with no offset and no total — the first hundred of tens of thousands,
+     * with no way to reach the rest — so this had to fork. It does not any more:
+     * both answer {clients, total, limit, offset} and ten rows is ten rows on a
+     * phone and on a desk alike. */
+    var qs = '?limit=' + CL.limit + '&offset=' + CL.offset +
+             (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
     var d = await api('/clients' + qs);
     var list = d.clients || [];
-    CL.total = d.total == null ? list.length : Number(d.total) || 0;
+    CL.total = Number(d.total) || 0;
 
-    // "121 client(s)" is the whole book; on a filtered or paged view the reader
-    // also needs to know which of them is on the screen in front of them.
-    if (PARTNER) {
-      var from = CL.total ? CL.offset + 1 : 0;
-      var to = Math.min(CL.offset + CL.limit, CL.total);
-      $('#clCount').textContent = CL.total
-        ? from + '–' + to + ' of ' + inr(CL.total, 0) + (CL.q ? ' matching' : '') + ' client(s)'
-        : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
-    } else {
-      // A desk search is capped, so say when the cap was hit rather than letting
-      // "100 client(s)" read as "there are 100".
-      $('#clCount').textContent = !list.length
-        ? (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients')
-        : (list.length >= 100 ? 'first 100 — narrow the search to see the rest'
-                              : inr(list.length, 0) + ' client(s)');
+    /* Asking for page 9 of a search that now has two pages: the server answers
+     * with nothing rather than an error, so step back to the last real page and
+     * fetch again. Happens whenever a search is narrowed while deep in a list. */
+    if (!list.length && CL.offset > 0 && CL.total > 0) {
+      CL.offset = Math.max(0, (Math.ceil(CL.total / CL.limit) - 1) * CL.limit);
+      return loadClients();
     }
+
+    // "121 client(s)" is the whole book; a reader on page 3 also needs to know
+    // which of them is on the screen in front of them.
+    var from = CL.total ? CL.offset + 1 : 0;
+    var to = Math.min(CL.offset + CL.limit, CL.total);
+    $('#clCount').textContent = CL.total
+      ? from + '–' + to + ' of ' + inr(CL.total, 0) + (CL.q ? ' matching' : '') + ' client(s)'
+      : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
 
     renderClientTotals(d);
 
@@ -1201,7 +1202,7 @@ async function loadClients(reset) {
     ) : ('<tbody><tr><td class="empty">' +
          (CL.q ? 'No client matches that search.'
                : PARTNER ? 'No clients are mapped to your branch.'
-                         : 'Search for a client by UCC, name, PAN or mobile.') +
+                         : 'No clients found.') +
          '</td></tr></tbody>');
 
     renderClientsPager();
@@ -1242,16 +1243,15 @@ function renderClientTotals(d) {
 function renderClientsPager() {
   var el = $('#clPager');
   if (!el) return;
-  // Only the partner endpoint pages. The desk's is a capped search, and a pager
-  // over it would offer a "Next" that returns the same ten rows.
-  if (!PARTNER || CL.total <= CL.limit) { el.innerHTML = ''; return; }
+  // Both shells page now. Ten rows is ten rows whoever is asking.
+  if (CL.total <= CL.limit) { el.innerHTML = ''; return; }
   var pages = Math.max(1, Math.ceil(CL.total / CL.limit));
   var page = Math.floor(CL.offset / CL.limit) + 1;
   el.innerHTML =
-    '<button class="mini" data-clpage="prev"' + (CL.offset <= 0 ? ' disabled' : '') + '>Previous</button> ' +
-    '<span class="tag">Page ' + page + ' of ' + pages + '</span> ' +
+    '<button class="mini" data-clpage="prev"' + (CL.offset <= 0 ? ' disabled' : '') + '>← Previous</button> ' +
+    '<span class="tag">Page ' + page + ' of ' + inr(pages, 0) + '</span> ' +
     '<button class="mini" data-clpage="next"' +
-      (CL.offset + CL.limit >= CL.total ? ' disabled' : '') + '>Next</button>';
+      (CL.offset + CL.limit >= CL.total ? ' disabled' : '') + '>Next →</button>';
 }
 
 /**

@@ -80,18 +80,56 @@ async function findMany(uccs) {
 }
 
 /** Desk search across UCC / name / PAN / mobile. */
+/* The one search clause, written once. Both the page and the count have to filter
+   identically or the pager claims a number of rows the list cannot produce. */
+const MATCH = `upper(btrim(u.ucc)) LIKE $1
+            OR upper(COALESCE(u.client_name,'')) LIKE $1
+            OR upper(COALESCE(u.name_asper_pan,'')) LIKE $1
+            OR upper(COALESCE(c.cclientname,'')) LIKE $1
+            OR upper(btrim(u.pan)) LIKE $1
+            OR right(regexp_replace(COALESCE(u.mobile, c.mobile, ''),'[^0-9]','','g'),10) LIKE $1`;
+
+const FROM = `FROM ${DWH}.tbl_user_info u
+              LEFT JOIN ${STG}.ask_clientmast c
+                ON upper(btrim(c.ctermcode)) = upper(btrim(u.ucc))`;
+
+/**
+ * One page of clients, and how many there are in total.
+ *
+ * Paged in SQL, not in the app. The desk's client base runs to tens of thousands;
+ * the previous version took a `limit` and returned that many rows with no offset
+ * and no total, so the screen could only ever show the first N and the desk had no
+ * way to reach the rest except by typing a narrower search.
+ *
+ * The count is a second query rather than a window function: `count(*) OVER ()`
+ * would be free per row but still makes Postgres walk every matching row before
+ * returning the first page, and on an unfiltered list that is the whole table.
+ */
+async function searchPage(q, limit, offset) {
+  const lim = Math.min(Math.max(Number(limit) || 10, 1), 200);
+  const off = Math.max(Number(offset) || 0, 0);
+  const term = String(q || '').trim();
+
+  if (!term) {
+    const [list, n] = await Promise.all([
+      ananta.rows(SELECT + ` ORDER BY u.ucc LIMIT $1 OFFSET $2`, [lim, off]),
+      ananta.one(`SELECT count(*)::int AS n ` + FROM)
+    ]);
+    return { clients: list, total: (n && n.n) || 0, limit: lim, offset: off };
+  }
+
+  const like = '%' + norm(term) + '%';
+  const [list, n] = await Promise.all([
+    ananta.rows(SELECT + ` WHERE ${MATCH} ORDER BY u.ucc LIMIT $2 OFFSET $3`, [like, lim, off]),
+    ananta.one(`SELECT count(*)::int AS n ` + FROM + ` WHERE ${MATCH}`, [like])
+  ]);
+  return { clients: list, total: (n && n.n) || 0, limit: lim, offset: off };
+}
+
+/** The old shape, still used where a plain list is wanted (the bid form's lookup). */
 async function search(q, limit) {
-  const lim = Math.min(Number(limit) || 50, 500);
-  if (!String(q || '').trim()) return ananta.rows(SELECT + ` ORDER BY u.ucc LIMIT $1`, [lim]);
-  const like = '%' + norm(q) + '%';
-  return ananta.rows(
-    SELECT + ` WHERE upper(btrim(u.ucc)) LIKE $1
-                  OR upper(COALESCE(u.client_name,'')) LIKE $1
-                  OR upper(COALESCE(u.name_asper_pan,'')) LIKE $1
-                  OR upper(COALESCE(c.cclientname,'')) LIKE $1
-                  OR upper(btrim(u.pan)) LIKE $1
-                  OR right(regexp_replace(COALESCE(u.mobile, c.mobile, ''),'[^0-9]','','g'),10) LIKE $1
-               ORDER BY u.ucc LIMIT $2`, [like, lim]);
+  const r = await searchPage(q, limit == null ? 50 : limit, 0);
+  return r.clients;
 }
 
 async function exists(ucc) {
@@ -130,4 +168,4 @@ async function enrich(rows, uccField, into) {
   });
 }
 
-module.exports = { norm, findByUcc, findMany, search, exists, eligibility, enrich };
+module.exports = { norm, findByUcc, findMany, search, searchPage, exists, eligibility, enrich };

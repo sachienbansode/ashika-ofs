@@ -28,12 +28,21 @@ const ofsSideFor = (uccs) => marginView.forUccs(uccs);
  */
 router.get('/', requirePage(PAGE), async (req, res, next) => {
   try {
-    const clients = await ld.search(req.query.q, req.query.limit);
-    const merged = await marginView.attach(clients, 'ucc');
+    /* Ten at a time, paged in SQL. This used to take a `limit` and return that
+     * many rows with no offset and no total: the desk saw the first hundred
+     * clients of tens of thousands, the pager could not be drawn because nothing
+     * said how many there were, and the only way to reach client number 101 was to
+     * guess a narrower search. Same shape the partner endpoint has always
+     * returned, so one screen renders both. */
+    const page = await ld.searchPage(req.query.q, req.query.limit || 10, req.query.offset);
+    const merged = await marginView.attach(page.clients, 'ucc');
     res.json({
       clients: maskRows(merged, canViewPII(req, PAGE)),
-      // Across the rows returned, not across every client on the platform — the
-      // screen says so, because a total whose scope is unclear is worse than none.
+      total: page.total, limit: page.limit, offset: page.offset,
+      q: String(req.query.q || '').trim() || null,
+      // Across the rows on THIS page, not across every client on the platform —
+      // the screen says which, because a total whose scope is unclear is worse
+      // than none.
       totals: marginView.totalsOf(merged),
       pii_unmasked: canViewPII(req, PAGE)
     });
