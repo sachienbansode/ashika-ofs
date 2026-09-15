@@ -101,10 +101,14 @@ async function main() {
       (hit ? ok : fail)('ldAdapter.findByUcc round-trips');
       const many = await ld.findMany(sample.map((x) => x.ucc));
       (many.size === sample.length ? ok : warn)('ldAdapter.findMany', many.size + '/' + sample.length + ' resolved');
+      /* Counted the way the application counts it. This used to count the client
+       * master's own status, which is not what decides anything - so the number
+       * printed here disagreed with the number of clients who could actually bid,
+       * which is a bad thing for a check whose whole job is to be believed. */
       const act = await ananta.one(
-        `SELECT count(*) FILTER (WHERE lower(COALESCE(cstatus,'')) = 'active')::bigint AS active,
-                count(*)::bigint AS total FROM ${ananta.STG}.ask_clientmast`);
-      ok('clients active in the client master', act.active + ' of ' + act.total);
+        `SELECT count(*) FILTER (WHERE ${ananta.CLIENT_ACTIVE_SQL})::bigint AS active,
+                count(*)::bigint AS total FROM ${ananta.DWH}.tbl_user_info u`);
+      ok('clients eligible to bid', act.active + ' of ' + act.total);
     } else {
       warn('no client rows', 'the desk will reject every bid with unknown_client');
     }
