@@ -235,6 +235,34 @@ async function main() {
     return { detail: 'date-only and midnight both take the session times' };
   }, { expected: 'the CSV import comes through the same door' });
 
+  await scenario('ISS-6', 'A bad ISIN is refused when an issue is EDITED, not only when created', async () => {
+    const r = await PUT('/api/issues/' + ISSUE.id, { isin: 'INE522F000' }, { session: 'desk' });
+    eq(r.status, 422, 'a 10-character ISIN was accepted by the edit form');
+    must(/10 characters/.test((r.json && r.json.message) || ''),
+      'the refusal does not say what is wrong with it: ' + (r.text || '').slice(0, 160));
+    const back = await GET('/api/issues/' + ISSUE.id, { session: 'desk' });
+    eq(back.json.issue.isin, 'INE522F01014', 'the good ISIN was overwritten by the bad one');
+    return { detail: (r.json.message || '').slice(0, 110) };
+  }, { expected: 'the check was on create only - edit was an open door' });
+
+  await scenario('ISS-7', 'A refused bid file names WHICH issue, and what is wrong with it', async () => {
+    const exp = require('../lib/exportBuild');
+    let msg = '';
+    try {
+      exp.assertExportable([{ is_cutoff: false, issue: {
+        id: 41, symbol: 'COALINDIA', isin: 'INE522F000', floor_price: 100,
+        ret_close: '2026-09-16T09:45:00Z'
+      } }], 'BSE');
+    } catch (e) { msg = e.message; }
+    must(msg, 'a 10-character ISIN built a file');
+    must(/#41/.test(msg), 'the refusal does not say which issue: ' + msg);
+    must(/INE522F000/.test(msg), 'the refusal does not quote the value the desk can see: ' + msg);
+    must(/10 characters/.test(msg), 'the refusal does not say what is wrong with it: ' + msg);
+    must(!/no confirmed ISIN yet/.test(msg),
+      'it still says there is no ISIN about an issue that plainly has one');
+    return { detail: msg.slice(0, 120) };
+  }, { expected: 'four COALINDIA offers can be open at once - the symbol is not an identity' });
+
   /* ================================================================ margin */
   G('Margin');
 

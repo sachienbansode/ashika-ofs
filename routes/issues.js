@@ -71,6 +71,33 @@ const FIELDS = ['symbol','company','isin','series','exchange','bse_scrip_code','
  * one place that stamps the offset the desk's browser does not send. */
 const WINDOWS = { hni_open: 'open', hni_close: 'close', ret_open: 'open', ret_close: 'close' };
 
+/**
+ * An ISIN is twelve characters: two letters of country, nine letters or digits,
+ * then a check digit. Checked at BOTH doors, create and edit.
+ *
+ * It used to be checked for presence only, so a typo was accepted here and
+ * surfaced days later as a refused exchange file - by which time the issue is
+ * live, bids are on it, and the desk is reading "no confirmed ISIN" about a
+ * value it can see on the screen. Returns the 422 body, or null.
+ */
+const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
+
+function badIsin(value) {
+  const isin = String(value == null ? '' : value).trim().toUpperCase();
+  if (!isin || ISIN_RE.test(isin)) return null;
+  return {
+    error: 'invalid_isin',
+    field: 'isin',
+    value: isin,
+    message: isin.length !== 12
+      ? '"' + isin + '" is ' + isin.length + ' character' + (isin.length === 1 ? '' : 's') +
+        '; an ISIN is 12 — two letters, nine letters or digits, then a check digit, '
+        + 'for example INE522F01014.'
+      : '"' + isin + '" is 12 characters but not the shape of an ISIN: two letters, '
+        + 'nine letters or digits, then a check digit — for example INE522F01014.'
+  };
+}
+
 function pick(body) {
   const out = {};
   for (const f of FIELDS) {
@@ -103,17 +130,8 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
       });
     }
 
-    /* An ISIN is twelve characters: two letters of country, nine alphanumerics,
-     * one check digit. It was only checked for PRESENCE, so a typo was accepted
-     * here and surfaced days later as a refused exchange file — assertExportable
-     * catches it, but by then the issue is live and bids are on it. Twelve
-     * characters is cheap to check while someone can still fix it. */
-    const isinFmt = String(req.body.isin || '').trim().toUpperCase();
-    if (isinFmt && !/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(isinFmt)) {
-      return res.status(422).json({ error: 'invalid_isin', field: 'isin',
-        message: 'ISIN must be 12 characters: two letters, nine letters or digits, '
-               + 'then a check digit — for example INE522F01014.' });
-    }
+    const isinBad = badIsin(req.body.isin);
+    if (isinBad) return res.status(422).json(isinBad);
     if (v.cut_price_min == null) v.cut_price_min = v.floor_price == null ? null : v.floor_price;
     const keys = Object.keys(v);
     const r = await one(
@@ -131,6 +149,11 @@ router.put('/:id(\\d+)', requirePage(PAGE), requireEdit(PAGE), async (req, res, 
   try {
     const before = await one(`SELECT ${COLS} FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [req.params.id]);
     if (!before) return res.status(404).json({ error: 'not_found' });
+    // Editing is the other door, and it had no lock on it: the check was on create
+    // only, so an ISIN corrected into a WORSE one was accepted here and refused
+    // days later at exchange-file time, which is where this was found.
+    const isinBad = badIsin(req.body && req.body.isin);
+    if (isinBad) return res.status(422).json(isinBad);
     const v = pick(req.body || {});
     const keys = Object.keys(v);
     if (!keys.length) return res.json({ issue: decorate(before) });
