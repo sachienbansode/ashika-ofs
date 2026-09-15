@@ -35,7 +35,19 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
      * guess a narrower search. Same shape the partner endpoint has always
      * returned, so one screen renders both. */
     const page = await ld.searchPage(req.query.q, req.query.limit || 10, req.query.offset);
-    const merged = await marginView.attach(page.clients, 'ucc');
+    /* `active`, spelled the way the screen reads it.
+     *
+     * The comment above says this endpoint returns the same shape as the partner
+     * one so that a single screen renders both. It did not. The partner endpoint
+     * builds each row by hand and sets `active`; this one hands back the client
+     * record, which carries `is_active`. The table reads `c.active`, so on the
+     * desk it was undefined on every row - and undefined is falsy, so EVERY client
+     * was labelled Inactive and had its Place bid button replaced with "cannot
+     * bid", however active they actually were. Nothing was refused by it; the bid
+     * path never looked at this field. It was purely a screen telling the desk the
+     * opposite of the truth. */
+    const merged = (await marginView.attach(page.clients, 'ucc'))
+      .map((c) => Object.assign({}, c, { active: c.is_active === true }));
     res.json({
       clients: maskRows(merged, canViewPII(req, PAGE)),
       total: page.total, limit: page.limit, offset: page.offset,
@@ -65,7 +77,9 @@ router.get('/:ucc', requirePage(PAGE), async (req, res, next) => {
 
     res.json({
       client: maskRow(Object.assign({}, client, {
-        available_margin: available, margin_at: side.margin_at || null
+        available_margin: available, margin_at: side.margin_at || null,
+        // Both spellings, for the same reason as the list above.
+        active: client.is_active === true
       }), canViewPII(req, PAGE)),
       margin_used: used,
       free_margin: available - used,

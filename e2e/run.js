@@ -187,6 +187,41 @@ async function main() {
     return { detail: 'refused ' + r.status };
   });
 
+  await scenario('ISS-4', 'A window typed as 09:15 is stored as 09:15 IST, not UTC', async () => {
+    const day = '2026-10-20';
+    const r = await POST('/api/issues', {
+      symbol: 'TZTEST' + Math.floor(Math.random() * 10000), company: 'Timezone Test Ltd',
+      isin: 'INE522F01014', exchange: 'BSE', bse_scrip_code: '500001', floor_price: 100,
+      hni_open: day + 'T09:15', hni_close: day + 'T15:15',
+      ret_open: '2026-10-21T09:15', ret_close: '2026-10-21T15:15'
+    }, { session: 'desk' });
+    eq(r.status, 201, 'issue create failed: ' + (r.text || '').slice(0, 200));
+    const ist = (v) => new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false
+    }).format(new Date(v));
+    eq(ist(r.json.issue.hni_open), '09:15', 'HNI open did not come back as 09:15 IST');
+    eq(ist(r.json.issue.hni_close), '15:15', 'HNI close did not come back as 15:15 IST');
+    return { detail: 'typed 09:15/15:15, stored and read back as 09:15/15:15 IST' };
+  }, { expected: 'a naive string used to be read as UTC - every window 5h30 late' });
+
+  await scenario('ISS-5', 'A date with no time takes 09:15 and 15:15', async () => {
+    const r = await POST('/api/issues', {
+      symbol: 'DFLT' + Math.floor(Math.random() * 10000), company: 'Default Times Ltd',
+      isin: 'INE522F01014', exchange: 'BSE', bse_scrip_code: '500002', floor_price: 100,
+      hni_open: '2026-10-22', hni_close: '2026-10-22',
+      ret_open: '2026-10-23T00:00', ret_close: '2026-10-23T00:00'
+    }, { session: 'desk' });
+    eq(r.status, 201, 'issue create failed: ' + (r.text || '').slice(0, 200));
+    const ist = (v) => new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false
+    }).format(new Date(v));
+    eq(ist(r.json.issue.hni_open), '09:15', 'a date with no time did not open at 09:15');
+    eq(ist(r.json.issue.hni_close), '15:15', 'a date with no time did not close at 15:15');
+    eq(ist(r.json.issue.ret_open), '09:15', 'a midnight time did not become 09:15');
+    eq(ist(r.json.issue.ret_close), '15:15', 'a midnight time did not become 15:15');
+    return { detail: 'date-only and midnight both take the session times' };
+  }, { expected: 'the CSV import comes through the same door' });
+
   /* ================================================================ margin */
   G('Margin');
 
@@ -895,6 +930,20 @@ async function main() {
     must((byName.json.clients || []).length >= 1, 'search by name found nothing');
     return { detail: 'UCC and name both resolve' };
   });
+
+  await scenario('CLT-5', 'The client list says whether each client may bid', async () => {
+    const r = await GET('/api/clients?limit=50', { session: 'desk' });
+    eq(r.status, 200, 'client list failed');
+    const rows = r.json.clients || [];
+    const one = rows.find((c) => c.ucc === 'ASH1001');
+    must(one, 'ASH1001 is not in the list');
+    eq(one.active, true, 'an active client is reported inactive by the list');
+    const dead = rows.find((c) => c.ucc === 'ASH9001');
+    if (dead) eq(dead.active, false, 'an inactive client is reported active by the list');
+    must(rows.every((c) => typeof c.active === 'boolean'),
+      'some rows carry no "active" at all - the screen renders those as Inactive');
+    return { detail: rows.length + ' row(s), every one carrying active true/false' };
+  }, { expected: 'the desk sent is_active and the screen read active - every client showed Inactive' });
 
   await scenario('CLT-4', 'The client list carries margin per client', async () => {
     const r = await GET('/api/clients?q=ASH1001', { session: 'desk' });

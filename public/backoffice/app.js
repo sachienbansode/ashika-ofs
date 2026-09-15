@@ -1184,8 +1184,8 @@ async function loadClients(reset) {
             '<span class="sub"> · ' + esc(c.name || c.client_name || '—') + '</span></td>' +
           '<td class="hide-stack">' + esc(c.name || c.client_name || '—') + '</td>' +
           '<td data-label="Category">' + esc(c.category || '—') + '</td>' +
-          '<td data-label="Status"><span class="chip ' + (c.active ? 'open' : 'closed') + '">' +
-            (c.active ? 'Active' : 'Inactive') + '</span></td>' +
+          '<td data-label="Status"><span class="chip ' + (clientActive(c) ? 'open' : 'closed') + '">' +
+            (clientActive(c) ? 'Active' : 'Inactive') + '</span></td>' +
           '<td class="n" data-label="Available">' + inr(c.available_margin, 0) + '</td>' +
           // Used is only interesting when there is something behind it, and the
           // bid count is what makes the figure checkable against the book.
@@ -1195,7 +1195,7 @@ async function loadClients(reset) {
             inr(free, 0) + '</td>' +
           // Only an active client may be bid for, so an inactive row says so rather
           // than offering a button that leads straight to a refusal.
-          '<td class="act">' + (c.active
+          '<td class="act">' + (clientActive(c)
             ? '<button class="mini" data-bidfor="' + esc(c.ucc) + '">Place bid</button>'
             : '<span class="sub">cannot bid</span>') + '</td></tr>';
       }).join('') + '</tbody>'
@@ -2414,6 +2414,56 @@ function fldSel(id, label, opts, val, hint) {
  * Local (IST) wall-clock, no timezone suffix — the same convention the form uses
  * when it sends a value back, so a saved window does not shift by 5.5 hours.
  */
+/**
+ * Is this client active? Belt and braces on the field name.
+ *
+ * Two endpoints feed this one screen and they spelled it differently - the desk
+ * sent is_active, the partner sent active - so the table read undefined on the
+ * desk and labelled every client Inactive. Both now send both; this reads either,
+ * and a row that carries NEITHER is treated as active rather than as inactive,
+ * because "I was not told" must never render as "closed account" on a screen the
+ * desk makes decisions from.
+ */
+/* An OFS day runs 09:15 to 15:15. Every open opens at 09:15 and every close
+ * closes at 15:15 unless somebody deliberately types otherwise, so the form
+ * opens with those times already in it rather than with four empty boxes that
+ * each need a time typed into them. The server applies the same two defaults to
+ * anything that arrives without a time, so the CSV import gets them too. */
+var SESSION_OPEN = '09:15';
+var SESSION_CLOSE = '15:15';
+
+function istDatePlus(days) {
+  var d = new Date();
+  d.setDate(d.getDate() + (days || 0));
+  var p2 = function (x) { return String(x).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+}
+
+/** A datetime-local value: the given day at the session's open or close. */
+function sessionLocal(days, kind) {
+  return istDatePlus(days) + 'T' + (kind === 'close' ? SESSION_CLOSE : SESSION_OPEN);
+}
+
+/* If the time half is left at midnight, it was not chosen - put the session time
+ * back. Bound to each window field so it corrects as the desk tabs out. */
+function snapSessionTime(sel, kind) {
+  var el = $(sel);
+  if (!el) return;
+  el.addEventListener('change', function () {
+    var v = String(el.value || '');
+    if (/T00:00(:00)?$/.test(v)) {
+      el.value = v.slice(0, 11) + (kind === 'close' ? SESSION_CLOSE : SESSION_OPEN);
+    }
+  });
+}
+
+function clientActive(c) {
+  if (!c) return false;
+  if (typeof c.active === 'boolean') return c.active;
+  if (typeof c.is_active === 'boolean') return c.is_active;
+  return true;
+}
+
 function dtLocal(v) {
   if (!v) return '';
   var d = new Date(v);
@@ -2458,15 +2508,23 @@ function issueForm(issue) {
           'Discount to retail on the cut-off price.') +
       fldSel('fCutoffFlag', 'Cut-off bidding', [['1', 'Allowed for Retail'], ['0', 'Not allowed']],
           i.cutoff_flag === false ? '0' : '1') +
-      fld('fHniOpen', 'HNI open', 'datetime-local', dtLocal(i.hni_open)) +
-      fld('fHniClose', 'HNI close', 'datetime-local', dtLocal(i.hni_close)) +
-      fld('fRetOpen', 'Retail open', 'datetime-local', dtLocal(i.ret_open)) +
-      fld('fRetClose', 'Retail close', 'datetime-local', dtLocal(i.ret_close)) +
+      fld('fHniOpen', 'HNI open', 'datetime-local',
+          dtLocal(i.hni_open) || (editing ? '' : sessionLocal(0, 'open'))) +
+      fld('fHniClose', 'HNI close', 'datetime-local',
+          dtLocal(i.hni_close) || (editing ? '' : sessionLocal(0, 'close'))) +
+      fld('fRetOpen', 'Retail open', 'datetime-local',
+          dtLocal(i.ret_open) || (editing ? '' : sessionLocal(1, 'open'))) +
+      fld('fRetClose', 'Retail close', 'datetime-local',
+          dtLocal(i.ret_close) || (editing ? '' : sessionLocal(1, 'close'))) +
       (editing ? fldSel('fStatus', 'Status', ['Auto', 'Suspended', 'Closed'], i.status || 'Auto',
           'Suspended and Closed both hide it from clients.') : '') +
     '</div><div class="bar" style="margin-top:12px">' +
       '<button class="btn" id="miSave">' + (editing ? 'Save changes' : 'Save issue') + '</button>' +
       '<button class="btn ghost" id="miCancel">Cancel</button></div></div>';
+  snapSessionTime('#fHniOpen', 'open');
+  snapSessionTime('#fHniClose', 'close');
+  snapSessionTime('#fRetOpen', 'open');
+  snapSessionTime('#fRetClose', 'close');
   $('#miSave').addEventListener('click', function () { saveIssue(i.id || null); });
   $('#miCancel').addEventListener('click', function () { f.classList.add('hide'); f.innerHTML = ''; });
   f.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

@@ -5,7 +5,8 @@ const { SCHEMA, rows, one, query } = require('../db/ofsAdapter');
 const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAccess');
 const { maskRows } = require('../lib/pii');
 const settings = require('../lib/settings');
-const { issueStatus, catStatus } = require('../lib/domain');
+const domain = require('../lib/domain');
+const { issueStatus, catStatus } = domain;
 const audit = require('../lib/audit');
 const dbErr = require('../lib/dbErrors');
 const { sourceFor, capability } = require('../lib/issueSource');
@@ -63,9 +64,20 @@ const FIELDS = ['symbol','company','isin','series','exchange','bse_scrip_code','
   'tick','lot','issue_qty','retail_qty','discount_pct','cutoff_flag','hni_open','hni_close','ret_open','ret_close','issue_date',
   'indicative_ri','indicative_ni','status'];
 
+/* The four window boundaries, normalised on the way in.
+ *
+ * Every door uses pick() - the manual form, the CSV import, the API - so this is
+ * the one place that has to know that an OFS day is 09:15 to 15:15 IST, and the
+ * one place that stamps the offset the desk's browser does not send. */
+const WINDOWS = { hni_open: 'open', hni_close: 'close', ret_open: 'open', ret_close: 'close' };
+
 function pick(body) {
   const out = {};
-  for (const f of FIELDS) if (body[f] !== undefined) out[f] = body[f] === '' ? null : body[f];
+  for (const f of FIELDS) {
+    if (body[f] === undefined) continue;
+    const v = body[f] === '' ? null : body[f];
+    out[f] = WINDOWS[f] ? domain.sessionTime(v, WINDOWS[f]) : v;
+  }
   return out;
 }
 
