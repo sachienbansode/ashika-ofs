@@ -173,11 +173,16 @@ router.get('/me/bids', async (req, res, next) => {
 
     if (req.query.issue_id) add(' AND b.issue_id = $$::int', Number(req.query.issue_id));
     if (req.query.category) add(' AND b.category = $$', String(req.query.category));
-    if (req.query.status) add(' AND b.status = $$', String(req.query.status));
-    else if (String(req.query.include_cancelled || '') !== '1') {
-      // Cancelled bids are not part of the book. They stay reachable, but a branch
-      // reading a total that quietly includes them is reading the wrong number.
-      where += " AND b.status <> 'Cancelled'";
+    /* Same three-way as the desk book: an exact status, ALL for every row, or the
+     * default — what still stands. Cancelled and rejected bids stay reachable, but
+     * a branch reading a total that quietly includes them reads the wrong number. */
+    const wantStatus = String(req.query.status || '').trim();
+    const everything = wantStatus.toUpperCase() === 'ALL' ||
+      String(req.query.include_cancelled || '') === '1';
+    if (wantStatus && wantStatus.toUpperCase() !== 'ALL') {
+      add(' AND b.status = $$', wantStatus);
+    } else if (!everything) {
+      where += " AND b.status NOT IN ('Cancelled','Rejected')";
     }
     if (req.query.placed_by) add(' AND b.placed_by = $$', String(req.query.placed_by));
     if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.as_on || ''))) {

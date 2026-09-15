@@ -1311,8 +1311,13 @@ function renderBookTotals(rows) {
   var clients = new Set(live.map(function (x) { return x.client_ucc; })).size;
 
   var asOn = asOnParam('#bkAsOn');
+  /* With “All bids” chosen the list holds withdrawn and rejected rows as well, and
+   * a single count would be read as the book. So say both: how many rows are on
+   * screen, and how many of them actually stand. */
   $('#bkCount').textContent = (asOn ? 'as on ' + dtDate(asOn + 'T00:00:00+05:30') + ' · ' : '') +
-    live.length + ' bid(s) · ' + clients + ' client(s)';
+    (dead ? inr(rows.length, 0) + ' row(s) · ' + inr(live.length, 0) + ' in the book · '
+          : inr(live.length, 0) + ' bid(s) · ') +
+    clients + ' client(s)';
 
   var cell = function (label, cls, list) {
     // Unique clients per leg. Retail and Non-Retail are allotted against separate
@@ -1346,7 +1351,6 @@ function bookQuery() {
   if ($('#bkQ').value.trim()) q.push('q=' + encodeURIComponent($('#bkQ').value.trim()));
   if ($('#bkBranch').value.trim()) q.push('branch_code=' + encodeURIComponent($('#bkBranch').value.trim()));
   if (asOnParam('#bkAsOn')) q.push('as_on=' + encodeURIComponent(asOnParam('#bkAsOn')));
-  if ($('#bkStatus').value === 'Cancelled') q.push('include_cancelled=1');
   return q.join('&');
 }
 
@@ -1379,7 +1383,7 @@ async function loadBook() {
           '<td class="n" data-label="Value">' + inr(x.value, 0) + '</td>' +
           '<td data-label="Status"><span class="st ' + statusCls(x.status) + '">' + esc(x.status) + '</span>' +
             '<div class="sub">by ' + esc(placedByLabel(x.placed_by)) + '</div></td>' +
-          '<td class="act">' + (x.status === 'Cancelled' ? '' :
+          '<td class="act">' + (x.status === 'Cancelled' || x.status === 'Rejected' ? '' :
             '<button class="mini" data-edit="' + x.id + '">Modify</button> ' +
             '<button class="mini" data-cancel="' + x.id + '">Cancel</button>') + '</td>' +
         '</tr>';

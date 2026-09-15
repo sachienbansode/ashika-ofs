@@ -30,8 +30,21 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
     const w = [], p = [];
     if (req.query.issue_id) { p.push(req.query.issue_id); w.push('b.issue_id = $' + p.length); }
     if (req.query.category) { p.push(req.query.category); w.push('b.category = $' + p.length); }
-    if (req.query.status)   { p.push(req.query.status);   w.push('b.status = $' + p.length); }
-    else if (String(req.query.include_cancelled || '') !== '1') w.push("b.status <> 'Cancelled'");
+    /* status: one of Live | Modified | Cancelled | Rejected, or ALL.
+     *
+     * The default is the working book — what still stands — because a total that
+     * quietly includes withdrawn and rejected bids is the wrong number, and that is
+     * the number the desk reconciles against. ALL asks for every row regardless,
+     * which is what the bid book’s “All bids” option sends. include_cancelled=1 is
+     * the older spelling of ALL and still answers the same way. */
+    const wantStatus = String(req.query.status || '').trim();
+    const everything = wantStatus.toUpperCase() === 'ALL' ||
+      String(req.query.include_cancelled || '') === '1';
+    if (wantStatus && wantStatus.toUpperCase() !== 'ALL') {
+      p.push(wantStatus); w.push('b.status = $' + p.length);
+    } else if (!everything) {
+      w.push("b.status NOT IN ('Cancelled','Rejected')");
+    }
     if (req.query.branch_code) {
       p.push(String(req.query.branch_code).trim().toUpperCase());
       w.push('upper(b.branch_code) = $' + p.length);

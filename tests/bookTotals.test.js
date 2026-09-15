@@ -77,9 +77,17 @@ test('cancelled and rejected are shown apart, and counted', () => {
   assert.match(html, /not in the book/);
 });
 
-test('the count is live bids and distinct clients, not rows on screen', () => {
+/* With “All bids” chosen the list holds withdrawn and rejected rows too, and one
+ * number would be read as the book. So the count says both: rows on screen, and how
+ * many of them still stand. When there is nothing dead in the list, it says one. */
+test('the count separates rows on screen from what stands, when the two differ', () => {
   const { count } = render(BIDS);
-  assert.match(count, /^4 bid\(s\) · 3 client\(s\)$/, count);   // A twice = one client
+  assert.match(count, /^6 row\(s\) · 4 in the book · 3 client\(s\)$/, count);  // A twice = one client
+});
+
+test('with nothing withdrawn or rejected the count stays a single figure', () => {
+  const live = BIDS.filter((b) => b.status !== 'Cancelled' && b.status !== 'Rejected');
+  assert.match(render(live).count, /^4 bid\(s\) · 3 client\(s\)$/);
 });
 
 test('a past as-on date is named in the count; today is not', () => {
@@ -111,4 +119,37 @@ test('today is shown but sent as no filter; a past date is sent', () => {
 
 test('a past date pauses auto-refresh; today does not', () => {
   assert.match(SRC, /var pinned = !!asOnParam\('#dashAsOn'\)/);
+});
+
+/* ------------------------------------------------- the status filter on the book */
+
+/* Four statuses exist — Live, Modified, Cancelled, Rejected — and the book has to
+ * offer every one of them plus everything at once. The default stays the working
+ * book: a total that quietly includes withdrawn bids is the number the desk
+ * reconciles against, and it would be wrong. */
+test('the bid book offers every status and an All option', () => {
+  const html = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'public', 'backoffice', 'index.html'), 'utf8');
+  const sel = html.slice(html.indexOf('id="bkStatus"'));
+  const box = sel.slice(0, sel.indexOf('</select>'));
+  for (const v of ['ALL', 'Live', 'Modified', 'Cancelled', 'Rejected']) {
+    assert.ok(box.includes('value="' + v + '"'), 'the book has no ' + v + ' option');
+  }
+  assert.ok(box.indexOf('value=""') < box.indexOf('value="ALL"'),
+    'the default is no longer the first option');
+});
+
+test('choosing All sends status=ALL and nothing else', () => {
+  const m = SRC.match(/function bookQuery\(\)[\s\S]*?\n}/);
+  assert.ok(m, 'bookQuery is gone');
+  assert.ok(/status=/.test(m[0]), 'bookQuery no longer sends a status');
+  assert.ok(!/include_cancelled/.test(m[0]),
+    'bookQuery still sends the old include_cancelled flag alongside a status');
+});
+
+test('a withdrawn or rejected bid offers no Modify or Cancel button', () => {
+  const m = SRC.match(/'<td class="act">' \+ \(x\.status[\s\S]{0,240}/);
+  assert.ok(m, 'the book’s actions cell is gone');
+  assert.ok(/Cancelled/.test(m[0]) && /Rejected/.test(m[0]),
+    'a rejected bid can still be modified from the book: ' + m[0]);
 });

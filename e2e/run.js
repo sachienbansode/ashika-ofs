@@ -730,6 +730,45 @@ async function main() {
     return { detail: 'refused ' + r.status + ' ' + ((r.json && r.json.error) || '') };
   });
 
+  await scenario('WDR-5', 'The book defaults to what still stands', async () => {
+    const r = await GET('/api/bids', { session: 'desk' });
+    eq(r.status, 200, 'bid book failed');
+    const bad = (r.json.bids || []).filter((b) => b.status === 'Cancelled' || b.status === 'Rejected');
+    eq(bad.length, 0, bad.length + ' withdrawn or rejected bid(s) are counted in the default book');
+    return { detail: (r.json.bids || []).length + ' live/modified bid(s), no dead rows' };
+  }, { expected: 'the default total is the one the desk reconciles against' });
+
+  await scenario('WDR-6', 'All bids shows every row, withdrawn and rejected included', async () => {
+    const all = await GET('/api/bids?status=ALL', { session: 'desk' });
+    eq(all.status, 200, 'status=ALL failed: ' + (all.text || '').slice(0, 200));
+    const rows = all.json.bids || [];
+    must(rows.some((b) => b.status === 'Cancelled'),
+      'status=ALL did not return the bid that was withdrawn a moment ago');
+    const dflt = await GET('/api/bids', { session: 'desk' });
+    must(rows.length > (dflt.json.bids || []).length,
+      'All returned no more rows than the default view');
+    const seen = [...new Set(rows.map((b) => b.status))].sort().join(', ');
+    return { detail: rows.length + ' row(s) across ' + seen };
+  }, { expected: 'the bid book "All bids" option sends status=ALL' });
+
+  await scenario('WDR-7', 'Each status can still be asked for on its own', async () => {
+    for (const st of ['Live', 'Modified', 'Cancelled', 'Rejected']) {
+      const r = await GET('/api/bids?status=' + st, { session: 'desk' });
+      eq(r.status, 200, st + ' filter failed');
+      const wrong = (r.json.bids || []).filter((b) => b.status !== st);
+      eq(wrong.length, 0, st + ' filter returned a bid with status ' + (wrong[0] || {}).status);
+    }
+    return { detail: 'Live, Modified, Cancelled and Rejected each return only their own' };
+  }, { expected: 'ALL must not break the single-status filters' });
+
+  await scenario('WDR-8', 'A branch sees the same three-way on its own book only', async () => {
+    const r = await GET('/client/api/me/bids?status=ALL', { session: 'ap' });
+    eq(r.status, 200, 'partner book with status=ALL failed: ' + (r.text || '').slice(0, 200));
+    const outside = (r.json.bids || []).filter((b) => !['ASH1001', 'ASH1002'].includes(b.client_ucc));
+    eq(outside.length, 0, 'All bids leaked a client outside the branch book');
+    return { detail: (r.json.bids || []).length + ' row(s), all within the branch book' };
+  }, { expected: 'a wider status filter must not widen the scope' });
+
   /* ============================================================== security */
   G('Security headers and hardening');
 
