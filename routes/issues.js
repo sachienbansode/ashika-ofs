@@ -90,6 +90,18 @@ router.post('/', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) =>
           missing.map(dbErr.label).join(', ') + '.'
       });
     }
+
+    /* An ISIN is twelve characters: two letters of country, nine alphanumerics,
+     * one check digit. It was only checked for PRESENCE, so a typo was accepted
+     * here and surfaced days later as a refused exchange file — assertExportable
+     * catches it, but by then the issue is live and bids are on it. Twelve
+     * characters is cheap to check while someone can still fix it. */
+    const isinFmt = String(req.body.isin || '').trim().toUpperCase();
+    if (isinFmt && !/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(isinFmt)) {
+      return res.status(422).json({ error: 'invalid_isin', field: 'isin',
+        message: 'ISIN must be 12 characters: two letters, nine letters or digits, '
+               + 'then a check digit — for example INE522F01014.' });
+    }
     if (v.cut_price_min == null) v.cut_price_min = v.floor_price == null ? null : v.floor_price;
     const keys = Object.keys(v);
     const r = await one(
