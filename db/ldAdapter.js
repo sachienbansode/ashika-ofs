@@ -51,31 +51,20 @@ const SELECT = `
          c.last_traded_date,
          c.account_opened,
          u.etl_loaded_at,
-         -- Eligibility for OFS bidding. Fail-closed, and this time actually so.
+         -- Eligibility for OFS bidding: the ACCOUNT RECORD decides, and only it.
          --
-         -- The previous version read "whichever source is present says active": each
-         -- status fell back to the other through COALESCE, so a client held in the
-         -- user table with no row in the client master at all came out ACTIVE and
-         -- could bid. Nothing downstream caught it, because everything downstream
-         -- trusts this column.
+         -- The client master is a branch mapping. It says which branch or partner a
+         -- client belongs to, and it is read here for that and for nothing else. It
+         -- used to sit in this condition too, ANDed with the account status and
+         -- COALESCEd into it, which let each source answer for the other - so a
+         -- client with no client-master row came out active and could bid.
          --
-         -- The rule is now the one the desk states: a client may bid only if it is
-         -- IN the client master and BOTH records say active on their own account.
-         -- No fallback between them - a missing or blank status is not a yes.
-         (    c.ctermcode IS NOT NULL
-          AND lower(btrim(COALESCE(c.cstatus, ''))) = 'active'
-          AND upper(btrim(COALESCE(c.activation_status, 'Y'))) = 'Y'
-          AND lower(btrim(COALESCE(u.status, ''))) = 'active'
-         )                                                               AS is_active,
+         -- One source, no fallback, and a blank status is not a yes.
+         (lower(btrim(COALESCE(u.status, ''))) = 'active')                              AS is_active,
          -- Why not, in words, so a screen can say more than "cannot bid".
-         CASE
-           WHEN c.ctermcode IS NULL                                    THEN 'not in the client master'
-           WHEN lower(btrim(COALESCE(c.cstatus, ''))) <> 'active'      THEN
-             'client master status is ' || COALESCE(NULLIF(btrim(c.cstatus), ''), 'blank')
-           WHEN upper(btrim(COALESCE(c.activation_status, 'Y'))) <> 'Y' THEN 'account not activated'
-           WHEN lower(btrim(COALESCE(u.status, ''))) <> 'active'       THEN
-             'account status is ' || COALESCE(NULLIF(btrim(u.status), ''), 'blank')
-           ELSE NULL
+         CASE WHEN NOT (lower(btrim(COALESCE(u.status, ''))) = 'active')
+              THEN 'account status is ' || COALESCE(NULLIF(btrim(u.status), ''), 'blank')
+              ELSE NULL
          END                                                             AS inactive_reason
     FROM ${DWH}.tbl_user_info u
     LEFT JOIN ${STG}.ask_clientmast c

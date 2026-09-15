@@ -106,11 +106,15 @@ async function uccsOfBranch(code) {
   const c = normCode(code);
   if (!c) return [];
   const r = await ananta.rows(
+    /* The client master answers "whose client is this"; the account record answers
+     * "may they bid". Both are asked here, each of the source that owns it - the
+     * mapping no longer carries a status of its own. */
     `SELECT upper(btrim(c.ctermcode)) AS ucc
        FROM ${STG}.ask_clientmast c
+       JOIN ${ananta.DWH}.tbl_user_info u
+         ON upper(btrim(u.ucc)) = upper(btrim(c.ctermcode))
       WHERE upper(btrim(COALESCE(c.branch_id,''))) = $1
-        AND lower(btrim(COALESCE(c.cstatus,''))) = 'active'
-        AND upper(btrim(COALESCE(c.activation_status,'Y'))) = 'Y'
+        AND ${ananta.CLIENT_ACTIVE_SQL}
         AND btrim(COALESCE(c.ctermcode,'')) <> ''
       ORDER BY 1`, [c]);
   return r.map((x) => x.ucc);
@@ -123,10 +127,11 @@ async function branchHasClient(code, ucc) {
   const r = await ananta.one(
     `SELECT 1 AS ok
        FROM ${STG}.ask_clientmast c
+       JOIN ${ananta.DWH}.tbl_user_info u
+         ON upper(btrim(u.ucc)) = upper(btrim(c.ctermcode))
       WHERE upper(btrim(COALESCE(c.branch_id,''))) = $1
         AND upper(btrim(COALESCE(c.ctermcode,''))) = $2
-        AND lower(btrim(COALESCE(c.cstatus,''))) = 'active'
-        AND upper(btrim(COALESCE(c.activation_status,'Y'))) = 'Y'
+        AND ${ananta.CLIENT_ACTIVE_SQL}
       LIMIT 1`, [c, u]);
   return !!r;
 }

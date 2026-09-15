@@ -489,30 +489,43 @@ async function main() {
     return { detail: 'used 48,000 · free 4,52,000' };
   });
 
-  await scenario('ELG-1', 'A client not in the client master cannot bid', async () => {
+  /* The account record decides who may bid, and only it. The client master is a
+   * branch mapping: it says whose client this is, not whether they may trade. */
+
+  await scenario('ELG-1', 'The branch mapping does not decide who may bid', async () => {
     const r = await POST('/api/bids/validate', {
       issue_id: ISSUE.id, client_ucc: 'ASH7001', exchange: 'BSE',
       category: 'Retail', qty: 100, price: 400
     }, { session: 'desk' });
-    const errs = (r.json && (r.json.errors || [])).join(' ');
-    must(r.status >= 400 || errs, 'a client with no client-master row was allowed to bid');
-    must(/client master/i.test(errs), 'the refusal does not say why: ' + errs);
-    return { detail: errs.slice(0, 120) };
-  }, { expected: 'this client used to come out ACTIVE - each status fell back to the other' });
+    const errs = ((r.json && r.json.errors) || []).join(' ');
+    must(!/cannot bid/i.test(errs),
+      'an active account was refused for having no client-master row: ' + errs);
+    return { detail: 'ASH7001 has no branch mapping and is not refused on eligibility' };
+  }, { expected: 'eligibility comes from the account record alone' });
 
-  await scenario('ELG-2', 'A client whose status is blank cannot bid', async () => {
+  await scenario('ELG-2', 'An account marked closed cannot bid, whatever the mapping says', async () => {
+    const r = await POST('/api/bids/validate', {
+      issue_id: ISSUE.id, client_ucc: 'ASH7003', exchange: 'BSE',
+      category: 'Retail', qty: 100, price: 400
+    }, { session: 'desk' });
+    const errs = ((r.json && r.json.errors) || []).join(' ');
+    must(/cannot bid/i.test(errs), 'a closed account was allowed to bid: ' + errs);
+    must(/account status is Closed/i.test(errs), 'the refusal does not name the status: ' + errs);
+    return { detail: errs.slice(0, 120) };
+  }, { expected: 'the client master calls this one active - the account record wins' });
+
+  await scenario('ELG-3', 'A blank account status is not a yes', async () => {
     const r = await POST('/api/bids/validate', {
       issue_id: ISSUE.id, client_ucc: 'ASH7002', exchange: 'BSE',
       category: 'Retail', qty: 100, price: 400
     }, { session: 'desk' });
-    const errs = (r.json && (r.json.errors || [])).join(' ');
-    must(r.status >= 400 || errs, 'a client with no status recorded was allowed to bid');
-    must(/blank/i.test(errs), 'the refusal does not name the blank status: ' + errs);
+    const errs = ((r.json && r.json.errors) || []).join(' ');
+    must(/blank/i.test(errs), 'a client with no status recorded was allowed to bid: ' + errs);
     return { detail: errs.slice(0, 120) };
   }, { expected: 'a missing status is not a yes' });
 
-  await scenario('ELG-3', 'An ineligible client cannot be placed for, not just validated', async () => {
-    for (const ucc of ['ASH7001', 'ASH7002', 'ASH9001']) {
+  await scenario('ELG-4', 'An ineligible client is refused at place, not only at validate', async () => {
+    for (const ucc of ['ASH7002', 'ASH7003', 'ASH9001']) {
       const r = await POST('/api/bids', {
         issue_id: ISSUE.id, client_ucc: ucc, exchange: 'BSE',
         category: 'Retail', qty: 100, price: 400
@@ -522,26 +535,16 @@ async function main() {
     return { detail: 'all three refused at the place endpoint, not only at validate' };
   }, { expected: 'validate and place must agree - the screen is not the control' });
 
-  await scenario('ELG-4', 'The client record says whether it may bid, and why not', async () => {
-    const r = await GET('/api/clients/ASH7001', { session: 'desk' });
-    eq(r.status, 200, 'the client could not be read');
-    const c = r.json.client || {};
-    eq(c.is_active, false, 'a client with no client-master row is still reported active');
-    must(c.inactive_reason, 'no reason given, so the bid screen can only say "cannot bid"');
+  await scenario('ELG-5', 'The client record says whether it may bid, and why not', async () => {
+    const bad = await GET('/api/clients/ASH7003', { session: 'desk' });
+    eq(bad.status, 200, 'the client could not be read');
+    eq((bad.json.client || {}).is_active, false, 'a closed account is still reported active');
+    must((bad.json.client || {}).inactive_reason,
+      'no reason given, so the bid screen can only say "cannot bid"');
     const ok = await GET('/api/clients/ASH1001', { session: 'desk' });
     eq((ok.json.client || {}).is_active, true, 'a genuinely active client is now blocked');
-    return { detail: 'ASH7001: ' + c.inactive_reason + ' · ASH1001 still active' };
+    return { detail: 'ASH7003: ' + bad.json.client.inactive_reason + ' · ASH1001 still active' };
   }, { expected: 'the Place bid panel warns before the form is filled in' });
-
-  await scenario('ELG-5', 'A branch cannot bid for an ineligible client either', async () => {
-    const r = await POST('/client/api/branch/bids/validate', {
-      issue_id: ISSUE.id, client_ucc: 'ASH7002', exchange: 'BSE',
-      category: 'Retail', qty: 100, price: 400
-    }, { session: 'ap' });
-    must(r.status >= 400 || ((r.json && r.json.errors) || []).length,
-      'the partner path let an ineligible client through');
-    return { detail: 'refused on the partner path as well as the desk' };
-  }, { expected: 'one rule, every door' });
 
   /* ================================================== exchange file export */
   G('Exchange files');
@@ -649,6 +652,21 @@ async function main() {
     must(!bad.length, 'a branch session reached desk endpoints: ' + bad.join(', '));
     return { detail: '4 desk endpoints all refused' };
   });
+
+  await scenario('AP-9', 'A branch book holds only its own ACTIVE clients', async () => {
+    const list = await GET('/client/api/me/clients?limit=50', { session: 'ap' });
+    eq(list.status, 200, 'the branch client list failed');
+    const uccs = (list.json.clients || []).map((c) => c.ucc);
+    must(!uccs.includes('ASH9001') && !uccs.includes('ASH7002'),
+      'an inactive account is in the branch book: ' + uccs.join(', '));
+    const r = await POST('/client/api/branch/bids/validate', {
+      issue_id: ISSUE.id, client_ucc: 'ASH7002', exchange: 'BSE',
+      category: 'Retail', qty: 100, price: 400
+    }, { session: 'ap' });
+    must(r.status >= 400 || ((r.json && r.json.errors) || []).length,
+      'the partner path let an ineligible client through');
+    return { detail: uccs.join(', ') + ' - and an ineligible client is refused' };
+  }, { expected: 'one rule, every door' });
 
   /* ========================================================= client portal */
   G('Investor portal');

@@ -65,10 +65,14 @@ VALUES ('ASH1001','ACTIVE CLIENT ONE','AAAPZ1234A','9811100001','client1@example
        -- back to the other, so the one source that was present answered for both.
        ('ASH7001','ORPHAN NO MASTER', 'AAAPZ7777D','9811107001','client7@example.com','Individual','Thane','MH','Active'),
        -- In the master, but with no status recorded either side. A blank is not a yes.
-       ('ASH7002','BLANK STATUS',     'AAAPZ7778E','9811107002','client8@example.com','Individual','Thane','MH','');
+       ('ASH7002','BLANK STATUS',     'AAAPZ7778E','9811107002','client8@example.com','Individual','Thane','MH',''),
+       -- Mapped to a branch and marked active in the client master, but the ACCOUNT
+       -- record says closed. The account record decides, so this client cannot bid.
+       ('ASH7003','MASTER SAYS ACTIVE','AAAPZ7779F','9811107003','clienta@example.com','Individual','Thane','MH','Closed');
 INSERT INTO stg.ask_clientmast (ctermcode,cclientname,mobile,email_id,client_category,branch_id,cstatus,activation_status)
 VALUES ('ASH1001','ACTIVE CLIENT ONE','9811100001','client1@example.com','Individual','A016','Active','Y'),
        ('ASH1002','ACTIVE CLIENT TWO','9811100002','client2@example.com','Individual','A016','Active','Y'),
        ('ASH9001','INACTIVE CLIENT',  '9811109001','client9@example.com','Individual','A016','Inactive','N'),
        ('ASH2001','OTHER BRANCH CLI', '9811102001','client3@example.com','Individual','A017','Active','Y'),
-       ('ASH7002','BLANK STATUS',     '9811107002','client8@example.com','Individual','A016','','Y');
+       ('ASH7002','BLANK STATUS',     '9811107002','client8@example.com','Individual','A016','','Y'),
+       ('ASH7003','MASTER SAYS ACTIVE','9811107003','clienta@example.com','Individual','A017','Active','Y');
