@@ -22,7 +22,7 @@ test('the desk list is paged in SQL, with a total', () => {
   const ld = read('db/ldAdapter.js');
   assert.match(ld, /async function searchPage\(q, limit, offset\)/);
   assert.match(ld, /LIMIT \$1 OFFSET \$2/, 'the unfiltered list must page');
-  assert.match(ld, /LIMIT \$2 OFFSET \$3/, 'and so must the search');
+  assert.match(ld, /LIMIT \$5 OFFSET \$6/, 'and so must the search');
   assert.match(ld, /SELECT count\(\*\)::int AS n/);
   // The page and the count must filter identically, or the pager promises rows
   // the list cannot produce. One clause, used twice.
@@ -75,4 +75,31 @@ test('the old unpaged helper still works for the callers that want a plain list'
   const ld = read('db/ldAdapter.js');
   assert.match(ld, /async function search\(q, limit\) \{[\s\S]{0,200}?searchPage\(q, limit == null \? 50 : limit, 0\)/);
   assert.match(ld, /module\.exports = \{ norm, findByUcc, findMany, search, searchPage/);
+});
+
+/* Search had one %term% for every field. A PAN is five letters, four digits, a
+ * letter, and the fifth letter is the surname's first - so the UCC M9757 matched
+ * the PAN of every M-something client whose digits are 9757, and the desk got a
+ * stranger back with no way to see why, PAN being masked on that screen. */
+test('PAN is matched from the start, never in the middle', () => {
+  const ld = read('db/ldAdapter.js');
+  assert.match(ld, /upper\(btrim\(u\.pan\)\) LIKE \$2/,
+    'PAN is still matched with the contains term');
+  assert.doesNotMatch(ld, /upper\(btrim\(u\.pan\)\) LIKE \$1/);
+  assert.match(ld, /'%' \+ t \+ '%'/, 'the contains term is gone');
+  assert.match(ld, /t \+ '%'/, 'there is no prefix term');
+});
+
+test('a mobile is only searched when the whole term is digits', () => {
+  const ld = read('db/ldAdapter.js');
+  assert.match(ld, /\/\^\[0-9\]\{4,\}\$\/\.test\(t\) \? t : ''/,
+    'the digits term is not gated on the term being all digits');
+  assert.match(ld, /\$3 <> '' AND right\(regexp_replace\(/,
+    'an empty digits term must switch the mobile test off, not match everything');
+});
+
+test('an exact UCC is ordered first', () => {
+  const ld = read('db/ldAdapter.js');
+  assert.match(ld, /ORDER BY \(upper\(btrim\(u\.ucc\)\) = \$4\) DESC/);
+  assert.match(ld, /\(upper\(btrim\(u\.ucc\)\) LIKE \$2\) DESC/);
 });

@@ -152,6 +152,19 @@ async function main() {
   /* ============================================================ issue master */
   G('Issue master');
 
+  /* The run must not depend on the time of day it is started.
+   *
+   * The desk cut-off is 15:15 IST and the market window 09:15-15:30, so every
+   * bidding scenario below failed outright when the suite was run after lunch -
+   * fourteen red lines that said nothing at all about the application. The window
+   * is widened for the duration, and SET-5/SET-6 still prove the real setting
+   * works. A suite that only passes in the morning is not a suite. */
+  for (const [key, value] of [['daily_cutoff', '23:59'], ['market_open', '00:00'],
+                             ['market_close', '23:59'], ['market_days', '0-6']]) {
+    const r = await PUT('/api/settings', { key, value }, { session: 'desk' });
+    if (r.status !== 200) throw new Error('could not widen ' + key + ': ' + (r.text || '').slice(0, 160));
+  }
+
   await scenario('ISS-1', 'Desk creates an OFS issue', async () => {
     const r = await POST('/api/issues', {
       symbol: 'COALINDIA', company: 'Coal India Ltd', isin: 'INE522F01014',
@@ -954,6 +967,44 @@ async function main() {
   });
 
   G('Production safety');
+
+  await scenario('CLT-6', 'A UCC search does not return a stranger whose PAN contains it', async () => {
+    const r = await GET('/api/clients?q=M9757&limit=50', { session: 'desk' });
+    eq(r.status, 200, 'client search failed');
+    const uccs = (r.json.clients || []).map((c) => c.ucc);
+    must(uccs.includes('M9757'), 'the client whose UCC this is was not found: ' + uccs.join(', '));
+    must(!uccs.includes('S8707'),
+      'S8707 came back because its PAN contains M9757 - a UCC search reached into PANs: ' + uccs.join(', '));
+    eq(r.json.total, uccs.length, 'the pager total disagrees with the rows returned');
+    return { detail: uccs.length + ' row(s): ' + uccs.join(', ') };
+  }, { expected: 'PAN is matched from the start, not anywhere inside' });
+
+  await scenario('CLT-7', 'A full PAN still finds its client', async () => {
+    const r = await GET('/api/clients?q=ABCPM9757Q', { session: 'desk' });
+    eq(r.status, 200, 'PAN search failed');
+    const uccs = (r.json.clients || []).map((c) => c.ucc);
+    eq(uccs.join(','), 'S8707', 'a full PAN no longer finds its own client: ' + uccs.join(', '));
+    return { detail: 'the whole PAN resolves to exactly one client' };
+  }, { expected: 'narrowing the PAN match must not break searching by PAN' });
+
+  await scenario('CLT-8', 'Digits search mobiles; a code with letters in it does not', async () => {
+    const byMobile = await GET('/api/clients?q=9811108707', { session: 'desk' });
+    eq(byMobile.status, 200, 'mobile search failed');
+    must((byMobile.json.clients || []).some((c) => c.ucc === 'S8707'),
+      'a full mobile number did not find its client');
+    const byCode = await GET('/api/clients?q=M9757', { session: 'desk' });
+    must(!(byCode.json.clients || []).some((c) => c.ucc === 'S8707'),
+      'the digits of a UCC were still matched against mobile numbers');
+    return { detail: 'a mobile is found by its digits; letters never reach the mobile test' };
+  }, { expected: 'the digits inside a UCC used to match another client number' });
+
+  await scenario('CLT-9', 'An exact UCC comes first in the list', async () => {
+    const r = await GET('/api/clients?q=ASH1001', { session: 'desk' });
+    eq(r.status, 200, 'search failed');
+    const first = (r.json.clients || [])[0];
+    eq(first && first.ucc, 'ASH1001', 'the client whose code was typed is not the first row');
+    return { detail: 'typed ASH1001, got ASH1001 at the top' };
+  }, { expected: 'exact match, then prefix, then the rest' });
 
   await scenario('PRD-1', 'The fixed test OTP is floored off in production', async () => {
     const otp = require('../lib/otp');

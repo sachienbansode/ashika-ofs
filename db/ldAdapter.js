@@ -88,15 +88,50 @@ async function findMany(uccs) {
   return map;
 }
 
-/** Desk search across UCC / name / PAN / mobile. */
-/* The one search clause, written once. Both the page and the count have to filter
-   identically or the pager claims a number of rows the list cannot produce. */
+/**
+ * Desk search across UCC / name / PAN / mobile.
+ *
+ * Every field used to be matched with the same %term% - a substring, anywhere.
+ * That is right for a name and for a UCC, and quietly wrong for the other two.
+ *
+ * A PAN is five letters, four digits, a letter, and the fifth character is the
+ * first letter of the surname. So searching the UCC M9757 also matched the PAN of
+ * every client called M-something whose four digits are 9757: the desk typed one
+ * client's code and got a stranger back, with no way to see why, because PAN is
+ * masked on that screen. It is also a quiet oracle - a PAN can be probed a
+ * fragment at a time through a search box.
+ *
+ * The same went for the mobile: the digits inside a UCC or a PAN fragment would
+ * match somebody's number in the middle.
+ *
+ * So each field is matched the way people actually search it:
+ *   UCC and names   - contains, as before
+ *   PAN             - from the start, so a full or leading PAN works and a
+ *                     fragment buried in the middle of someone else's does not
+ *   mobile          - only when the whole term is digits, so letters never reach it
+ *
+ * Both the page and the count have to filter identically or the pager claims a
+ * number of rows the list cannot produce, so the clause is written once. $1 is the
+ * contains term, $2 the prefix term, $3 the digits - empty when the term is not
+ * all digits, which switches the mobile test off.
+ */
 const MATCH = `upper(btrim(u.ucc)) LIKE $1
             OR upper(COALESCE(u.client_name,'')) LIKE $1
             OR upper(COALESCE(u.name_asper_pan,'')) LIKE $1
             OR upper(COALESCE(c.cclientname,'')) LIKE $1
-            OR upper(btrim(u.pan)) LIKE $1
-            OR right(regexp_replace(COALESCE(u.mobile, c.mobile, ''),'[^0-9]','','g'),10) LIKE $1`;
+            OR upper(btrim(u.pan)) LIKE $2
+            OR ($3 <> '' AND right(regexp_replace(
+                 COALESCE(NULLIF(btrim(u.mobile),''), c.mobile, ''),'[^0-9]','','g'),10) LIKE '%' || $3)`;
+
+/** The three search terms MATCH expects, derived from what was typed. */
+function searchTerms(term) {
+  const t = norm(term);
+  return [
+    '%' + t + '%',                     // $1 contains - UCC and names
+    t + '%',                           // $2 prefix   - PAN
+    /^[0-9]{4,}$/.test(t) ? t : ''     // $3 digits   - mobile, or switched off
+  ];
+}
 
 const FROM = `FROM ${DWH}.tbl_user_info u
               LEFT JOIN ${STG}.ask_clientmast c
@@ -127,10 +162,19 @@ async function searchPage(q, limit, offset) {
     return { clients: list, total: (n && n.n) || 0, limit: lim, offset: off };
   }
 
-  const like = '%' + norm(term) + '%';
+  /* $1 contains, $2 prefix, $3 digits - the three MATCH expects - then $4 the
+   * term exactly, for the ordering below. */
+  const t = searchTerms(term).concat([norm(term)]);
+  /* An exact UCC first, then the ones that start with what was typed, then the
+   * rest. Typing a whole client code and finding it third is its own small
+   * failure, even when every row in the list does match it somehow. */
+  const ORDER = `ORDER BY (upper(btrim(u.ucc)) = $4) DESC,
+                          (upper(btrim(u.ucc)) LIKE $2) DESC,
+                          u.ucc`;
   const [list, n] = await Promise.all([
-    ananta.rows(SELECT + ` WHERE ${MATCH} ORDER BY u.ucc LIMIT $2 OFFSET $3`, [like, lim, off]),
-    ananta.one(`SELECT count(*)::int AS n ` + FROM + ` WHERE ${MATCH}`, [like])
+    ananta.rows(SELECT + ` WHERE ${MATCH} ${ORDER} LIMIT $5 OFFSET $6`,
+      [t[0], t[1], t[2], t[3], lim, off]),
+    ananta.one(`SELECT count(*)::int AS n ` + FROM + ` WHERE ${MATCH}`, [t[0], t[1], t[2]])
   ]);
   return { clients: list, total: (n && n.n) || 0, limit: lim, offset: off };
 }

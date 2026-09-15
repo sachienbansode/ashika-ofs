@@ -68,7 +68,12 @@ VALUES ('ASH1001','ACTIVE CLIENT ONE','AAAPZ1234A','9811100001','client1@example
        ('ASH7002','BLANK STATUS',     'AAAPZ7778E','9811107002','client8@example.com','Individual','Thane','MH',''),
        -- Mapped to a branch and marked active in the client master, but the ACCOUNT
        -- record says closed. The account record decides, so this client cannot bid.
-       ('ASH7003','MASTER SAYS ACTIVE','AAAPZ7779F','9811107003','clienta@example.com','Individual','Thane','MH','Closed');
+       ('ASH7003','MASTER SAYS ACTIVE','AAAPZ7779F','9811107003','clienta@example.com','Individual','Thane','MH','Closed'),
+       -- The pair that broke search. A PAN is five letters, four digits, a letter,
+       -- and the fifth letter is the first letter of the surname - so this client's
+       -- PAN CONTAINS the other client's UCC. Searching M9757 used to return both.
+       ('M9757','MUKESH LODHA HUF','AAAHM1111A','9811109757','m9757@example.com','HUF','Mumbai','MH','Active'),
+       ('S8707','SACHIN MITRA',    'ABCPM9757Q','9811108707','s8707@example.com','Individual','Mumbai','MH','Active');
 INSERT INTO stg.ask_clientmast (ctermcode,cclientname,mobile,email_id,client_category,branch_id,cstatus,activation_status)
 VALUES ('ASH1001','ACTIVE CLIENT ONE','9811100001','client1@example.com','Individual','A016','Active','Y'),
        ('ASH1002','ACTIVE CLIENT TWO','9811100002','client2@example.com','Individual','A016','Active','Y'),
