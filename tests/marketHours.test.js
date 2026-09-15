@@ -101,6 +101,13 @@ test('a bid outside the session is rejected by validateBid', () => {
   const inSession = domain.validateBid(issue, bid, Object.assign({ now: at('05:00') }, ctx));
   assert.deepEqual(inSession, []);
 
-  const afterCutoff = domain.validateBid(issue, bid, Object.assign({ now: at('09:45') }, ctx));
-  assert.ok(afterCutoff.some((m) => /cut-off of 15:15/.test(m)), afterCutoff.join(' | '));
+  /* 15:15 IST. The desk-wide cut-off says stop; this offer runs to 15:30, and the
+   * offer is the authority - a single setting applied to every issue was refusing
+   * bids an offer was still open for. */
+  const atCutoff = domain.validateBid(issue, bid, Object.assign({ now: at('09:45') }, ctx));
+  assert.deepEqual(atCutoff, [], 'the desk-wide cut-off still overrode the offer window');
+
+  // 15:31 IST - past the offer's own close.
+  const afterClose = domain.validateBid(issue, bid, Object.assign({ now: at('10:01') }, ctx));
+  assert.ok(afterClose.length, 'a bid after the offer closed was accepted');
 });

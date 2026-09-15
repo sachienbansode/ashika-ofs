@@ -236,14 +236,14 @@ test('the Place bid page’s existing-bids table stacks too', () => {
   // table is on that screen at all.
   const app = read('public/backoffice/app.js');
   const block = app.slice(app.indexOf("var box = $('#pbExisting');"));
-  assert.match(block.slice(0, 3000), /<table class="fit stack">/,
+  assert.match(block.slice(0, 8000), /<table class="fit stack">/,
     'the existing-bids table is still a bare table');
   for (const label of ['Exchange', 'Category', 'Qty', 'Price', 'Value', 'Status']) {
     assert.ok(block.indexOf('data-label="' + label + '"') >= 0,
       'the existing-bids table does not label ' + label);
   }
-  assert.match(block.slice(0, 3000), /class="m rowhead"/, 'it needs a card heading');
-  assert.match(block.slice(0, 3000), /<td class="act">/, 'Modify/Withdraw must be the actions row');
+  assert.match(block.slice(0, 8000), /class="m rowhead"/, 'it needs a card heading');
+  assert.match(block.slice(0, 8000), /<td class="act">/, 'Modify/Withdraw must be the actions row');
 });
 
 test('no rendered table is left as a bare wide table on a phone', () => {

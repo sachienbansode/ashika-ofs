@@ -516,6 +516,9 @@ function showTab(t, fromHash) {
       if (location.hash !== want) history.replaceState(null, '', want);
     } catch (e) { /* a file:// or sandboxed context — the tab still switches */ }
   }
+  // Leaving Place bid empties it, client and all. A UCC still sitting in the box
+  // when the desk comes back is how a bid gets placed for the previous client.
+  if (STATE.tab === 'place' && t !== 'place') clearBidForm(true);
   STATE.tab = t;
   $$('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
   ALL_PANES.forEach(function (k) {
@@ -1261,6 +1264,47 @@ function renderClientsPager() {
  * client-and-margin panel fills itself exactly as it does for a desk — one path,
  * not a second copy of the lookup that can drift from it.
  */
+/**
+ * Empty the bid form.
+ *
+ * Two rules, and they are not the same rule.
+ *
+ *  - Picking a different ISSUE clears the numbers. Quantity and price belong to
+ *    the offer they were worked out for; carried into the next one they are a
+ *    plausible-looking bid nobody typed. The exchange stays, because it is the
+ *    desk's standing choice and the form re-derives it for the new issue anyway.
+ *  - Leaving the screen, or finishing a bid, clears the CLIENT as well. A UCC
+ *    left in the box is the next bid placed for the wrong person.
+ *
+ * Never touches the form while a modify is in progress - that form is bound to a
+ * bid that exists.
+ */
+function clearBidForm(alsoClient) {
+  if (STATE.editing) return;
+  ['#pbQty', '#pbPrice'].forEach(function (sel) { var el = $(sel); if (el) el.value = ''; });
+  var type = $('#pbType');
+  if (type) type.value = 'price';
+  var res = $('#pbResult');
+  if (res) res.innerHTML = '';
+  var place = $('#pbPlace');
+  if (place) place.disabled = true;
+  DUPLICATE_BID = null;
+
+  if (alsoClient) {
+    var ucc = $('#pbUcc');
+    if (ucc) ucc.value = '';
+    PB_BLOCKED = null;
+    var panel = $('#pbClient');
+    if (panel) {
+      panel.className = 'note';
+      panel.textContent = 'Enter a UCC to see client, margin and limits.';
+    }
+    var ex = $('#pbExisting');
+    if (ex) { ex.className = 'note'; ex.textContent = 'Pick an issue to see the bids already on it.'; }
+  }
+  if (typeof refreshBidForm === 'function') refreshBidForm();
+}
+
 function bidForClient(ucc) {
   var el = $('#pbUcc');
   if (!el) return;
@@ -1409,6 +1453,9 @@ async function cancelBid(id) {
   try {
     await api('/bids/' + id, { method: 'DELETE', body: body });
     toast('Bid withdrawn', 'The client may bid again for this scrip.', 'ok');
+    // Withdrawn from the Place bid screen: the form goes back to empty, exactly
+    // as it does after a bid is placed.
+    if (STATE.tab === 'place') { clearBidForm(true); loadExistingBids(); }
     loadBook(); loadDash();
     return;
   } catch (e) {
@@ -1703,6 +1750,15 @@ function onUccTyped() {
   uccTimer = setTimeout(function () { loadClientPanel(v); }, 350);
 }
 
+/* The client's existing live bid on the selected issue, or null.
+ *
+ * Only one live bid per client per scrip is allowed. The desk used to find that
+ * out at Validate, or at Place - after the quantity, the price and, on the place
+ * path, the client's confirmation code. The bid is already on the screen the
+ * moment both the issue and the UCC are known, so it is said then, with the two
+ * buttons that resolve it. */
+var DUPLICATE_BID = null;
+
 /* Set by loadClientPanel: the reason the UCC on the form cannot bid, or null.
  * The server refuses an ineligible client either way; this is so the screen does
  * not invite the desk to fill in a bid that is going to be refused. */
@@ -1826,6 +1882,11 @@ async function placeBid(withOtp) {
       PB_BLOCKED.charAt(0).toUpperCase() + PB_BLOCKED.slice(1) +
       '. Only active clients on our books may bid.', 'bad');
   }
+  if (!editing && DUPLICATE_BID) {
+    return toast('Bid already placed',
+      'This client already has a live bid on this scrip (' + DUPLICATE_BID.ref +
+      '). Modify it or withdraw it first.', 'bad');
+  }
   var body = bidPayload();
   if (withOtp && OTP_STATE) {
     body.otp_ref = OTP_STATE.ref;
@@ -1841,7 +1902,9 @@ async function placeBid(withOtp) {
       r.bid.ref + ' · ' + inr(r.bid.qty, 0) + ' shares · ' + rupee(r.bid.value, 0), 'ok');
 
     $('#pbPlace').disabled = true;
-    $('#pbQty').value = ''; $('#pbPrice').value = '';
+    // Client and all. The next bid starts from nothing rather than from whatever
+    // the last one left in the boxes.
+    clearBidForm(true);
     refreshBidForm();
     if (editing) { endModify(); showTab('book'); }
     // After endModify and the tab switch, both of which clear the form's own
@@ -2013,6 +2076,31 @@ async function loadExistingBids() {
     var rows = (d.bids || []).filter(function (b) {
       return !ucc || String(b.client_ucc).toUpperCase() === ucc;
     });
+    /* A live bid for THIS client on THIS issue stops the form here.
+     *
+     * Modified counts as live - it is the same bid, edited. A bid being modified
+     * right now is excluded, or the form would refuse to let the desk save the
+     * very bid it has open. */
+    var mine = !ucc ? [] : rows.filter(function (b) {
+      return (b.status === 'Live' || b.status === 'Modified') &&
+             String(b.client_ucc).toUpperCase() === ucc &&
+             !(STATE.editing && String(STATE.editing.id) === String(b.id));
+    });
+    var was = DUPLICATE_BID && DUPLICATE_BID.id;
+    DUPLICATE_BID = mine[0] || null;
+    if (DUPLICATE_BID) {
+      var pl = $('#pbPlace');
+      if (pl) pl.disabled = true;
+      // Once per bid, not on every keystroke that re-runs this lookup.
+      if (was !== DUPLICATE_BID.id) {
+        toast('Bid already placed',
+          ucc + ' already has a live bid on ' + (selectedIssue() || {}).symbol +
+          ' — ' + inr(DUPLICATE_BID.qty, 0) + ' share(s) at ' +
+          (DUPLICATE_BID.is_cutoff ? 'cut-off' : inr(DUPLICATE_BID.price, 2)) +
+          '. Modify it or withdraw it; a second bid is not allowed.', 'bad');
+      }
+    }
+
     box.className = '';
     if (!rows.length) {
       box.className = 'note';
@@ -2022,6 +2110,16 @@ async function loadExistingBids() {
       return;
     }
     box.innerHTML =
+      (DUPLICATE_BID
+        ? '<div class="note bad"><b>' + esc(ucc) + ' has already bid on ' +
+          esc((selectedIssue() || {}).symbol || 'this issue') + '.</b> ' +
+          esc(inr(DUPLICATE_BID.qty, 0)) + ' share(s) at ' +
+          esc(DUPLICATE_BID.is_cutoff ? 'cut-off' : inr(DUPLICATE_BID.price, 2)) +
+          ' · ' + esc(DUPLICATE_BID.ref) + '. Only one live bid per client per scrip is ' +
+          'allowed — modify that bid or withdraw it. ' +
+          '<button class="mini" data-edit="' + DUPLICATE_BID.id + '">Modify</button> ' +
+          '<button class="mini" data-cancel="' + DUPLICATE_BID.id + '">Withdraw</button></div>'
+        : '') +
       '<div class="legend">' + rows.length + ' bid(s)' + (ucc ? ' for ' + esc(ucc) : ' on this issue') + '</div>' +
       /* fit + stack. As a bare <table> this inherited .wrap table{min-width:max-content}
        * and measured 794px on a 375px screen — nine columns and a 29-character
@@ -2159,7 +2257,18 @@ async function previewExport() {
           'Use <b>Download all (audit)</b> for a file that includes them.' +
           '</td></tr></tfoot>'
         : '');
-  } catch (e) { toast('Preview failed', exportError(e), 'bad'); }
+  } catch (e) {
+    /* A failed preview used to leave the PREVIOUS selection on screen - its file
+     * name, its row count, its bids - with only a toast to say otherwise. Pick a
+     * different issue, get a refusal, and the desk is looking at another issue's
+     * rows under this issue's name, which reads as "the bids are not loading".
+     * Clear it, and put the reason where the rows were. */
+    $('#exSummary').innerHTML = '';
+    $('#exTbl').innerHTML =
+      '<tbody><tr><td class="empty"><b>No file could be built for this selection.</b>' +
+      '<div class="sub" style="margin-top:6px">' + esc(exportError(e)) + '</div></td></tr></tbody>';
+    toast('Preview failed', exportError(e), 'bad');
+  }
 }
 
 /**
@@ -4259,7 +4368,13 @@ async function boot() {
     $(sel).addEventListener('change', refreshBidForm);
     $(sel).addEventListener('input', refreshBidForm);
   });
-  $('#pbIssue').addEventListener('change', function () { renderIssueInfo(); loadExistingBids(); });
+  $('#pbIssue').addEventListener('change', function () {
+    // Quantity and price were worked out for the previous offer. Fill suggested
+    // bid is how the new ones arrive; the exchange is left alone.
+    clearBidForm(false);
+    renderIssueInfo();
+    loadExistingBids();
+  });
   $('#pbUcc').addEventListener('change', loadExistingBids);
   $('#pbExisting').addEventListener('click', function (e) {
     var c = e.target.closest('[data-cancel]');
