@@ -66,22 +66,109 @@ router.put('/:ucc', requirePage(PAGE), requireEdit(PAGE), async (req, res, next)
   } catch (e) { dbErr.send(res, next, e); }
 });
 
+/**
+ * Write many margins at once, as SET operations rather than a loop.
+ *
+ * This is what made the CSV import fail with a gateway timeout. The old version
+ * called upsert() once per row, and upsert() opens its own transaction: BEGIN,
+ * SELECT, INSERT, INSERT, COMMIT. Five round trips per client, run one after
+ * another. A 25,000-client snapshot is 125,000 round trips; nginx gives the
+ * request 60 seconds and then returns 504, and the desk sees "Import failed" on
+ * an upload that was still running and had already written part of the file.
+ *
+ * Now it is two statements for the whole batch, in one transaction, with the
+ * values passed as arrays — so the cost is one round trip per chunk rather than
+ * five per row, and the whole thing either lands or does not.
+ *
+ * Three details that matter:
+ *
+ *   `prev` is read in the same statement that writes, and every CTE sees the same
+ *   snapshot, so old_value in the log is the value from BEFORE this upload even
+ *   though the upsert is writing over it in the same breath.
+ *
+ *   A UCC listed twice in one CSV is a normal mistake, not a reason to fail the
+ *   upload. ON CONFLICT cannot touch the same row twice in one statement, so the
+ *   last value for a UCC wins and the earlier one is dropped — the same answer
+ *   the row-by-row version gave, for the same reason.
+ *
+ *   The log insert reads from `prev`, not from `up`. Reading from a
+ *   data-modifying CTE would only return the rows it actually wrote, which after
+ *   a DO UPDATE is not the same set.
+ */
+async function upsertMany(c, batch, source, note, actor) {
+  if (!batch.length) return 0;
+  const uccs = batch.map((r) => r.ucc);
+  const amts = batch.map((r) => r.available);
+  const r = await c.query(
+    `WITH incoming AS (
+       SELECT DISTINCT ON (client_ucc) client_ucc, available
+         FROM unnest($1::text[], $2::numeric[]) WITH ORDINALITY AS t(client_ucc, available, ord)
+        ORDER BY client_ucc, ord DESC
+     ),
+     prev AS (
+       SELECT i.client_ucc, i.available, m.available AS old_value
+         FROM incoming i
+         LEFT JOIN ${SCHEMA}.ofs_margin m ON m.client_ucc = i.client_ucc
+     ),
+     up AS (
+       INSERT INTO ${SCHEMA}.ofs_margin
+         (client_ucc, available, source, note, updated_by, updated_at)
+       SELECT client_ucc, available, $3, $4, $5, now() FROM incoming
+       ON CONFLICT (client_ucc) DO UPDATE
+         SET available = EXCLUDED.available, source = EXCLUDED.source,
+             note = EXCLUDED.note, updated_by = EXCLUDED.updated_by, updated_at = now()
+       RETURNING client_ucc
+     )
+     INSERT INTO ${SCHEMA}.ofs_margin_log
+       (client_ucc, old_value, new_value, source, note, actor)
+     SELECT client_ucc, old_value, available, $3, $4, $5 FROM prev
+     RETURNING client_ucc`,
+    [uccs, amts, source, note, actor]);
+  return r.rowCount;
+}
+
+/* Chunked so one upload cannot build an unbounded statement, and so a very large
+   file makes steady progress instead of one enormous transaction. */
+const BULK_CHUNK = 2000;
+const BULK_MAX = 50000;          // was 5000 rows, silently truncated
+
 /** POST /api/margin/bulk  { rows: [{ucc, available}], source } */
 router.post('/bulk', requirePage(PAGE), requireEdit(PAGE), async (req, res, next) => {
   try {
     const list = Array.isArray(req.body.rows) ? req.body.rows : [];
     if (!list.length) return res.status(400).json({ error: 'no_rows' });
+    if (list.length > BULK_MAX) {
+      return res.status(413).json({ error: 'too_many_rows',
+        message: 'That file has ' + list.length + ' rows. Send at most ' + BULK_MAX +
+                 ' at a time.' });
+    }
     const actor = String(req.user.email || req.user.id);
-    let n = 0;
-    for (const row of list.slice(0, 5000)) {
+    const source = req.body.source || 'csv';
+    const note = req.body.note || null;
+
+    // Cleaned and de-duplicated here as well as in SQL, so `skipped` can be
+    // reported: a row the desk expected to see written and did not is worth
+    // naming rather than silently dropping, which is what the loop used to do.
+    const clean = [];
+    let skipped = 0;
+    for (const row of list) {
       const ucc = String(row.ucc || row.client_ucc || '').trim().toUpperCase();
       const amt = Number(row.available);
-      if (!ucc || !isFinite(amt) || amt < 0) continue;
-      await upsert(ucc, amt, req.body.source || 'csv', req.body.note || null, actor);
-      n++;
+      if (!ucc || !isFinite(amt) || amt < 0) { skipped++; continue; }
+      clean.push({ ucc, available: amt });
     }
-    await audit.log(req, 'bulk_margin', 'ofs_margin', null, null, { count: n });
-    res.json({ updated: n });
+    if (!clean.length) return res.status(400).json({ error: 'no_valid_rows', skipped });
+
+    let n = 0;
+    await tx(async (c) => {
+      for (let i = 0; i < clean.length; i += BULK_CHUNK) {
+        n += await upsertMany(c, clean.slice(i, i + BULK_CHUNK), source, note, actor);
+      }
+    });
+
+    await audit.log(req, 'bulk_margin', 'ofs_margin', null, null,
+      { count: n, skipped, rows_sent: list.length });
+    res.json({ updated: n, skipped: skipped, rows_sent: list.length });
   } catch (e) { dbErr.send(res, next, e); }
 });
 
@@ -146,15 +233,22 @@ router.post('/reset', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
     const note = String((req.body && req.body.note) || 'start-of-day reset').slice(0, 300);
     const keepZero = String((req.body && req.body.delete_rows) || '') === '1';
 
-    const before = await rows(
-      `SELECT client_ucc, available FROM ${SCHEMA}.ofs_margin WHERE COALESCE(available,0) <> 0`);
+    // A count, not every row. This used to pull the whole non-zero margin table
+    // into memory purely to report a number the write itself already knows.
+    const before = await one(
+      `SELECT count(*)::int AS n FROM ${SCHEMA}.ofs_margin WHERE COALESCE(available,0) <> 0`);
 
+    /* Two statements, not one per client. This had the same shape as the CSV
+     * import and the same failure: one INSERT per non-zero margin, run one after
+     * another inside a single transaction, so zeroing a day's 25,000 uploaded
+     * margins ran past nginx's 60-second limit and came back 504 — after which
+     * nobody could tell whether it had happened. */
     const out = await tx(async (c) => {
-      for (const m of before) {
-        await c.query(
-          `INSERT INTO ${SCHEMA}.ofs_margin_log (client_ucc, old_value, new_value, source, note, actor)
-           VALUES ($1,$2,0,'reset',$3,$4)`, [m.client_ucc, m.available, note, actor]);
-      }
+      const logged = await c.query(
+        `INSERT INTO ${SCHEMA}.ofs_margin_log (client_ucc, old_value, new_value, source, note, actor)
+         SELECT client_ucc, available, 0, 'reset', $1, $2
+           FROM ${SCHEMA}.ofs_margin
+          WHERE COALESCE(available,0) <> 0`, [note, actor]);
       if (keepZero) {
         await c.query(`DELETE FROM ${SCHEMA}.ofs_margin`);
       } else {
@@ -163,10 +257,11 @@ router.post('/reset', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
               SET available = 0, source = 'reset', note = $1, updated_by = $2, updated_at = now()
             WHERE COALESCE(available,0) <> 0`, [note, actor]);
       }
-      return before.length;
+      // What was actually logged, rather than what a read a moment earlier said.
+      return logged.rowCount;
     });
 
-    await audit.log(req, 'reset_margin', 'ofs_margin', null, { clients: before.length },
+    await audit.log(req, 'reset_margin', 'ofs_margin', null, { clients: (before && before.n) || 0 },
       { zeroed: out, rows_deleted: keepZero });
     res.json({ ok: true, clients: out, rows_deleted: keepZero, at: new Date().toISOString() });
   } catch (e) { dbErr.send(res, next, e); }

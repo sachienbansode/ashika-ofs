@@ -3405,6 +3405,7 @@ function importPreview(title, cols, parsed, note, onCommit) {
       '<button class="btn" id="impGo"' + (valid.length ? '' : ' disabled') + '>Import ' + valid.length + ' row(s)</button>' +
       '<button class="btn ghost" id="impClose">Close</button>' +
     '</div>' +
+    '<div class="note hide" id="impProgress"></div>' +
     (note ? '<div class="note">' + note + '</div>' : '') +
     '<div class="wrap"><table><thead><tr><th></th>' +
       cols.map(function (c) { return '<th>' + esc(c.label) + '</th>'; }).join('') +
@@ -3417,7 +3418,26 @@ function importPreview(title, cols, parsed, note, onCommit) {
       (parsed.length > 200 ? '<div class="legend">Showing the first 200 rows; all valid rows are imported.</div>' : '') +
     '</div>';
   $('#impClose').addEventListener('click', closeImport);
-  $('#impGo').addEventListener('click', function () { onCommit(valid); });
+  $('#impGo').addEventListener('click', function () {
+    /* Disabled for the duration. A large import takes several requests, and a
+     * second click while the first is running would upload the whole file
+     * again — harmless, because every row is an upsert, but it doubles the wait
+     * and makes the counter on screen meaningless. */
+    var go = $('#impGo');
+    go.disabled = true;
+    go.textContent = 'Importing…';
+    Promise.resolve(onCommit(valid)).catch(function () {}).then(function () {
+      if (go.isConnected) { go.disabled = false; go.textContent = 'Import ' + valid.length + ' row(s)'; }
+    });
+  });
+}
+
+/** How far a chunked import has got. Silent for a small file that finishes at once. */
+function importProgress(text) {
+  var el = $('#impProgress');
+  if (!el) return;
+  el.classList.remove('hide');
+  el.textContent = text;
 }
 
 // Every column the importer reads, in the order the sample file uses. series,
@@ -3512,15 +3532,44 @@ function importMargins() {
       parsed,
       'This replaces each client’s available margin and writes an entry to ofs_margin_log. RMS has no available-margin read API yet, so this snapshot is the gate for every bid.',
       async function (valid) {
+        /* Uploaded in chunks, not as one request.
+         *
+         * A day's margin file is the whole client base — tens of thousands of
+         * rows. As a single POST that is a megabyte of JSON against a 2MB body
+         * limit and one database write against nginx's 60-second ceiling, and
+         * when it timed out the desk was told "Import failed" about an upload
+         * that had in fact written part of the file. Chunks keep every request
+         * small and quick, and the count on screen says how far it got.
+         *
+         * Each chunk is its own transaction, so a failure half way leaves the
+         * earlier chunks written — which is why the message says how many, and
+         * why re-running the same file is safe: every row is an upsert keyed on
+         * the UCC, so a repeat sets the same values again. */
+        var CHUNK = 2000;
+        var rows = valid.map(function (x) { return { ucc: x.ucc, available: x.available }; });
+        var done = 0, skipped = 0;
         try {
-          var r = await api('/margin/bulk', {
-            method: 'POST',
-            body: { source: 'csv', rows: valid.map(function (x) { return { ucc: x.ucc, available: x.available }; }) }
-          });
+          for (var i = 0; i < rows.length; i += CHUNK) {
+            var part = rows.slice(i, i + CHUNK);
+            var r = await api('/margin/bulk', { method: 'POST',
+              body: { source: 'csv', rows: part } });
+            done += Number(r.updated) || 0;
+            skipped += Number(r.skipped) || 0;
+            if (rows.length > CHUNK) {
+              importProgress(done + ' of ' + inr(rows.length, 0) + ' client(s) written…');
+            }
+          }
           closeImport();
-          toast('Margins imported', r.updated + ' client(s) updated.', 'ok');
+          toast('Margins imported', inr(done, 0) + ' client(s) updated' +
+            (skipped ? ' · ' + inr(skipped, 0) + ' row(s) skipped' : '') + '.', 'ok');
           loadMargins();
-        } catch (e) { toast('Import failed', apiMessage(e), 'bad'); }
+        } catch (e) {
+          // Say what DID land. "Import failed" on a partial write is the message
+          // that sends someone looking for a problem in the file.
+          toast('Import stopped', apiMessage(e) +
+            (done ? ' — ' + inr(done, 0) + ' client(s) were written before it stopped.' : ''), 'bad');
+          if (done) loadMargins();
+        }
       });
   });
 }
