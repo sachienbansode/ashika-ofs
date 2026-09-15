@@ -32,7 +32,39 @@
     });
   }
 
+  /**
+   * A number as a spreadsheet writes it.
+   *
+   * Margin files do not arrive as bare digits. They come out of Excel and out of
+   * the risk system with Indian digit grouping ("12,50,000"), a rupee sign, a
+   * non-breaking space, or a negative in accountancy brackets. Number() answers
+   * NaN to every one of those, the row is marked "available must be a number
+   * >= 0", and the desk is told the upload failed on a file that is correct.
+   *
+   * So: strip the currency mark, the separators and the spaces; read (1,234) as
+   * -1234; and still answer NaN when what is left is genuinely not a number, so
+   * a real typo is rejected as loudly as before.
+   */
+  function csvNum(v) {
+    if (typeof v === "number") return v;
+    var s = String(v == null ? "" : v).trim();
+    if (!s) return NaN;
+    var neg = /^\(.*\)$/.test(s);
+    if (neg) s = s.slice(1, -1);
+    s = s.replace(/[\u20B9$]/g, "")
+      .replace(/\u00A0/g, "")
+      .replace(/^INR/i, "")
+      .replace(/[,\s']/g, "")
+      .trim();
+    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(s)) return NaN;
+    var n = Number(s);
+    return neg ? -n : n;
+  }
+
   root.csvParse = csvParse;
   root.csvObjects = csvObjects;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { csvParse: csvParse, csvObjects: csvObjects };
+  root.csvNum = csvNum;
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { csvParse: csvParse, csvObjects: csvObjects, csvNum: csvNum };
+  }
 }(typeof globalThis !== 'undefined' ? globalThis : this));

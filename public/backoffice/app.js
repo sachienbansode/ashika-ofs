@@ -3140,10 +3140,20 @@ async function marginHistory(ucc) {
  * figure is already there, the form is editing it.
  */
 function showMarginFor(ucc) {
+  /* The list on screen is only the margin table. A client can be perfectly real
+   * and have no row in it — a new account, or one that was never in the day’s
+   * file — and until the fetch answered, all this panel could say about such a
+   * client was “Used ₹0 · Free ₹0”, which reads as a wrong figure rather than as
+   * “nothing recorded”. So the fetched client’s own figures, which come from the
+   * server with the client, win over the cached list whenever the UCC matches. */
+  var f = MG_FETCHED && MG_FETCHED.ucc === ucc ? MG_FETCHED : null;
   var m = (STATE.margins || []).filter(function (x) { return x.client_ucc === ucc; })[0];
-  $('#mgUsed').textContent = 'Used ' + (m ? rupee(m.used, 0) : '—');
-  $('#mgFree').textContent = 'Free ' + (m ? rupee(m.free, 0) : '—');
-  $('#mgSet').textContent = m ? 'Replace margin' : 'Save margin';
+  var has = f ? f.has : !!m;
+  var used = f ? f.used : (m ? m.used : 0);
+  var free = f ? f.free : (m ? m.free : 0);
+  $('#mgUsed').textContent = 'Used ' + (has || (f && f.used) ? rupee(used, 0) : '—');
+  $('#mgFree').textContent = 'Free ' + (has ? rupee(free, 0) : '—');
+  $('#mgSet').textContent = has ? 'Replace margin' : 'Save margin';
   return m;
 }
 
@@ -3176,12 +3186,24 @@ async function fetchMarginClient() {
   try {
     var d = await api('/clients/' + encodeURIComponent(ucc));
     var c = d.client || {};
-    MG_FETCHED = { ucc: ucc, name: c.name || '' , active: c.is_active !== false };
+    var avail = Number(c.available_margin) || 0;
+    MG_FETCHED = {
+      ucc: ucc, name: c.name || '', active: c.is_active !== false,
+      // has: is there a margin record at all? A recorded zero is not the same
+      // thing as no record, and the button below says “Replace” only for the first.
+      has: c.margin_at != null,
+      available: avail,
+      used: Number(d.margin_used) || 0,
+      free: Number(d.free_margin != null ? d.free_margin : avail - (Number(d.margin_used) || 0))
+    };
     $('#mgClient').textContent = (c.name || ucc) + (c.is_active === false ? ' · INACTIVE' : '');
     $('#mgClient').classList.toggle('ok-tag', c.is_active !== false);
     $('#mgClient').classList.toggle('warn-tag', c.is_active === false);
     $('#mgSet').disabled = false;
     showMarginFor(ucc);
+    // Start the field at what the client has now, so “Replace margin” is an edit
+    // of a real figure rather than a number typed from memory.
+    if (MG_FETCHED.has && !String($('#mgAmt').value).trim()) $('#mgAmt').value = avail;
     $('#mgAmt').focus();
   } catch (e) {
     MG_FETCHED = null;
@@ -3469,13 +3491,13 @@ function importIssues() {
           ? true : !/^(0|n|no|false)$/i.test(String(r.cutoff_flag).trim()),
         // Blank is legitimate: NSE's FAQ (Q12) says the seller need not publish a
         // floor before the offer opens.
-        floor_price: r.floor_price === '' || r.floor_price == null ? null : Number(r.floor_price),
-        cut_price_min: r.cut_price_min ? Number(r.cut_price_min) : null,
-        tick: r.tick ? Number(r.tick) : 0.05,
-        lot: r.lot ? Number(r.lot) : 1,
-        issue_qty: r.issue_qty ? Number(r.issue_qty) : null,
-        retail_qty: r.retail_qty ? Number(r.retail_qty) : null,
-        discount_pct: r.discount_pct ? Number(r.discount_pct) : 0,
+        floor_price: r.floor_price === '' || r.floor_price == null ? null : csvNum(r.floor_price),
+        cut_price_min: r.cut_price_min ? csvNum(r.cut_price_min) : null,
+        tick: r.tick ? csvNum(r.tick) : 0.05,
+        lot: r.lot ? csvNum(r.lot) : 1,
+        issue_qty: r.issue_qty ? csvNum(r.issue_qty) : null,
+        retail_qty: r.retail_qty ? csvNum(r.retail_qty) : null,
+        discount_pct: r.discount_pct ? csvNum(r.discount_pct) : 0,
         hni_open: r.hni_open, hni_close: r.hni_close, ret_open: r.ret_open, ret_close: r.ret_close
       };
       if (missing.length) o.__error = 'missing ' + missing.join(', ');
@@ -3520,7 +3542,7 @@ function importMargins() {
     var parsed = rows.map(function (r) {
       var o = {
         ucc: String(r.ucc || r.client_ucc || r.client_code || '').trim().toUpperCase(),
-        available: Number(r.available || r.margin || r.available_margin),
+        available: csvNum(r.available || r.margin || r.available_margin),
         note: r.note || ''
       };
       if (!o.ucc) o.__error = 'missing ucc';
