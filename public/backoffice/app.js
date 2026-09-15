@@ -1695,6 +1695,7 @@ function onUccTyped() {
   var v = $('#pbUcc').value.trim().toUpperCase();
   if (uccTimer) clearTimeout(uccTimer);
   if (v.length < 3) {
+    PB_BLOCKED = null;
     $('#pbClient').className = 'note';
     $('#pbClient').textContent = 'Enter a UCC to see client, margin and limits.';
     return;
@@ -1702,12 +1703,32 @@ function onUccTyped() {
   uccTimer = setTimeout(function () { loadClientPanel(v); }, 350);
 }
 
+/* Set by loadClientPanel: the reason the UCC on the form cannot bid, or null.
+ * The server refuses an ineligible client either way; this is so the screen does
+ * not invite the desk to fill in a bid that is going to be refused. */
+var PB_BLOCKED = null;
+
 async function loadClientPanel(ucc) {
   try {
     var d = await api('/clients/' + encodeURIComponent(ucc));
     var c = d.client;
+    /* Whether this client may bid at all, said BEFORE the form is filled in.
+     *
+     * The panel used to show name, PAN and margin for any UCC that resolved, so a
+     * closed account looked exactly like an open one and the desk found out only
+     * when it pressed Place bid, having typed the whole thing. Only active clients
+     * on our own books may bid, so an ineligible one says so here, in a banner, and
+     * says why - a client missing from the client master is somebody's data problem,
+     * a closed account is not. */
+    var blocked = c.is_active === false;
+    PB_BLOCKED = blocked ? (c.inactive_reason || 'this client is not active') : null;
     $('#pbClient').className = '';
     $('#pbClient').innerHTML =
+      (blocked
+        ? '<div class="note bad"><b>' + esc(c.name || ucc) + ' cannot bid.</b> ' +
+          esc(PB_BLOCKED.charAt(0).toUpperCase() + PB_BLOCKED.slice(1)) +
+          '. Only active clients on our books may bid.</div>'
+        : '') +
       '<div class="grid2 pairs">' +
         '<div class="f"><div class="k">Name</div><div class="v">' + esc(c.name || '') + '</div></div>' +
         '<div class="f"><div class="k">PAN</div><div class="v">' + esc(c.pan || '') + '</div></div>' +
@@ -1717,6 +1738,7 @@ async function loadClientPanel(ucc) {
         '<div class="f"><div class="k">Free margin</div><div class="v">' + rupee(d.free_margin, 0) + '</div></div>' +
       '</div>' + (d.pii_unmasked ? '' : '<div class="note">PII is masked. An explicit unmask grant is required to see full values.</div>');
   } catch (e) {
+    PB_BLOCKED = null;
     $('#pbClient').className = 'note';
     // No internal system names in anything a user reads. "LD" means nothing to a
     // desk and less to an AP; what they can act on is whether the UCC is theirs.
@@ -1797,6 +1819,13 @@ async function sendBidOtp(action) {
 
 async function placeBid(withOtp) {
   var editing = STATE.editing;
+  // The server refuses this anyway. Saying it here means the desk is not sent
+  // through the client's confirmation code for a bid that cannot be accepted.
+  if (PB_BLOCKED) {
+    return toast('Cannot bid for this client',
+      PB_BLOCKED.charAt(0).toUpperCase() + PB_BLOCKED.slice(1) +
+      '. Only active clients on our books may bid.', 'bad');
+  }
   var body = bidPayload();
   if (withOtp && OTP_STATE) {
     body.otp_ref = OTP_STATE.ref;

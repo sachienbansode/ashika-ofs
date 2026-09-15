@@ -51,12 +51,32 @@ const SELECT = `
          c.last_traded_date,
          c.account_opened,
          u.etl_loaded_at,
-         -- Eligibility for OFS bidding: every status the platform exposes must agree.
-         -- Fail-closed - a client we cannot positively confirm as active is not active.
-         (    lower(COALESCE(c.cstatus, u.status, '')) = 'active'
-          AND upper(COALESCE(c.activation_status, 'Y')) = 'Y'
-          AND lower(COALESCE(u.status, c.cstatus, '')) = 'active'
-         )                                                               AS is_active
+         -- Eligibility for OFS bidding. Fail-closed, and this time actually so.
+         --
+         -- The previous version read "whichever source is present says active": each
+         -- status fell back to the other through COALESCE, so a client held in the
+         -- user table with no row in the client master at all came out ACTIVE and
+         -- could bid. Nothing downstream caught it, because everything downstream
+         -- trusts this column.
+         --
+         -- The rule is now the one the desk states: a client may bid only if it is
+         -- IN the client master and BOTH records say active on their own account.
+         -- No fallback between them - a missing or blank status is not a yes.
+         (    c.ctermcode IS NOT NULL
+          AND lower(btrim(COALESCE(c.cstatus, ''))) = 'active'
+          AND upper(btrim(COALESCE(c.activation_status, 'Y'))) = 'Y'
+          AND lower(btrim(COALESCE(u.status, ''))) = 'active'
+         )                                                               AS is_active,
+         -- Why not, in words, so a screen can say more than "cannot bid".
+         CASE
+           WHEN c.ctermcode IS NULL                                    THEN 'not in the client master'
+           WHEN lower(btrim(COALESCE(c.cstatus, ''))) <> 'active'      THEN
+             'client master status is ' || COALESCE(NULLIF(btrim(c.cstatus), ''), 'blank')
+           WHEN upper(btrim(COALESCE(c.activation_status, 'Y'))) <> 'Y' THEN 'account not activated'
+           WHEN lower(btrim(COALESCE(u.status, ''))) <> 'active'       THEN
+             'account status is ' || COALESCE(NULLIF(btrim(u.status), ''), 'blank')
+           ELSE NULL
+         END                                                             AS inactive_reason
     FROM ${DWH}.tbl_user_info u
     LEFT JOIN ${STG}.ask_clientmast c
       ON upper(btrim(c.ctermcode)) = upper(btrim(u.ucc))`;
@@ -143,7 +163,7 @@ async function exists(ucc) {
 async function eligibility(ucc) {
   const c = await findByUcc(ucc);
   if (!c) return { found: false, active: false, client: null };
-  return { found: true, active: c.is_active === true, client: c };
+  return { found: true, active: c.is_active === true, reason: c.inactive_reason || null, client: c };
 }
 
 /** Merge LD fields onto OFS rows by UCC. Rows keep every OFS column they arrived with. */

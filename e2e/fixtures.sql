@@ -59,9 +59,16 @@ INSERT INTO dwh.tbl_user_info (ucc,name_asper_pan,pan,mobile,email,ucc_client_ca
 VALUES ('ASH1001','ACTIVE CLIENT ONE','AAAPZ1234A','9811100001','client1@example.com','Individual','Mumbai','MH','Active'),
        ('ASH1002','ACTIVE CLIENT TWO','AAAPZ1234B','9811100002','client2@example.com','Individual','Mumbai','MH','Active'),
        ('ASH9001','INACTIVE CLIENT',  'AAAPZ9999Z','9811109001','client9@example.com','Individual','Pune','MH','Inactive'),
-       ('ASH2001','OTHER BRANCH CLI', 'AAAPZ2222C','9811102001','client3@example.com','Individual','Pune','MH','Active');
+       ('ASH2001','OTHER BRANCH CLI', 'AAAPZ2222C','9811102001','client3@example.com','Individual','Pune','MH','Active'),
+       -- Held in the user table, but with NO row in the client master below. This
+       -- is the client that used to come out ACTIVE and could bid: each status fell
+       -- back to the other, so the one source that was present answered for both.
+       ('ASH7001','ORPHAN NO MASTER', 'AAAPZ7777D','9811107001','client7@example.com','Individual','Thane','MH','Active'),
+       -- In the master, but with no status recorded either side. A blank is not a yes.
+       ('ASH7002','BLANK STATUS',     'AAAPZ7778E','9811107002','client8@example.com','Individual','Thane','MH','');
 INSERT INTO stg.ask_clientmast (ctermcode,cclientname,mobile,email_id,client_category,branch_id,cstatus,activation_status)
 VALUES ('ASH1001','ACTIVE CLIENT ONE','9811100001','client1@example.com','Individual','A016','Active','Y'),
        ('ASH1002','ACTIVE CLIENT TWO','9811100002','client2@example.com','Individual','A016','Active','Y'),
        ('ASH9001','INACTIVE CLIENT',  '9811109001','client9@example.com','Individual','A016','Inactive','N'),
-       ('ASH2001','OTHER BRANCH CLI', '9811102001','client3@example.com','Individual','A017','Active','Y');
+       ('ASH2001','OTHER BRANCH CLI', '9811102001','client3@example.com','Individual','A017','Active','Y'),
+       ('ASH7002','BLANK STATUS',     '9811107002','client8@example.com','Individual','A016','','Y');

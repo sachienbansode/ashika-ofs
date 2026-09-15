@@ -133,7 +133,18 @@ test('an inactive client cannot bid', () => {
   assert.deepEqual(errs(good, { client: { found: true, active: true } }), []);
 
   const inactive = errs(good, { client: { found: true, active: false, status: 'Closed' } });
-  assert.ok(inactive.some((e) => /ASH2001 is not active \(Closed\)/.test(e)), inactive.join(' | '));
+  assert.ok(inactive.some((e) => /ASH2001 cannot bid - status is Closed/.test(e)), inactive.join(' | '));
+
+  /* The reason, when the adapter supplies one, is what the desk is told: "not in the
+   * client master" is somebody's data problem and "account status is blank" is
+   * another, and both used to read as the same flat "is not active". */
+  const orphan = errs(good, {
+    client: { found: true, active: false, reason: 'not in the client master' } });
+  assert.ok(orphan.some((e) => /not in the client master/.test(e)), orphan.join(' | '));
+
+  const blank = errs(good, {
+    client: { found: true, active: false, reason: 'client master status is blank' } });
+  assert.ok(blank.some((e) => /status is blank/.test(e)), blank.join(' | '));
 
   const unknown = errs(good, { client: { found: false, active: false } });
   assert.ok(unknown.some((e) => /No client found/.test(e)));

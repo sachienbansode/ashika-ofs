@@ -489,6 +489,60 @@ async function main() {
     return { detail: 'used 48,000 · free 4,52,000' };
   });
 
+  await scenario('ELG-1', 'A client not in the client master cannot bid', async () => {
+    const r = await POST('/api/bids/validate', {
+      issue_id: ISSUE.id, client_ucc: 'ASH7001', exchange: 'BSE',
+      category: 'Retail', qty: 100, price: 400
+    }, { session: 'desk' });
+    const errs = (r.json && (r.json.errors || [])).join(' ');
+    must(r.status >= 400 || errs, 'a client with no client-master row was allowed to bid');
+    must(/client master/i.test(errs), 'the refusal does not say why: ' + errs);
+    return { detail: errs.slice(0, 120) };
+  }, { expected: 'this client used to come out ACTIVE - each status fell back to the other' });
+
+  await scenario('ELG-2', 'A client whose status is blank cannot bid', async () => {
+    const r = await POST('/api/bids/validate', {
+      issue_id: ISSUE.id, client_ucc: 'ASH7002', exchange: 'BSE',
+      category: 'Retail', qty: 100, price: 400
+    }, { session: 'desk' });
+    const errs = (r.json && (r.json.errors || [])).join(' ');
+    must(r.status >= 400 || errs, 'a client with no status recorded was allowed to bid');
+    must(/blank/i.test(errs), 'the refusal does not name the blank status: ' + errs);
+    return { detail: errs.slice(0, 120) };
+  }, { expected: 'a missing status is not a yes' });
+
+  await scenario('ELG-3', 'An ineligible client cannot be placed for, not just validated', async () => {
+    for (const ucc of ['ASH7001', 'ASH7002', 'ASH9001']) {
+      const r = await POST('/api/bids', {
+        issue_id: ISSUE.id, client_ucc: ucc, exchange: 'BSE',
+        category: 'Retail', qty: 100, price: 400
+      }, { session: 'desk' });
+      must(r.status >= 400, ucc + ' was accepted by POST /api/bids with status ' + r.status);
+    }
+    return { detail: 'all three refused at the place endpoint, not only at validate' };
+  }, { expected: 'validate and place must agree - the screen is not the control' });
+
+  await scenario('ELG-4', 'The client record says whether it may bid, and why not', async () => {
+    const r = await GET('/api/clients/ASH7001', { session: 'desk' });
+    eq(r.status, 200, 'the client could not be read');
+    const c = r.json.client || {};
+    eq(c.is_active, false, 'a client with no client-master row is still reported active');
+    must(c.inactive_reason, 'no reason given, so the bid screen can only say "cannot bid"');
+    const ok = await GET('/api/clients/ASH1001', { session: 'desk' });
+    eq((ok.json.client || {}).is_active, true, 'a genuinely active client is now blocked');
+    return { detail: 'ASH7001: ' + c.inactive_reason + ' · ASH1001 still active' };
+  }, { expected: 'the Place bid panel warns before the form is filled in' });
+
+  await scenario('ELG-5', 'A branch cannot bid for an ineligible client either', async () => {
+    const r = await POST('/client/api/branch/bids/validate', {
+      issue_id: ISSUE.id, client_ucc: 'ASH7002', exchange: 'BSE',
+      category: 'Retail', qty: 100, price: 400
+    }, { session: 'ap' });
+    must(r.status >= 400 || ((r.json && r.json.errors) || []).length,
+      'the partner path let an ineligible client through');
+    return { detail: 'refused on the partner path as well as the desk' };
+  }, { expected: 'one rule, every door' });
+
   /* ================================================== exchange file export */
   G('Exchange files');
 
