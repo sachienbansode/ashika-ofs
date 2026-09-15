@@ -545,7 +545,7 @@ async function main() {
     return { detail: 'answered ' + r.status + ' ' + ((r.json && (r.json.error || 'ok')) || '') };
   });
 
-  await scenario('AP-4', 'A branch that LD marks inactive cannot start a sign-in', async () => {
+  await scenario('AP-4', 'A branch marked inactive in the client master cannot start a sign-in', async () => {
     const r = await POST('/client/auth/branch/start', { email: 'branch.a017@example.com' });
     must(r.status >= 400, 'an inactive branch was allowed to start a sign-in');
     return { detail: 'refused ' + r.status + ' ' + ((r.json && r.json.error) || '') };
