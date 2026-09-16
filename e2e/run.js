@@ -744,6 +744,52 @@ async function main() {
     return { detail: uccs.join(', ') + ' - and an ineligible client is refused' };
   }, { expected: 'one rule, every door' });
 
+  const API = (await POST('/api/issues', {
+    symbol: 'APPORT' + Math.floor(Math.random() * 100000), company: 'Partner Portal Test Ltd',
+    isin: 'INE522F01014', exchange: 'BSE', bse_scrip_code: '500010',
+    floor_price: 400, cut_price_min: 400, tick: 0.05, lot: 1, cutoff_flag: true,
+    hni_open: minusH(2), hni_close: plusH(6),
+    ret_open: minusH(2), ret_close: plusH(6)
+  }, { session: 'desk' })).json.issue;
+
+  await scenario('AP-10', 'A branch can PLACE a bid, not only validate one', async () => {
+    const start = await POST('/client/api/branch/bids/otp', {
+      issue_id: API.id, client_ucc: 'ASH1002', action: 'place',
+      detail: '20 shares', terms: {
+        issue_id: API.id, client_ucc: 'ASH1002', exchange: 'BSE',
+        category: 'Retail', qty: 20, price: 400
+      }
+    }, { session: 'ap' });
+    eq(start.status, 200, 'the branch could not send the client a code: ' + (start.text || '').slice(0, 200));
+    const code = start.json.test_code;
+    must(code, 'no test code - is OFS_OTP_TEST_MODE on?');
+
+    const r = await POST('/client/api/branch/bids', {
+      issue_id: API.id, client_ucc: 'ASH1002', exchange: 'BSE',
+      category: 'Retail', qty: 20, price: 400,
+      otp_ref: start.json.ref, otp: code
+    }, { session: 'ap' });
+    eq(r.status, 201, 'a branch could not place a bid for its own client: ' + (r.text || '').slice(0, 220));
+
+    const book = await GET('/client/api/me/bids?limit=50', { session: 'ap' });
+    must((book.json.bids || []).some((b) => String(b.id) === String(r.json.bid.id)),
+      'the bid was written but is not in the branch book');
+    await bidWithConfirmation('DELETE', '/api/bids/' + r.json.bid.id,
+      { reason: 'tidy up', client_ucc: 'ASH1002', issue_id: API.id, bid_id: r.json.bid.id }, 'cancel');
+    return { detail: r.json.bid.ref + ' placed by the branch and visible in its book' };
+  }, { expected: 'the screen posted this to a read-only endpoint and got the server 404' });
+
+  await scenario('AP-11', 'The branch bid book is read-only where it should be', async () => {
+    const r = await POST('/client/api/me/bids', {
+      issue_id: API.id, client_ucc: 'ASH1002', exchange: 'BSE',
+      category: 'Retail', qty: 20, price: 400
+    }, { session: 'ap' });
+    eq(r.status, 404, 'the read-only book accepted a write');
+    eq((r.json && r.json.error), 'not_found',
+      'the server answers something other than its catch-all here');
+    return { detail: 'POST to the book is a 404 - which is why the place path must not use it' };
+  }, { expected: 'this 404 is what the screen was showing as "that record no longer exists"' });
+
   /* ========================================================= client portal */
   G('Investor portal');
 

@@ -42,12 +42,25 @@ var PARTNER = MODE === 'partner';
    MATCH, so a replacement that does not put it back turns
    /dashboard?as_on=2026-09-12 into /client/api/me/dashboardas_on=2026-09-12 —
    a 404 that looks like a missing endpoint rather than a mangled URL. */
+/* One path, two endpoints, and the METHOD is what tells them apart.
+ *
+ * "/bids" is the bid BOOK when it is read and a bid being PLACED when it is
+ * posted, and a branch has a different endpoint for each: /me/bids is the
+ * read-only book over its own clients, /branch/bids is where a bid is written.
+ * Mapping both to /me/bids sent every POST to a GET-only route, so it matched no
+ * route at all and Express answered with its catch-all 404 - which the screen
+ * renders as "That record no longer exists", about a bid that had never been
+ * written. Validate worked, Modify worked, Withdraw worked; a branch simply
+ * could not place a new bid, and was told the record was missing.
+ *
+ * A route may therefore name the methods it applies to. No methods means any. */
 var PARTNER_ROUTES = [
   [/^\/me$/,                       '/client/api/me'],
   [/^\/dashboard(\?|$)/,           '/client/api/me/dashboard$1'],
   [/^\/bids\/validate$/,           '/client/api/branch/bids/validate'],
   [/^\/bids\/otp$/,                '/client/api/branch/bids/otp'],
   [/^\/bids\/(\d+)$/,              '/client/api/branch/bids/$1'],
+  [/^\/bids(\?|$)/,                '/client/api/branch/bids$1', ['POST']],
   [/^\/bids(\?|$)/,                '/client/api/me/bids$1'],
   [/^\/allotment\/mine(\?|$)/,     '/client/api/me/allotments$1'],
   [/^\/clients\/([^/?]+)$/,        '/client/api/me/clients/$1'],
@@ -56,9 +69,12 @@ var PARTNER_ROUTES = [
   [/^\/settings(\?|$)/,            '/client/api/me/settings$1']
 ];
 
-function partnerPath(path) {
+function partnerPath(path, method) {
+  var m = String(method || 'GET').toUpperCase();
   for (var i = 0; i < PARTNER_ROUTES.length; i++) {
     var re = PARTNER_ROUTES[i][0];
+    var only = PARTNER_ROUTES[i][2];
+    if (only && only.indexOf(m) < 0) continue;
     if (re.test(path)) return path.replace(re, PARTNER_ROUTES[i][1]);
   }
   throw new Error('not available to a branch or Authorised Partner');
@@ -334,7 +350,7 @@ async function api(path, opts) {
   // A partner session is a cookie, not a bearer token. Sending a stale staff token
   // alongside it would be answered by whichever the server checked first.
   if (TOKEN && !PARTNER) headers.Authorization = 'Bearer ' + TOKEN;
-  var url = PARTNER ? partnerPath(path) : '/api' + path;
+  var url = PARTNER ? partnerPath(path, opts.method || 'GET') : '/api' + path;
   var res = await fetch(url, {
     method: opts.method || 'GET',
     headers: headers,

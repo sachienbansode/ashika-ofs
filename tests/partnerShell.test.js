@@ -77,7 +77,9 @@ test('the desk is untouched by any of this', () => {
   // Every call on the desk still goes to /api, with the bearer token attached.
   const api = SRC.slice(SRC.indexOf('async function api('), SRC.indexOf('async function api(') + 900);
   assert.match(api, /if \(TOKEN && !PARTNER\) headers\.Authorization = 'Bearer ' \+ TOKEN;/);
-  assert.match(api, /var url = PARTNER \? partnerPath\(path\) : '\/api' \+ path;/);
+  // partnerPath now takes the method too: reading the bid book and placing a bid
+  // are the same path and different endpoints, and only the method says which.
+  assert.match(api, /var url = PARTNER \? partnerPath\(path, opts\.method \|\| 'GET'\) : '\/api' \+ path;/);
   const { PARTNER } = shellAt('/backoffice/');
   assert.equal(PARTNER, false, 'so the desk takes the /api branch every time');
 });
