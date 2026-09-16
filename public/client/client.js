@@ -735,16 +735,172 @@ async function withdrawBid(box) {
   }
 }
 
+/**
+ * Is the offer this bid belongs to still open to it?
+ *
+ * The open-issues list is the better answer, because the server worked the status
+ * out. But My bids and Open issues load side by side and either can land first,
+ * so with the list not yet in hand the bid's own close time answers instead -
+ * showing a dash on every row for the first second, and then buttons, is its own
+ * small lie about what the portal can do.
+ */
+function bidStillOpen(x) {
+  var i = ISSUES_BY_ID[String(x.issue_id)];
+  if (i) return (x.category === 'Retail' ? i.ret_status : i.hni_status) === 'Open';
+  var close = x.category === 'Retail' ? x.ret_close : x.hni_close;
+  if (!close) return false;
+  var t = new Date(close).getTime();
+  return !isNaN(t) && t > Date.now();
+}
+
+/**
+ * Modify from the My bids tab: go to the offer's own card.
+ *
+ * Not a second bid form. The card carries the floor, the tick, the cap and the
+ * suggested-bid button, and it is already filled with this bid because the
+ * server sends it as my_bid - so the honest thing is to take the investor there
+ * rather than build a thinner copy that can disagree with it.
+ */
+function modifyFromList(issueId) {
+  showCTab('issues');
+  var go = function () {
+    var box = document.querySelector('.bidbox[data-bid-issue="' + issueId + '"]');
+    if (!box) return toast('That offer is closed', 'This bid can no longer be changed.', 'bad');
+    var card = box.closest('.card') || box;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    var qty = box.querySelector('[data-bf="qty"]');
+    if (qty && qty.focus) qty.focus();
+  };
+  if (document.querySelector('.bidbox[data-bid-issue="' + issueId + '"]')) go();
+  else loadIssues().then(go);
+}
+
+/** Withdraw from the My bids tab, on the same endpoint the card uses. */
+async function withdrawFromList(id, ref) {
+  if (!window.confirm('Withdraw bid ' + ref + '? This cannot be undone.')) return;
+  try {
+    await api(bidBase() + '/' + id, { method: 'DELETE' });
+    toast('Bid withdrawn', ref + ' has been cancelled.', 'ok');
+    await loadIssues();
+    await loadBids(BIDS_PAGE.offset);
+  } catch (e) {
+    if (e.status === 401) return sessionLost();
+    toast('Could not withdraw', e.message, 'bad');
+  }
+}
+
 var BIDS_BY_ISSUE = {};
 /* The issues themselves, and the caps that go with them — "Fill suggested bid"
  * needs the floor, the tick and the lot, and the box only carries an id. */
 var ISSUES_BY_ID = {};
 var SETTINGS = {};
 
+/**
+ * What is half-typed in a bid form, so a background refresh cannot take it.
+ *
+ * The issue list reloads every fifteen seconds and the bid form lives INSIDE the
+ * issue card, so every refresh rebuilt the form from the server's copy - and an
+ * investor who took more than fifteen seconds to type a quantity watched it
+ * empty itself. That is what the desk was shown on video: quantity 100 and a
+ * chosen bid type, gone twenty seconds later, with nobody having touched it.
+ *
+ * So the values are lifted out before the rebuild and put back after, along with
+ * the caret. Only forms the investor has actually touched are restored: an
+ * untouched card takes the server's fresh copy, which is the whole point of
+ * refreshing it.
+ */
+/* Which bid forms the investor has actually typed in. Keyed by issue id, set by
+ * the delegated input handler, cleared when that form is submitted or withdrawn. */
+var DIRTY = {};
+
+/**
+ * The time in the header, in sync with what actually closes bidding.
+ *
+ * It read the desk-wide cut-off setting and said "Cut-off 15:15" over an offer
+ * whose own window ran to 17:15 - the investor was told bidding ends two hours
+ * before it does, and the back office was saying something different again.
+ * Bidding runs to each offer's own close, so the header shows the next one of
+ * those; with nothing open it falls back to the desk setting, which is then the
+ * only answer there is.
+ */
+function showCutoff(list, settings) {
+  var el = $('#cutTime');
+  if (!el) return;
+  var label = el.parentNode && el.parentNode.querySelector('[data-cut-label]');
+  var now = Date.now();
+  var closes = (list || [])
+    .filter(function (i) { return i.ret_status === 'Open' || i.hni_status === 'Open'; })
+    .map(function (i) {
+      var t = [i.ret_close, i.hni_close]
+        .map(function (v) { return v ? new Date(v).getTime() : NaN; })
+        .filter(function (v) { return !isNaN(v) && v > now; });
+      return t.length ? Math.min.apply(null, t) : NaN;
+    })
+    .filter(function (v) { return !isNaN(v); });
+
+  if (closes.length) {
+    el.textContent = hhmmIST(new Date(Math.min.apply(null, closes)));
+    if (label) label.textContent = closes.length > 1 ? 'Next close' : 'Closes';
+    return;
+  }
+  el.textContent = (settings && settings.daily_cutoff) || el.textContent;
+  if (label) label.textContent = 'Cut-off';
+}
+
+/** HH:MM in Indian time, whatever the device is set to. */
+function hhmmIST(d) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(d);
+}
+
+function captureBidForms() {
+  var out = {};
+  Array.prototype.forEach.call(document.querySelectorAll('.bidbox'), function (box) {
+    var id = box.getAttribute('data-bid-issue');
+    if (!id || !DIRTY[id]) return;
+    var vals = {};
+    Array.prototype.forEach.call(box.querySelectorAll('[data-bf]'), function (el) {
+      if (el.tagName === 'BUTTON') return;
+      vals[el.getAttribute('data-bf')] = { value: el.value, disabled: !!el.disabled };
+    });
+    var a = document.activeElement;
+    out[id] = {
+      vals: vals,
+      focus: a && box.contains(a) ? a.getAttribute('data-bf') : null,
+      start: a && typeof a.selectionStart === 'number' ? a.selectionStart : null,
+      end: a && typeof a.selectionEnd === 'number' ? a.selectionEnd : null
+    };
+  });
+  return out;
+}
+
+function restoreBidForms(snap) {
+  Object.keys(snap || {}).forEach(function (id) {
+    var box = document.querySelector('.bidbox[data-bid-issue="' + id + '"]');
+    if (!box) return;                                  // the offer closed; let it go
+    var st = snap[id];
+    Object.keys(st.vals).forEach(function (k) {
+      var el = box.querySelector('[data-bf="' + k + '"]');
+      if (!el || el.tagName === 'BUTTON') return;
+      el.value = st.vals[k].value;
+      if (el.tagName === 'INPUT') el.disabled = st.vals[k].disabled;
+    });
+    if (st.focus) {
+      var back = box.querySelector('[data-bf="' + st.focus + '"]');
+      if (back && back.focus) {
+        back.focus();
+        try {
+          if (st.start != null && back.setSelectionRange) back.setSelectionRange(st.start, st.end);
+        } catch (e) { /* a number input in some browsers - focus alone is enough */ }
+      }
+    }
+  });
+}
+
 async function loadIssues(quiet) {
   try {
     var d = await api('/client/api/issues');
-    if (d.settings && d.settings.daily_cutoff) $('#cutTime').textContent = d.settings.daily_cutoff;
     SETTINGS = d.settings || {};
     var list = d.issues || [];
     BIDS_BY_ISSUE = {};
@@ -753,10 +909,13 @@ async function loadIssues(quiet) {
       ISSUES_BY_ID[String(i.id)] = i;
       if (i.my_bid) BIDS_BY_ISSUE[String(i.id)] = i.my_bid;
     });
+    showCutoff(list, d.settings || {});
+    var keep = captureBidForms();
     $('#clientIssues').innerHTML = list.length
       ? list.map(issueCard).join('')
       : '<div class="tbl-empty">There is no open Offer for Sale right now. ' +
         'Issues appear here as soon as Ashika publishes them.</div>';
+    restoreBidForms(keep);
   } catch (e) {
     if (e.status === 401) return sessionLost();
     if (!quiet) toast('Could not load issues', e.message, 'bad');
@@ -854,7 +1013,7 @@ async function loadBids(offset) {
       (branch ? '<th>Client</th><th>Placed by</th>' : '') +
       '<th>Category</th>' +
       '<th class="n">Qty</th><th class="n">Price</th><th class="n">Value</th>' +
-      '<th>Status</th><th>Placed</th></tr></thead><tbody>' +
+      '<th>Status</th><th>Placed</th><th></th></tr></thead><tbody>' +
       b.map(function (x) {
         return '<tr><td class="m rowhead"><b>' + esc(x.symbol || '') + '</b>' +
             '<span class="sub"> · ' + esc(x.ref) + '</span></td>' +
@@ -874,7 +1033,22 @@ async function loadBids(offset) {
           '<td class="n" data-label="Value">' + inr(x.value, 0) + '</td>' +
           '<td data-label="Status"><span class="chip ' + (x.status === 'Live' ? 'open' : x.status === 'Cancelled' ? 'grey' : 'soon') +
             '">' + esc(x.status) + '</span></td>' +
-          '<td class="m" data-label="Placed">' + dt(x.created_at) + '</td></tr>';
+          '<td class="m" data-label="Placed">' + dt(x.created_at) + '</td>' +
+          /* Modify and Withdraw, on the screen the investor actually looks at.
+           *
+           * Both have always existed - on the issue card, under Open issues - so
+           * an investor who came to My bids to change a bid found a read-only
+           * list and concluded the portal could not do it. Modify carries them to
+           * that card, which is where the floor, the tick and the cap are shown.
+           * Neither is offered on a bid that is no longer live, nor on one whose
+           * offer has closed. */
+          '<td class="act" data-label="">' + (
+            (x.status === 'Live' || x.status === 'Modified') && bidStillOpen(x)
+              ? '<button class="btn btn-o btn-sm" data-bid-modify="' + esc(x.issue_id) + '">Modify</button> ' +
+                '<button class="btn btn-o btn-sm" data-bid-cancel="' + esc(x.id) + '" ' +
+                  'data-bid-ref="' + esc(x.ref) + '">Withdraw</button>'
+              : '<span class="sub">—</span>'
+          ) + '</td></tr>';
       }).join('') + '</tbody>'
     ) : '<tbody><tr><td class="tbl-empty">' +
         (branch ? 'No bids for your clients yet.' : 'You have not placed a bid yet.') +
@@ -1029,6 +1203,16 @@ async function boot() {
   });
   $('#signOutBtn').addEventListener('click', signOut);
   $('#bidsCsv').addEventListener('click', downloadBidsCsv);
+  // The bids table is rebuilt on every load, so delegate from its container.
+  $('#myBidsTbl').addEventListener('click', function (e) {
+    var m = e.target.closest('[data-bid-modify]');
+    if (m) { e.preventDefault(); return modifyFromList(m.getAttribute('data-bid-modify')); }
+    var c = e.target.closest('[data-bid-cancel]');
+    if (c) {
+      e.preventDefault();
+      withdrawFromList(c.getAttribute('data-bid-cancel'), c.getAttribute('data-bid-ref'));
+    }
+  });
   $$('#cTabs button').forEach(function (b) {
     b.addEventListener('click', function () { showCTab(b.dataset.ctab); });
   });
@@ -1040,12 +1224,28 @@ async function boot() {
     if (!box) return;
     if (e.target.closest('[data-bf="fill"]'))   { e.preventDefault(); fillSuggested(box); return; }
     if (e.target.closest('[data-bf="check"]'))  { e.preventDefault(); checkBid(box); return; }
-    if (e.target.closest('[data-bf="submit"]')) { e.preventDefault(); submitBid(box, null); return; }
-    if (e.target.closest('[data-bf="cancel"]')) { e.preventDefault(); withdrawBid(box); }
+    if (e.target.closest('[data-bf="submit"]')) {
+      e.preventDefault();
+      // Acted on, so the next refresh may bring the server's copy back.
+      delete DIRTY[box.getAttribute('data-bid-issue')];
+      submitBid(box, null);
+      return;
+    }
+    if (e.target.closest('[data-bf="cancel"]')) {
+      e.preventDefault();
+      delete DIRTY[box.getAttribute('data-bid-issue')];
+      withdrawBid(box);
+    }
+  });
+  // Typed in, so a background refresh must not overwrite it.
+  $('#clientIssues').addEventListener('input', function (e) {
+    var box = e.target.closest('.bidbox');
+    if (box && e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
   });
   $('#clientIssues').addEventListener('change', function (e) {
     var box = e.target.closest('.bidbox');
     if (!box) return;
+    if (e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
     // A cut-off bid has no price of its own; leaving the field live would invite a
     // number that is then silently discarded.
     if (e.target.matches('[data-bf="type"]')) {

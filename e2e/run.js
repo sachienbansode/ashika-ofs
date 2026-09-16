@@ -761,6 +761,95 @@ async function main() {
     return { detail: 'both answered ' + a.status };
   }, { expected: 'used to answer 200 vs 404' });
 
+  /* The investor's own portal, checked against the desk rather than on its own.
+   * Three verbs, one rule set: an investor who can place a bid can change it and
+   * take it back, and every refusal is the refusal the desk would have got. */
+
+  await scenario('CL-3', 'An investor signs in with a code sent to their own contacts', async () => {
+    const start = await POST('/client/auth/start',
+      { identifier: 'client1@example.com' }, { session: 'inv' });
+    eq(start.status, 200, 'client sign-in start failed: ' + (start.text || '').slice(0, 200));
+    const code = start.json.test_code;
+    must(code, 'no test code - is OFS_OTP_TEST_MODE on?');
+    const v = await POST('/client/auth/verify',
+      { ref: start.json.ref, otp: code }, { session: 'inv' });
+    eq(v.status, 200, 'client verify failed: ' + (v.text || '').slice(0, 200));
+    must(jar.inv, 'no session cookie was set for the investor');
+    return { detail: 'signed in as ' + ((v.json.client && v.json.client.ucc) || 'a client') };
+  }, { expected: 'the code goes to the contacts on the client record, never to the request' });
+
+  await scenario('CL-4', 'The investor sees only their own account', async () => {
+    const me = await GET('/client/api/me/bids?limit=50', { session: 'inv' });
+    eq(me.status, 200, 'the investor cannot read their own bids');
+    const outside = (me.json.bids || []).filter((b) => b.client_ucc !== 'ASH1001');
+    eq(outside.length, 0, 'SCOPE LEAK: another client is in this investor list');
+    const list = await GET('/client/api/me/clients', { session: 'inv' });
+    eq((list.json.clients || []).length, 0, 'a client was handed a list of clients');
+    return { detail: 'own bids only, and no client list' };
+  }, { expected: 'a client is not a list of clients' });
+
+  // An offer of this group's own, so the bids the bidding group left live do not
+  // collide with the one-live-bid-per-scrip rule.
+  const CLI = (await POST('/api/issues', {
+    symbol: 'INVPORT' + Math.floor(Math.random() * 100000), company: 'Investor Portal Test Ltd',
+    isin: 'INE522F01014', exchange: 'BSE', bse_scrip_code: '500009',
+    floor_price: 400, cut_price_min: 400, tick: 0.05, lot: 1, cutoff_flag: true,
+    hni_open: minusH(2), hni_close: plusH(6),
+    ret_open: minusH(2), ret_close: plusH(6)
+  }, { session: 'desk' })).json.issue;
+
+  await scenario('CL-5', 'An investor places, modifies and withdraws their own bid', async () => {
+    const place = await POST('/client/api/bids', {
+      issue_id: CLI.id, exchange: 'BSE', category: 'Retail', qty: 50, price: 400
+    }, { session: 'inv' });
+    eq(place.status, 201, 'the investor could not place a bid: ' + (place.text || '').slice(0, 220));
+    const id = place.json.bid.id;
+
+    const mod = await PUT('/client/api/bids/' + id, {
+      issue_id: CLI.id, exchange: 'BSE', category: 'Retail', qty: 60, price: 400
+    }, { session: 'inv' });
+    eq(mod.status, 200, 'the investor could not modify their own bid: ' + (mod.text || '').slice(0, 220));
+    eq(Number(mod.json.bid.qty), 60, 'the modification did not take');
+
+    const del = await DEL('/client/api/bids/' + id, {}, { session: 'inv' });
+    eq(del.status, 200, 'the investor could not withdraw their own bid: ' + (del.text || '').slice(0, 220));
+    return { detail: 'placed 50, modified to 60, withdrawn - the same three the desk has' };
+  }, { expected: 'My bids offers Modify and Withdraw; the endpoints must be there for them' });
+
+  await scenario('CL-6', 'An investor cannot touch a bid that is not theirs', async () => {
+    const other = await bidWithConfirmation('POST', '/api/bids', {
+      issue_id: CLI.id, client_ucc: 'ASH1002', exchange: 'BSE',
+      category: 'Retail', qty: 10, price: 400
+    }, 'place');
+    eq(other.status, 201, 'the desk could not place the bid this scenario needs: ' +
+      (other.text || '').slice(0, 200));
+    const id = other.json.bid.id;
+    const mod = await PUT('/client/api/bids/' + id, {
+      issue_id: CLI.id, exchange: 'BSE', category: 'Retail', qty: 99, price: 400
+    }, { session: 'inv' });
+    must(mod.status >= 400, 'SCOPE LEAK: an investor modified another client bid');
+    const del = await DEL('/client/api/bids/' + id, {}, { session: 'inv' });
+    must(del.status >= 400, 'SCOPE LEAK: an investor withdrew another client bid');
+    await bidWithConfirmation('DELETE', '/api/bids/' + id,
+      { reason: 'tidy up', client_ucc: 'ASH1002', issue_id: CLI.id, bid_id: id }, 'cancel');
+    return { detail: 'modify refused ' + mod.status + ', withdraw refused ' + del.status };
+  }, { expected: 'the only account an investor can act on is their own' });
+
+  await scenario('CL-7', 'The investor is refused for the same reasons the desk is', async () => {
+    const overCap = await POST('/client/api/bids/validate', {
+      issue_id: CLI.id, exchange: 'BSE', category: 'Retail', qty: 600, price: 400
+    }, { session: 'inv' });
+    const invErrs = ((overCap.json && overCap.json.errors) || []).join(' ');
+    const deskSide = await POST('/api/bids/validate', {
+      issue_id: CLI.id, client_ucc: 'ASH1001', exchange: 'BSE',
+      category: 'Retail', qty: 600, price: 400
+    }, { session: 'desk' });
+    const deskErrs = ((deskSide.json && deskSide.json.errors) || []).join(' ');
+    must(/2,00,000/.test(invErrs), 'the investor was not given the retail cap: ' + invErrs);
+    eq(invErrs, deskErrs, 'the investor and the desk are told different things about the same bid');
+    return { detail: invErrs.slice(0, 110) };
+  }, { expected: 'one rule set, three front ends' });
+
   /* ============================================================== settings */
   G('Settings and access control');
 
