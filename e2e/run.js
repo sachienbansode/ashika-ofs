@@ -790,6 +790,131 @@ async function main() {
     return { detail: 'POST to the book is a 404 - which is why the place path must not use it' };
   }, { expected: 'this 404 is what the screen was showing as "that record no longer exists"' });
 
+  /* The whole grid, proved rather than assumed: three actors, three verbs, and a
+   * confirmation code that reaches the CLIENT and nobody else. */
+
+  /** Place a bid for ASH1002 on the partner issue, with the client's code. */
+  async function apPlace(qty) {
+    const s1 = await POST('/client/api/branch/bids/otp', {
+      issue_id: API.id, client_ucc: 'ASH1002', action: 'place', detail: qty + ' shares',
+      terms: { issue_id: API.id, client_ucc: 'ASH1002', exchange: 'BSE',
+               category: 'Retail', qty: qty, price: 400 }
+    }, { session: 'ap' });
+    if (s1.status !== 200) throw new Error('otp for place failed: ' + (s1.text || '').slice(0, 160));
+    const r = await POST('/client/api/branch/bids', {
+      issue_id: API.id, client_ucc: 'ASH1002', exchange: 'BSE',
+      category: 'Retail', qty: qty, price: 400,
+      otp_ref: s1.json.ref, otp: s1.json.test_code
+    }, { session: 'ap' });
+    if (r.status !== 201) throw new Error('place failed: ' + (r.text || '').slice(0, 200));
+    return r.json.bid;
+  }
+
+  await scenario('AP-12', 'A branch modifies a bid with the client’s own code', async () => {
+    const bid = await apPlace(20);
+    const bare = await PUT('/client/api/branch/bids/' + bid.id, {
+      issue_id: API.id, exchange: 'BSE', category: 'Retail', qty: 30, price: 400
+    }, { session: 'ap' });
+    eq(bare.status, 428, 'a branch modified a bid with no confirmation from the client');
+
+    const sent = await POST('/client/api/branch/bids/otp', {
+      issue_id: API.id, client_ucc: 'ASH1002', action: 'modify', bid_id: bid.id,
+      detail: '30 shares', terms: { issue_id: API.id, client_ucc: 'ASH1002', exchange: 'BSE',
+                                    category: 'Retail', qty: 30, price: 400 }
+    }, { session: 'ap' });
+    eq(sent.status, 200, 'the branch could not send a modify code');
+    const r = await PUT('/client/api/branch/bids/' + bid.id, {
+      issue_id: API.id, exchange: 'BSE', category: 'Retail', qty: 30, price: 400,
+      otp_ref: sent.json.ref, otp: sent.json.test_code
+    }, { session: 'ap' });
+    eq(r.status, 200, 'a branch could not modify its own client bid: ' + (r.text || '').slice(0, 200));
+    eq(Number(r.json.bid.qty), 30, 'the modification did not take');
+
+    const del = await POST('/client/api/branch/bids/otp', {
+      issue_id: API.id, client_ucc: 'ASH1002', action: 'cancel', bid_id: bid.id
+    }, { session: 'ap' });
+    await DEL('/client/api/branch/bids/' + bid.id,
+      { otp_ref: del.json.ref, otp: del.json.test_code }, { session: 'ap' });
+    return { detail: 'refused 428 with no code, 20 -> 30 with it' };
+  }, { expected: 'a bid changed on a client behalf is a bid the client agreed to' });
+
+  await scenario('AP-13', 'A branch withdraws a bid with the client’s own code', async () => {
+    const bid = await apPlace(25);
+    const bare = await DEL('/client/api/branch/bids/' + bid.id, {}, { session: 'ap' });
+    eq(bare.status, 428, 'a branch withdrew a bid with no confirmation from the client');
+
+    const sent = await POST('/client/api/branch/bids/otp', {
+      issue_id: API.id, client_ucc: 'ASH1002', action: 'cancel', bid_id: bid.id
+    }, { session: 'ap' });
+    eq(sent.status, 200, 'the branch could not send a withdrawal code');
+    const r = await DEL('/client/api/branch/bids/' + bid.id,
+      { otp_ref: sent.json.ref, otp: sent.json.test_code }, { session: 'ap' });
+    eq(r.status, 200, 'a branch could not withdraw its own client bid: ' + (r.text || '').slice(0, 200));
+
+    const book = await GET('/client/api/me/bids?status=ALL&limit=50', { session: 'ap' });
+    const row = (book.json.bids || []).find((b) => String(b.id) === String(bid.id));
+    eq(row && row.status, 'Cancelled', 'the bid is not cancelled in the branch book');
+    return { detail: 'refused 428 with no code, cancelled with it' };
+  }, { expected: 'the same gate on the way out as on the way in' });
+
+  await scenario('AP-14', 'The code goes to the client’s registered contacts, not the requester’s', async () => {
+    const sent = await POST('/client/api/branch/bids/otp', {
+      issue_id: API.id, client_ucc: 'ASH1002', action: 'place', detail: '20 shares',
+      terms: { issue_id: API.id, client_ucc: 'ASH1002', exchange: 'BSE',
+               category: 'Retail', qty: 20, price: 400 }
+    }, { session: 'ap' });
+    eq(sent.status, 200, 'the code could not be sent');
+    const to = String(sent.json.sent_to || '');
+    must(to, 'the response does not say where the code went');
+    must(/0002$/.test(to.replace(/[^0-9]/g, '')) || /0002/.test(to),
+      'the code did not go to the client own mobile: ' + to);
+    must(!/branch/i.test(to) && !/a016/i.test(to),
+      'the code went to the branch rather than to the client: ' + to);
+    return { detail: 'sent to ' + to };
+  }, { expected: 'the person asking for the code must not be able to say where it goes' });
+
+  await scenario('AP-15', 'A branch cannot send a code for a client outside its book', async () => {
+    const r = await POST('/client/api/branch/bids/otp', {
+      issue_id: API.id, client_ucc: 'ASH2001', action: 'place', detail: '10 shares',
+      terms: { issue_id: API.id, client_ucc: 'ASH2001', exchange: 'BSE',
+               category: 'Retail', qty: 10, price: 400 }
+    }, { session: 'ap' });
+    must(r.status >= 400, 'a branch sent a confirmation code to another branch client');
+    return { detail: 'refused ' + r.status };
+  }, { expected: 'the code is a message to somebody - scope applies before it is sent' });
+
+  await scenario('AP-16', 'The desk is held to the same three gates', async () => {
+    const out = {};
+    const place = await POST('/api/bids', {
+      issue_id: API.id, client_ucc: 'ASH1001', exchange: 'BSE',
+      category: 'Retail', qty: 15, price: 400
+    }, { session: 'desk' });
+    out.place = place.status;
+    eq(place.status, 428, 'the desk placed a bid with no confirmation from the client');
+
+    const made = await bidWithConfirmation('POST', '/api/bids', {
+      issue_id: API.id, client_ucc: 'ASH1001', exchange: 'BSE',
+      category: 'Retail', qty: 15, price: 400
+    }, 'place');
+    eq(made.status, 201, 'the desk could not place with a code: ' + (made.text || '').slice(0, 200));
+    const id = made.json.bid.id;
+
+    const mod = await PUT('/api/bids/' + id, {
+      issue_id: API.id, exchange: 'BSE', category: 'Retail', qty: 16, price: 400
+    }, { session: 'desk' });
+    out.modify = mod.status;
+    eq(mod.status, 428, 'the desk modified a bid with no confirmation from the client');
+
+    const cancel = await DEL('/api/bids/' + id, { reason: 'test' }, { session: 'desk' });
+    out.cancel = cancel.status;
+    eq(cancel.status, 428, 'the desk withdrew a bid with no confirmation from the client');
+
+    await bidWithConfirmation('DELETE', '/api/bids/' + id,
+      { reason: 'tidy up', client_ucc: 'ASH1001', issue_id: API.id, bid_id: id }, 'cancel');
+    return { detail: 'place ' + out.place + ', modify ' + out.modify + ', cancel ' + out.cancel +
+                     ' without a code; all three go through with one' };
+  }, { expected: 'one rule for the desk and the branch alike' });
+
   /* ========================================================= client portal */
   G('Investor portal');
 
