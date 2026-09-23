@@ -106,16 +106,16 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
       const retQty = Number(i.retail_qty) || 0;
       const nonRetQty = issueQty && retQty ? issueQty - retQty : 0;
       return Object.assign({}, i, {
-        status_label: issueStatus(i, now),
-        hni_status: catStatus(i, 'HNI', now),
-        ret_status: catStatus(i, 'Retail', now),
+        status_label: issueStatus(i, now, s),
+        hni_status: catStatus(i, 'HNI', now, s),
+        ret_status: catStatus(i, 'Retail', now, s),
         // Open ON THE DAY being shown. Separate from the three above on purpose:
         // those drive what can be bid right now, this drives what is counted and
         // listed for the date on screen, and conflating them is what caused the
         // "0 open issues" over three bids.
-        open_on_scope: onDay ? issueOpenOnDay(i, onDay) : null,
-        ret_open_on_scope: onDay ? openOnDay(i, 'Retail', onDay) : null,
-        hni_open_on_scope: onDay ? openOnDay(i, 'HNI', onDay) : null,
+        open_on_scope: onDay ? issueOpenOnDay(i, onDay, s) : null,
+        ret_open_on_scope: onDay ? openOnDay(i, 'Retail', onDay, s) : null,
+        hni_open_on_scope: onDay ? openOnDay(i, 'HNI', onDay, s) : null,
         min_price_retail: minPrice(i, 'Retail'),
         min_price_hni: minPrice(i, 'HNI'),
         subscription_x: issueQty ? Number(i.total_qty) / issueQty : null,

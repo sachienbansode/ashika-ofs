@@ -232,7 +232,7 @@ router.delete('/:id', requirePage(PAGE), requireEdit(PAGE), async (req, res, nex
     if (blocked && String(req.body && req.body.force) !== 'true') {
       return res.status(422).json({ error: 'window_closed', message: blocked });
     }
-    const catShut = bids.cancelWindowMessage(
+    const catShut = await bids.cancelWindowMessage(
       await one(`SELECT symbol, status, hni_open, hni_close, ret_open, ret_close
                    FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [before.issue_id]),
       before.category);

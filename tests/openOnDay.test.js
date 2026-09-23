@@ -78,7 +78,9 @@ test('the dashboard only applies it to a PAST date, not to today or all-live', (
   const src = require('fs').readFileSync(
     require('path').join(__dirname, '..', 'routes/dashboard.js'), 'utf8');
   assert.match(src, /const onDay = scope\.all \|\| scope\.date === 'today' \? null : scope\.date/);
-  assert.match(src, /open_on_scope: onDay \? issueOpenOnDay\(i, onDay\) : null/);
-  // the live statuses must survive alongside it — they are what "can I bid" reads
-  assert.match(src, /ret_status: catStatus\(i, 'Retail', now\)/);
+  assert.match(src, /open_on_scope: onDay \? issueOpenOnDay\(i, onDay, s\) : null/);
+  /* The live statuses must survive alongside it — they are what "can I bid" reads
+   * — and they take the settings, because the desk cut-off decides the hour an
+   * offer stops and a chip that ignored it would disagree with the bid form. */
+  assert.match(src, /ret_status: catStatus\(i, 'Retail', now, s\)/);
 });

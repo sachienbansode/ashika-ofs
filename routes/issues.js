@@ -27,9 +27,11 @@ const COLS = `id, symbol, company, isin, series, exchange, bse_scrip_code,
 
 function decorate(r) {
   return Object.assign({}, r, {
-    status_label: issueStatus(r),
-    hni_status: catStatus(r, 'HNI'),
-    ret_status: catStatus(r, 'Retail')
+    // Synchronous: the chip reads the last known settings rather than awaiting.
+    // See lib/settings.js cachedAll - at most a TTL stale, and nothing decides on it.
+    status_label: issueStatus(r, null, settings.cachedAll()),
+    hni_status: catStatus(r, 'HNI', null, settings.cachedAll()),
+    ret_status: catStatus(r, 'Retail', null, settings.cachedAll())
   });
 }
 

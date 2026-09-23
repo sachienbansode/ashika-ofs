@@ -118,9 +118,9 @@ router.get('/issues', async (req, res, next) => {
       settings: { retail_cap: s.retail_cap, hni_min: s.hni_min, daily_cutoff: s.daily_cutoff,
                   allowed_exchanges: s.allowed_exchanges },
       issues: list.map((i) => Object.assign({}, i, {
-        status_label: issueStatus(i, now),
-        ret_status: catStatus(i, 'Retail', now),
-        hni_status: catStatus(i, 'HNI', now),
+        status_label: issueStatus(i, now, s),
+        ret_status: catStatus(i, 'Retail', now, s),
+        hni_status: catStatus(i, 'HNI', now, s),
         min_price_retail: minPrice(i, 'Retail'),
         min_price_hni: minPrice(i, 'HNI'),
         // A client sees their own bid. A branch sees how many of its clients have
@@ -436,7 +436,7 @@ router.delete('/bids/:id(\\d+)', requireSingleClient, async (req, res, next) => 
      * exchange — the book would say cancelled while the exchange still held the
      * bid, and nobody would find out until allotment. A modification has always
      * been gated on the window through validateBid; a cancellation was not. */
-    const catShut = bids.cancelWindowMessage(
+    const catShut = await bids.cancelWindowMessage(
       await one(`SELECT symbol, status, hni_open, hni_close, ret_open, ret_close
                    FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [before.issue_id]),
       before.category);
@@ -646,7 +646,7 @@ router.delete('/branch/bids/:id(\\d+)', async (req, res, next) => {
      * exchange — the book would say cancelled while the exchange still held the
      * bid, and nobody would find out until allotment. A modification has always
      * been gated on the window through validateBid; a cancellation was not. */
-    const catShut = bids.cancelWindowMessage(
+    const catShut = await bids.cancelWindowMessage(
       await one(`SELECT symbol, status, hni_open, hni_close, ret_open, ret_close
                    FROM ${SCHEMA}.ofs_issue WHERE id = $1`, [before.issue_id]),
       before.category);
@@ -840,12 +840,12 @@ router.get('/me/dashboard', async (req, res, next) => {
       const issueQty = Number(i.issue_qty) || 0;
       const retQty = Number(i.retail_qty) || 0;
       return Object.assign({}, i, {
-        status_label: issueStatus(i, now),
-        hni_status: catStatus(i, 'HNI', now),
-        ret_status: catStatus(i, 'Retail', now),
-        open_on_scope: onDay ? issueOpenOnDay(i, onDay) : null,
-        ret_open_on_scope: onDay ? openOnDay(i, 'Retail', onDay) : null,
-        hni_open_on_scope: onDay ? openOnDay(i, 'HNI', onDay) : null,
+        status_label: issueStatus(i, now, s),
+        hni_status: catStatus(i, 'HNI', now, s),
+        ret_status: catStatus(i, 'Retail', now, s),
+        open_on_scope: onDay ? issueOpenOnDay(i, onDay, s) : null,
+        ret_open_on_scope: onDay ? openOnDay(i, 'Retail', onDay, s) : null,
+        hni_open_on_scope: onDay ? openOnDay(i, 'HNI', onDay, s) : null,
         min_price_retail: minPrice(i, 'Retail'),
         min_price_hni: minPrice(i, 'HNI'),
         // Subscription is against the WHOLE issue, not against this branch, so it

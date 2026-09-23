@@ -184,24 +184,22 @@ test('a bid may be modified up to the cut-off and not after', () => {
   const bid = { category: 'Retail', qty: 10, price: 101, is_cutoff: false, editingId: 7 };
   const ctx = { settings: s, availableMargin: 1e7 };
 
-  /* The offer's own window is what closes bidding, not the desk-wide setting.
-   * This issue runs to 15:30 IST, so 15:14 and 15:15 are both inside it and the
-   * 15:15 setting no longer has anything to say about this bid. */
+  /* The desk cut-off decides the TIME, on the days the offer runs. This one is
+   * set to 15:15, so 15:14 is inside it and 15:15 is not — whatever hour is
+   * typed on the issue. Raise the setting and both go through; that is the point
+   * of it being a setting. */
   assert.deepEqual(d.validateBid(issue, bid, Object.assign({ now: at('09:44') }, ctx)), []);
-  assert.deepEqual(d.validateBid(issue, bid, Object.assign({ now: at('09:45') }, ctx)), []);
 
-  // 15:31 IST — past this offer's own close, and refused on that.
-  const after = d.validateBid(issue, bid, Object.assign({ now: at('10:01') }, ctx));
-  assert.ok(after.length, 'a bid after the offer closed was accepted: ' + after.join(' | '));
+  const after = d.validateBid(issue, bid, Object.assign({ now: at('09:45') }, ctx));
+  assert.ok(after.length, 'a bid at the cut-off was accepted: ' + after.join(' | '));
 
-  /* The desk-wide setting is still the gate where no offer is in play — the
-     dashboard clock and the cancel route ask it exactly this way. */
+  const later = Object.assign({}, ctx, { settings: Object.assign({}, s, { daily_cutoff: '18:00' }) });
+  assert.deepEqual(d.validateBid(issue, bid, Object.assign({ now: at('09:45') }, later)), [],
+    'raising the cut-off did not let the same bid through');
+
+  // The desk-wide state reads the same setting, and is what the clock shows.
   assert.equal(mh2.marketState(s, at('09:44')).open, true);
   assert.equal(mh2.marketState(s, at('09:45')).open, false);
-
-  // And with an offer in play, that same setting steps aside for its window.
-  assert.equal(mh2.marketState(s, at('09:45'),
-    { open: issue.ret_open, close: issue.ret_close }).open, true);
 });
 
 /* -------------------------------------------------------------------------

@@ -104,14 +104,15 @@ test('the tick check tests the price that will be stored', () => {
 
 /* --------------------------------------------------- the second clock -------- */
 
-test('a withdrawal is gated on the category window, not only the desk cut-off', () => {
+test('a withdrawal is gated on the category window, not only the desk cut-off', async () => {
   const bids = require('../lib/bidService');
   const issue = Object.assign({}, F.ISSUE);           // HNI 01-Sep, Retail 02-Sep
   // During the HNI window: nothing to say.
-  assert.equal(bids.cancelWindowMessage(issue, 'HNI', new Date('2026-09-01T11:00:00+05:30')), null);
-  // After it, but before the desk cut-off — the case that shipped open. The book
-  // would say cancelled while the exchange still held the bid.
-  const m = bids.cancelWindowMessage(issue, 'HNI', new Date('2026-09-02T14:00:00+05:30'));
+  assert.equal(await bids.cancelWindowMessage(issue, 'HNI', new Date('2026-09-01T11:00:00+05:30')), null);
+  // The day AFTER the HNI window — the case that shipped open. The book would say
+  // cancelled while the exchange still held the bid. The desk cut-off cannot reach
+  // this one: it moves the hour, never the day.
+  const m = await bids.cancelWindowMessage(issue, 'HNI', new Date('2026-09-02T14:00:00+05:30'));
   assert.match(m, /window for COALINDIA is closed/);
   assert.match(m, /Contact the OFS desk/);
   // Both portals and the desk consult it.
