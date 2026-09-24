@@ -312,6 +312,9 @@ async function sendCode() {
 function backToDetails() {
   setStep(1); showPane('details');
   showIdentifier(null);
+  // The help panel belongs to a code box that is waiting. Going back means there
+  // is nothing left to wait for.
+  showNoCodeHelp(false);
   refreshDetails();                         // what was typed is preserved, not cleared
   $('#idInput').focus();
   $('#idInput').select();
@@ -417,6 +420,54 @@ function tickResend() {
   var left = Math.ceil((S.resendAt - Date.now()) / 1000);
   if (left > 0) { btn.disabled = true; btn.textContent = 'Resend in ' + left + 's'; }
   else { btn.disabled = false; btn.textContent = 'Resend code'; }
+  showNoCodeHelp(left <= 0);
+}
+
+/**
+ * What to do when no code arrives.
+ *
+ * This page answers identically whether or not the identifier belongs to a
+ * client. That is deliberate and it is the right default: an unauthenticated
+ * caller must not be able to use a sign-in box to find out which of Ashika's
+ * accounts exist, and the per-identifier throttle cannot help, because a miss
+ * writes no challenge row and so never moves the counter for exactly the
+ * requests being used to enumerate. The desk can trade that away in Settings
+ * (Unknown sign-in identifier - generic or reveal); generic is the default.
+ *
+ * The cost of generic lands here. Somebody who mistyped their email, or who put
+ * a work address into the client door, waits at a code box that will never be
+ * filled and is told nothing at all - not even what to check.
+ *
+ * The fix is not to say whether the account exists. It is to say what is
+ * actually wrong when no code arrives, which is the same short list every time
+ * and gives nothing away: it is shown to EVERYONE once the cooldown expires,
+ * including the clients whose code is genuinely on its way.
+ */
+function showNoCodeHelp(on) {
+  var el = $('#otpNoCode');
+  if (!el) return;
+  /* Not on the branch door. That one names its own failures at step 1 - "not
+   * registered", "disabled by the desk" - because a branch address is a business
+   * address already printed on contract notes, so it never strands anybody here. */
+  if (!on || BR.ref) { el.classList.add('hide'); return; }
+  /* And only while there is a code box to be stranded at. The clock ticks every
+   * second and calls this, so without the pane test the panel came straight back
+   * after Use different details and sat over a form that is not waiting. */
+  var pane = $('#paneOtp');
+  if (!pane || pane.classList.contains('hide')) { el.classList.add('hide'); return; }
+  if (!el.innerHTML) {
+    el.innerHTML =
+      '<b>No code yet?</b>' +
+      '<ul>' +
+        '<li>It is sent to the mobile and email <b>registered on your trading account</b> — ' +
+          'not to a work address.</li>' +
+        '<li>The account has to be active. A dormant or closed account cannot bid.</li>' +
+        '<li>Branch, Authorised Partner and back-office users do not sign in here — ' +
+          'use <b>Branch / AP</b> above.</li>' +
+      '</ul>' +
+      '<div>Still nothing? Call your relationship manager.</div>';
+  }
+  el.classList.remove('hide');
 }
 
 /* ---------------- signed in ---------------- */

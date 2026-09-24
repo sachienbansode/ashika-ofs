@@ -269,3 +269,16 @@
    ordinary ink, because an investor has to be able to see what their bid costs. */
 .cp-f input[readonly][data-cutfill],
 .bb-f input[readonly][data-cutfill] { color: var(--ink, #0f172a); font-weight: 600; }
+
+/* ------------------------------------------------------------- no code yet --
+ * The sign-in page answers the same way whether or not the identifier belongs to
+ * a client, so an investor who mistyped waits at a code box with nothing to go
+ * on. This is what to check — shown to everyone once the cooldown expires, so it
+ * cannot be read as "that account does not exist".
+ */
+.nocode { margin-top: 12px; padding: 11px 13px; border-radius: 10px;
+  background: var(--wash, #f6f8fb); border: 1px solid var(--line, #e2e8f0);
+  font-size: 12px; line-height: 1.55; color: var(--muted, #64748b); }
+.nocode b { color: var(--ink, #0f172a); }
+.nocode ul { margin: 7px 0 7px; padding-left: 17px; }
+.nocode li { margin: 3px 0; }

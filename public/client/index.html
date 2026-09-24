@@ -103,6 +103,10 @@
           </div>
           <div id="demoOtp"></div>
           <div class="hint" id="otpHint" role="alert" aria-live="assertive"></div>
+          <!-- Shown to everyone once the resend cooldown expires, whether or not a
+               code was really sent - so it says what to check without saying
+               whether the account exists. -->
+          <div class="nocode hide" id="otpNoCode" role="status" aria-live="polite"></div>
         </div>
         <button class="btn btn-g btn-block" id="verifyBtn" type="button">
           <span class="lbl">Verify &amp; continue</span>
