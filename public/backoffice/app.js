@@ -3299,8 +3299,20 @@ function csvCell(v) {
 async function loadMargins() {
   try {
     var d = await api('/margin');
-    var r = d.margins || [];
-    STATE.margins = r;
+    STATE.margins = d.margins || [];
+    renderMargins();
+  } catch (e) { toast('Margins failed', e.message, 'bad'); }
+}
+
+function renderMargins() {
+  var r = marginRows();
+  var all = (STATE.margins || []).length;
+  if ($('#mgCount')) {
+    $('#mgCount').textContent = MG.q
+      ? inr(r.length, 0) + ' of ' + inr(all, 0) + ' client(s)'
+      : inr(all, 0) + ' client(s)';
+  }
+  try {
     pagedTable('margins', $('#marginTbl'), r, function (page) {
       return '<thead><tr><th>UCC</th><th>Client</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
       '<th>Source</th><th>Updated</th><th>By</th><th></th></tr></thead><tbody>' +
@@ -3315,7 +3327,9 @@ async function loadMargins() {
               '<button class="mini" data-mgdel="' + esc(m.client_ucc) + '" data-grant="ofs-masters">Delete</button> ' +
               '<button class="mini" data-mglog="' + esc(m.client_ucc) + '">History</button></td></tr>';
       }).join('') + '</tbody>';
-    }, 'clients', loadMargins, 'No margin snapshot loaded. RMS has no available-margin read API yet — set margins here or via CSV.');
+    }, 'clients', renderMargins, MG.q
+      ? 'No margin record matches “' + esc(MG.q) + '”. Add one, or clear the search.'
+      : 'No margin snapshot loaded. RMS has no available-margin read API yet — add one here or import a CSV.');
   } catch (e) { toast('Margins failed', e.message, 'bad'); }
 }
 
@@ -3355,100 +3369,149 @@ async function marginHistory(ucc) {
  * One record per client, so this is also how "create" and "modify" differ: if a
  * figure is already there, the form is editing it.
  */
-function showMarginFor(ucc) {
-  /* The list on screen is only the margin table. A client can be perfectly real
-   * and have no row in it — a new account, or one that was never in the day’s
-   * file — and until the fetch answered, all this panel could say about such a
-   * client was “Used ₹0 · Free ₹0”, which reads as a wrong figure rather than as
-   * “nothing recorded”. So the fetched client’s own figures, which come from the
-   * server with the client, win over the cached list whenever the UCC matches. */
-  var f = MG_FETCHED && MG_FETCHED.ucc === ucc ? MG_FETCHED : null;
-  var m = (STATE.margins || []).filter(function (x) { return x.client_ucc === ucc; })[0];
-  var has = f ? f.has : !!m;
-  var used = f ? f.used : (m ? m.used : 0);
-  var free = f ? f.free : (m ? m.free : 0);
-  $('#mgUsed').textContent = 'Used ' + (has || (f && f.used) ? rupee(used, 0) : '—');
-  $('#mgFree').textContent = 'Free ' + (has ? rupee(free, 0) : '—');
-  $('#mgSet').textContent = has ? 'Replace margin' : 'Save margin';
-  return m;
+/* ------------------------------------------------------------ margin screen --
+ *
+ * One list, searched, and every action on the row it belongs to.
+ *
+ * What was here before: a UCC box, a Fetch client button, an amount and a
+ * Save/Replace button across the top, above a list of every margin in the book.
+ * Two ways to change one figure — and the form, being furthest from the row the
+ * desk was actually reading, is the one that got used, with the row's own numbers
+ * off screen. The form is gone. Find the client, act on the line, confirm.
+ */
+var MG = { q: '' };
+
+/** Rows matching the search box, which is a plain contains on code and name. */
+function marginRows() {
+  var all = STATE.margins || [];
+  var q = String(MG.q || '').trim().toUpperCase();
+  if (!q) return all;
+  return all.filter(function (m) {
+    return String(m.client_ucc || '').toUpperCase().indexOf(q) >= 0 ||
+           String(m.client_name || '').toUpperCase().indexOf(q) >= 0;
+  });
+}
+
+function marginSearch() {
+  MG.q = $('#mgQ') ? $('#mgQ').value : '';
+  resetPage('margins');
+  renderMargins();
+}
+
+function marginClear() {
+  if ($('#mgQ')) $('#mgQ').value = '';
+  MG.q = '';
+  resetPage('margins');
+  renderMargins();
 }
 
 /**
- * Confirm who the UCC belongs to BEFORE any margin can be saved.
+ * The small window.
  *
- * A margin typed against a mistyped UCC is not an error anyone sees: it creates a
- * record for a client who does not exist, or worse, funds the wrong one. So Save
- * stays disabled until the client has been fetched and named, and any edit to the
- * UCC disables it again.
+ * Add and Modify are the same three fields and the same confirmation, so they are
+ * the same window — Modify simply opens it with the client already decided and the
+ * code locked, because a Modify that lets you change WHICH client you are editing
+ * is a Modify that funds the wrong one.
  */
-var MG_FETCHED = null;
+function marginModal(ucc, existing) {
+  var editing = !!ucc;
+  var veil = document.createElement('div');
+  veil.className = 'mdl-veil';
+  veil.innerHTML =
+    '<div class="mdl" role="dialog" aria-modal="true" aria-label="' +
+      (editing ? 'Modify margin' : 'Add margin') + '">' +
+      '<h3>' + (editing ? 'Modify margin — ' + esc(ucc) : 'Add margin') + '</h3>' +
+      '<div class="mdl-body">' +
+        '<label>Client code' +
+          '<input type="text" id="mmUcc" autocomplete="off" value="' + esc(ucc || '') + '"' +
+          (editing ? ' readonly' : '') + '></label>' +
+        '<div class="note" id="mmWho">' +
+          (editing ? esc(existing && existing.client_name ? existing.client_name : ucc)
+                   : 'Type the client code, then the amount.') + '</div>' +
+        '<label>Available margin' +
+          '<input type="number" id="mmAmt" step="1" min="0" value="' +
+          (existing ? esc(String(Number(existing.available))) : '') + '"></label>' +
+        (existing
+          ? '<div class="legend">Now ' + esc(rupee(existing.available, 0)) +
+            ' · used ' + esc(rupee(existing.used, 0)) +
+            ' · free ' + esc(rupee(existing.free, 0)) + '</div>'
+          : '') +
+        '<div class="note" id="mmNote" hidden></div>' +
+      '</div>' +
+      '<div class="mdl-foot"><button class="btn ghost" id="mmCancel">Cancel</button>' +
+        '<div class="sp"></div>' +
+        '<button class="btn" id="mmSave">' + (editing ? 'Save change' : 'Add margin') + '</button></div>' +
+    '</div>';
+  document.body.appendChild(veil);
+  var close = function () { veil.remove(); };
+  veil.addEventListener('click', function (e) { if (e.target === veil) close(); });
+  document.addEventListener('keydown', function esc2(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); }
+  });
+  $('#mmCancel').addEventListener('click', close);
 
-function marginGate() {
-  var ucc = $('#mgUcc').value.trim().toUpperCase();
-  var ok = MG_FETCHED && MG_FETCHED.ucc === ucc;
-  $('#mgSet').disabled = !ok;
-  if (!ok) {
-    $('#mgClient').textContent = ucc ? 'Fetch ' + ucc + ' first' : 'No client fetched';
-    $('#mgClient').classList.remove('ok-tag');
+  var say = function (text, bad) {
+    var n = $('#mmNote');
+    n.hidden = !text;
+    n.className = 'note' + (bad ? ' bad' : '');
+    n.textContent = text || '';
+  };
+
+  /* A margin typed against a mistyped code funds a client who does not exist, or
+   * worse, the wrong one. So on Add the code is resolved before it can be saved. */
+  var resolved = editing ? { ucc: ucc } : null;
+  if (!editing) {
+    $('#mmUcc').addEventListener('change', async function () {
+      var v = $('#mmUcc').value.trim().toUpperCase();
+      resolved = null;
+      if (!v) return;
+      try {
+        var d = await api('/clients/' + encodeURIComponent(v));
+        var c = d.client || {};
+        resolved = { ucc: v };
+        $('#mmWho').textContent = (c.name || v) +
+          (c.is_active === false ? ' · cannot bid: ' + (c.inactive_reason || 'not active') : '');
+      } catch (e2) {
+        $('#mmWho').textContent = e2.status === 404 ? 'No client found for ' + v : apiMessage(e2);
+      }
+    });
   }
-  showMarginFor(ucc);
-}
 
-async function fetchMarginClient() {
-  var ucc = $('#mgUcc').value.trim().toUpperCase();
-  if (!ucc) { toast('Enter a UCC', 'Type the client code first.', 'bad'); return; }
-  var btn = $('#mgFetch');
-  btn.disabled = true;
-  try {
-    var d = await api('/clients/' + encodeURIComponent(ucc));
-    var c = d.client || {};
-    var avail = Number(c.available_margin) || 0;
-    MG_FETCHED = {
-      ucc: ucc, name: c.name || '', active: c.is_active !== false,
-      // has: is there a margin record at all? A recorded zero is not the same
-      // thing as no record, and the button below says “Replace” only for the first.
-      has: c.margin_at != null,
-      available: avail,
-      used: Number(d.margin_used) || 0,
-      free: Number(d.free_margin != null ? d.free_margin : avail - (Number(d.margin_used) || 0))
-    };
-    $('#mgClient').textContent = (c.name || ucc) + (c.is_active === false ? ' · INACTIVE' : '');
-    $('#mgClient').classList.toggle('ok-tag', c.is_active !== false);
-    $('#mgClient').classList.toggle('warn-tag', c.is_active === false);
-    $('#mgSet').disabled = false;
-    showMarginFor(ucc);
-    // Start the field at what the client has now, so “Replace margin” is an edit
-    // of a real figure rather than a number typed from memory.
-    if (MG_FETCHED.has && !String($('#mgAmt').value).trim()) $('#mgAmt').value = avail;
-    $('#mgAmt').focus();
-  } catch (e) {
-    MG_FETCHED = null;
-    $('#mgSet').disabled = true;
-    $('#mgClient').textContent = e.status === 404 ? 'No client found for ' + ucc : apiMessage(e);
-    $('#mgClient').classList.add('warn-tag');
-    $('#mgClient').classList.remove('ok-tag');
-  } finally { btn.disabled = false; }
+  $('#mmSave').addEventListener('click', async function () {
+    var code = $('#mmUcc').value.trim().toUpperCase();
+    var amt = Number($('#mmAmt').value);
+    if (!code) return say('Enter the client code.', true);
+    if (!isFinite(amt) || amt < 0) return say('Enter an amount of 0 or more.', true);
+    if (!editing && (!resolved || resolved.ucc !== code)) {
+      return say('Press Tab to confirm the client code first.', true);
+    }
+    if (!window.confirm((editing ? 'Change the margin for ' : 'Set a margin for ') + code +
+        ' to ' + rupee(amt, 0) + '?' +
+        (existing ? '\n\nIt is ' + rupee(existing.available, 0) + ' now.' : '') +
+        '\n\nThe change is written to the margin history.')) return;
+    $('#mmSave').disabled = true;
+    try {
+      await api('/margin/' + encodeURIComponent(code),
+        { method: 'PUT', body: { available: amt, source: 'manual' } });
+      toast(editing ? 'Margin changed' : 'Margin added',
+        code + ' → ' + rupee(amt, 0) + (existing ? ' (was ' + rupee(existing.available, 0) + ')' : ''), 'ok');
+      close();
+      loadMargins();
+    } catch (e3) {
+      $('#mmSave').disabled = false;
+      say(apiMessage(e3), true);
+    }
+  });
+
+  setTimeout(function () {
+    var first = $(editing ? '#mmAmt' : '#mmUcc');
+    if (first && first.focus) first.focus();
+  }, 0);
 }
 
 function editMargin(ucc) {
-  $('#mgUcc').value = ucc;
-  var m = showMarginFor(ucc);
-  $('#mgAmt').value = m ? Number(m.available) : '';
-  // Modifying an existing record still confirms who it is — the name in the list is
-  // from the last fetch, and a client can be closed since.
-  fetchMarginClient();
-}
-
-async function setMargin() {
-  var ucc = $('#mgUcc').value.trim().toUpperCase(), amt = Number($('#mgAmt').value);
-  if (!ucc || !isFinite(amt)) { toast('Missing input', 'Enter a UCC and an amount.', 'bad'); return; }
-  var existing = (STATE.margins || []).filter(function (x) { return x.client_ucc === ucc; })[0];
-  try {
-    await api('/margin/' + encodeURIComponent(ucc), { method: 'PUT', body: { available: amt, source: 'manual' } });
-    toast(existing ? 'Margin replaced' : 'Margin set',
-      ucc + ' → ' + rupee(amt, 0) + (existing ? ' (was ' + rupee(existing.available, 0) + ')' : ''), 'ok');
-    $('#mgAmt').value = ''; loadMargins();
-  } catch (e) { toast('Failed', apiMessage(e), 'bad'); }
+  var m = (STATE.margins || []).filter(function (x) { return x.client_ucc === ucc; })[0];
+  marginModal(ucc, m || null);
 }
 
 async function deleteMargin(ucc, force) {
@@ -4473,9 +4536,11 @@ async function boot() {
     if (dl) return deleteMargin(dl.dataset.mgdel, false);
   });
   $('#mgReset').addEventListener('click', resetMargins);
-  $('#mgFetch').addEventListener('click', fetchMarginClient);
-  $('#mgUcc').addEventListener('input', marginGate);
-  $('#mgUcc').addEventListener('keydown', function (e) { if (e.key === 'Enter') fetchMarginClient(); });
+  bindIf('#mgGo', 'click', marginSearch);
+  bindIf('#mgClear', 'click', marginClear);
+  bindIf('#mgQ', 'input', marginSearch);
+  bindIf('#mgQ', 'keydown', function (e) { if (e.key === 'Enter') marginSearch(); });
+  bindIf('#mgAdd', 'click', function () { marginModal(null, null); });
   $('#sySchedOpen').addEventListener('click', function () { $('#sySched').classList.toggle('hide'); });
   $('#arGo').addEventListener('click', function () { resetPage('archive'); loadArchive(); });
   $('#arQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') { resetPage('archive'); loadArchive(); } });
@@ -4495,7 +4560,6 @@ async function boot() {
   });
   $('#miImport').addEventListener('click', importIssues);
   $('#miTemplate').addEventListener('click', function () { downloadText('ofs_issue_template.csv', ISSUE_TEMPLATE); });
-  $('#mgSet').addEventListener('click', setMargin);
   $('#mgImport').addEventListener('click', importMargins);
   $('#mgTemplate').addEventListener('click', function () { downloadText('ofs_margin_template.csv', MARGIN_TEMPLATE); });
   $('#setTbl').addEventListener('click', function (e) {

@@ -1080,6 +1080,89 @@ async function main() {
     return { detail: errs.slice(0, 110) };
   }, { expected: 'the cut-off moves the hour, never the day' });
 
+  await scenario('CUT-3', 'Withdrawal obeys the same cut-off as placing', async () => {
+    /* Withdrawal has two clocks and both must follow the setting: the desk's own
+     * state for today, and the offer's category window. A bid that can no longer
+     * be placed must no longer be withdrawn either - the file has gone to the
+     * exchange by then, and a book that says Cancelled while the exchange still
+     * holds the bid is found out at allotment. */
+    const hhmm = (offsetMin) => new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false
+    }).format(new Date(Date.now() + offsetMin * 60000));
+    const setCut = async (v) => {
+      const r = await PUT('/api/settings', { key: 'daily_cutoff', value: v }, { session: 'desk' });
+      if (r.status !== 200) throw new Error('could not set the cut-off to ' + v);
+    };
+
+    const iss = (await POST('/api/issues', {
+      symbol: 'WDRCUT' + Math.floor(Math.random() * 100000), company: 'Withdrawal Cut-off Ltd',
+      isin: 'INE522F01014', exchange: 'BSE', bse_scrip_code: '500013',
+      floor_price: 400, cut_price_min: 400, tick: 0.05, lot: 1, cutoff_flag: true,
+      hni_open: minusH(6), hni_close: plusH(2),
+      ret_open: minusH(6), ret_close: plusH(2)
+    }, { session: 'desk' })).json.issue;
+
+    await setCut('23:59');
+    const made = await bidWithConfirmation('POST', '/api/bids', {
+      issue_id: iss.id, client_ucc: 'ASH1001', exchange: 'BSE',
+      category: 'Retail', qty: 10, price: 400
+    }, 'place');
+    eq(made.status, 201, 'could not place the bid this scenario needs: ' + (made.text || '').slice(0, 200));
+    const id = made.json.bid.id;
+
+    // Cut-off behind us: the withdrawal is refused before the client is ever asked
+    // for a code, and it says the window rather than asking for confirmation.
+    await setCut(hhmm(-2));
+    const shut = await DEL('/api/bids/' + id, { reason: 'after the cut-off' }, { session: 'desk' });
+    eq(shut.status, 422, 'a bid was withdrawn after the cut-off (got ' + shut.status + ')');
+    eq((shut.json && shut.json.error), 'window_closed', 'refused, but not on the window');
+
+    // The desk keeps its hand-reconciliation override, deliberately.
+    const forced = await DEL('/api/bids/' + id,
+      { reason: 'reconciled by hand', force: 'true' }, { session: 'desk' });
+    must(forced.status === 428 || forced.status === 200,
+      'the desk force override no longer gets past the window: ' + forced.status);
+
+    // Move it ahead and the ordinary path works again, code and all.
+    await setCut(hhmm(+30));
+    const out = await bidWithConfirmation('DELETE', '/api/bids/' + id,
+      { reason: 'within the cut-off', client_ucc: 'ASH1001', issue_id: iss.id, bid_id: id }, 'cancel');
+    eq(out.status, 200, 'the withdrawal failed inside the cut-off: ' + (out.text || '').slice(0, 200));
+    eq(out.json.bid.status, 'Cancelled', 'the bid is not cancelled');
+
+    await setCut('23:59');
+    return { detail: 'refused 422 window_closed at ' + hhmm(-2) + ', withdrawn at ' + hhmm(30) };
+  }, { expected: 'a bid that cannot be placed must not be withdrawable either' });
+
+  await scenario('CUT-4', 'A withdrawal is still refused after the offer own day', async () => {
+    await PUT('/api/settings', { key: 'daily_cutoff', value: '23:59' }, { session: 'desk' });
+    const iss = (await POST('/api/issues', {
+      symbol: 'WDRDAY' + Math.floor(Math.random() * 100000), company: 'Closed Yesterday Ltd',
+      isin: 'INE522F01014', exchange: 'BSE', bse_scrip_code: '500014',
+      floor_price: 400, cut_price_min: 400, tick: 0.05, lot: 1, cutoff_flag: true,
+      hni_open: minusH(6), hni_close: plusH(2),
+      ret_open: minusH(6), ret_close: plusH(2)
+    }, { session: 'desk' })).json.issue;
+
+    const made = await bidWithConfirmation('POST', '/api/bids', {
+      issue_id: iss.id, client_ucc: 'ASH1002', exchange: 'BSE',
+      category: 'Retail', qty: 10, price: 400
+    }, 'place');
+    eq(made.status, 201, 'could not place the bid this scenario needs');
+
+    // Close the offer by moving its window into the past, the cut-off left wide open.
+    const upd = await PUT('/api/issues/' + iss.id,
+      { ret_open: minusH(50), ret_close: minusH(26), hni_open: minusH(50), hni_close: minusH(26) },
+      { session: 'desk' });
+    eq(upd.status, 200, 'could not close the offer');
+
+    const r = await DEL('/api/bids/' + made.json.bid.id, { reason: 'too late' }, { session: 'desk' });
+    eq(r.status, 422, 'a bid on an offer that closed yesterday was withdrawn');
+    must(/window for/i.test((r.json && r.json.message) || ''),
+      'the refusal does not name the category window: ' + (r.text || '').slice(0, 160));
+    return { detail: ((r.json && r.json.message) || '').slice(0, 110) };
+  }, { expected: 'the cut-off moves the hour, never the day - on the way out as on the way in' });
+
   /* ============================================================== settings */
   G('Settings and access control');
 

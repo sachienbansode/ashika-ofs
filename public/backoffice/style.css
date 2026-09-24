@@ -842,3 +842,79 @@ td.n.neg{color:var(--red);font-weight:650}
 /* The bottom bar is a phone idea. On anything wider the desktop strip is better:
    it shows every section at once and does not cost 56px of every screen. */
 @media (min-width: 721px) { .tabbar { display: none !important; } }
+
+/* ---------------------------------------------------------------- small window
+ *
+ * One modal, used where an action needs three fields and an answer rather than a
+ * screen: changing a client's margin, for instance. It is deliberately small and
+ * deliberately in the middle - a panel that opens at the top of a long list is a
+ * panel the desk scrolls away from and then edits blind.
+ */
+.mdl-veil { position: fixed; inset: 0; z-index: 70; background: rgba(16,24,40,.38);
+  display: flex; align-items: center; justify-content: center; padding: 16px; }
+.mdl-veil[hidden] { display: none; }
+.mdl { background: #fff; border: 1px solid var(--line, #e2e8f0); border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(16,24,40,.22); width: 100%; max-width: 420px;
+  max-height: calc(100vh - 32px); overflow: auto; }
+.mdl h3 { margin: 0; padding: 14px 16px 10px; font-size: 15px; }
+.mdl .mdl-body { padding: 0 16px 8px; }
+.mdl .mdl-body label { display: block; margin: 0 0 10px; font-size: 12px;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--muted, #64748b); }
+.mdl .mdl-body label input { display: block; width: 100%; margin-top: 4px;
+  text-transform: none; letter-spacing: normal; }
+.mdl .mdl-foot { display: flex; gap: 8px; padding: 10px 16px 14px; }
+.mdl .mdl-foot .sp { flex: 1; }
+
+/* --------------------------------------------------- Place bid, in one view --
+ *
+ * Everything needed to place an order — the fields, the total, and the three
+ * buttons — has to be on screen at once on an ordinary desk monitor. The form was
+ * laid out at reading density: 14px fields, generous rows, a hint under every box,
+ * and the Place bid button ended up below the fold. A desk placing an order at a
+ * quarter past three does not scroll to find the button, it mis-clicks the one it
+ * can see.
+ *
+ * So this tightens the ORDER-PLACEMENT half only: smaller type, shorter fields,
+ * less air between rows. The reference panels on the right and the bid list
+ * underneath keep their own sizes — they are read, not filled in.
+ *
+ * Fine pointers only. On a touch screen theme.css deliberately holds inputs at
+ * 16px (anything smaller makes iOS zoom the page on focus) and targets at 44px,
+ * and that rule wins: a phone scrolls, which is what phones do.
+ */
+@media (pointer: fine) and (min-width: 900px) {
+  #pane-place .pb-card { padding: 12px 14px; }
+  #pane-place .pb-card .bar { margin: 0 0 8px !important; }
+  #pane-place .sec { font-size: 14px; }
+
+  #pane-place .pb-row { gap: 7px 10px; }
+  #pane-place .pb-row .f { gap: 2px; }
+  #pane-place .pb-row .f .k { font-size: 9.5px; letter-spacing: .09em; }
+  #pane-place .pb-row .f select,
+  #pane-place .pb-row .f input { font-size: 12.5px; padding: 5px 8px; height: 30px; }
+
+  /* The hints are the biggest single cost: seven of them, each its own line. They
+     stay for the fields where the number has a rule — quantity, price, exchange —
+     and go where they only restated the label. */
+  #pane-place .pb-row .f .fh { font-size: 10.5px; line-height: 1.35; }
+  #pane-place .pb-row .f #pbUccHint { display: none; }
+
+  #pane-place .pb-total { margin-top: 8px; padding: 6px 10px; display: flex;
+    align-items: baseline; gap: 10px; }
+  #pane-place .pb-total .k { font-size: 9px; }
+  #pane-place .pb-total .v { font-size: 16px; }
+  #pane-place .pb-total .fh { margin: 0; font-size: 10px; }
+
+  #pane-place .pb-actions { gap: 6px 8px; margin-top: 8px; }
+  #pane-place .pb-actions .btn { padding: 6px 12px; font-size: 12.5px; }
+  #pane-place .pb-actions .fh { font-size: 10.5px; }
+
+  /* The panels on the right are consulted while the left is filled in, so they
+     have to fit beside it rather than run past it. */
+  #pane-place .place-side .card { padding: 10px 12px; }
+  #pane-place .place-side .sec { font-size: 11px; margin-bottom: 6px; }
+  #pane-place .place-side .pairs .k { font-size: 9px; }
+  #pane-place .place-side .pairs .v { font-size: 12px; }
+  #pane-place .place-side td,
+  #pane-place .place-side th { padding: 4px 8px; font-size: 11.5px; }
+}
