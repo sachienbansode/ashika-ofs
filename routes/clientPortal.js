@@ -28,8 +28,11 @@ router.use(requireClient);
  * Which clients is this session allowed to see?
  *
  * A client session answers with its own UCC. A branch or AP session answers with
- * every active client whose ask_clientmast.BRANCH_ID is that branch — read live from
- * LD, so a client moved to another branch this morning moves with it.
+ * every active AND DORMANT client whose ask_clientmast.BRANCH_ID is that branch —
+ * read live, so a client moved to another branch this morning moves with it.
+ *
+ * Dormant is in scope because it is still their client. It is NOT in scope for
+ * bidding: every write goes through the eligibility check, which asks for active.
  *
  * Returned as a list rather than a flag, because every query below filters on it and
  * a missing filter must produce an empty result, not everybody's.
@@ -272,7 +275,11 @@ router.get('/me/clients', async (req, res, next) => {
     let list = scope.map((u) => {
       const c = map.get(u) || {};
       return { ucc: u, name: c.name || null, category: c.category || null,
-               branch: c.branch_id || null, active: c.is_active === true };
+               branch: c.branch_id || null, branch_id: c.branch_id || null,
+               // The word itself, not just the yes/no, so the screen can say
+               // "Dormant" rather than the flat "Inactive" a boolean forces.
+               status: c.dwh_status || null,
+               active: c.is_active === true };
     });
     if (q) list = list.filter((c) => c.ucc.includes(q) || String(c.name || '').toUpperCase().includes(q));
 
@@ -478,7 +485,9 @@ async function requireOwnClient(req, res, ucc) {
     // 404, not 403: confirming that a UCC exists but belongs to someone else tells
     // a branch something about another branch's book.
     res.status(404).json({ error: 'not_your_client',
-      message: 'That client is not mapped to your branch, or is not active.' });
+      // No longer "or is not active": a dormant client IS mapped here and is
+      // refused further down, by name, for the reason that actually applies.
+      message: 'That client is not mapped to your branch.' });
     return false;
   }
   return true;
@@ -710,7 +719,10 @@ router.get('/me/clients/:ucc', async (req, res, next) => {
       client: {
         ucc: ucc, name: c.name || null, category: c.category || null,
         pan: masked.pan, mobile: masked.mobile, email: masked.email,
-        branch_id: c.branch_id || null, active: el.active === true,
+        branch_id: c.branch_id || null, branch: c.branch_id || null,
+        status: c.dwh_status || null,
+        active: el.active === true, is_active: el.active === true,
+        inactive_reason: el.reason || null,
         available_margin: available, margin_at: mv.margin_at
       },
       margin_used: consumed,

@@ -98,7 +98,9 @@ async function listAll() {
 }
 
 /**
- * The UCCs a branch may act for: active clients whose BRANCH_ID is this branch.
+ * The UCCs a branch may SEE: active and dormant clients whose BRANCH_ID is this
+ * branch. Bidding is narrower - a dormant client is on the list and is refused at
+ * the bid, by ldAdapter.eligibility, which asks for active and nothing else.
  * Returned as bare codes — identity comes from ldAdapter, which already knows how
  * to assemble a client from both tables and what not to select.
  */
@@ -114,13 +116,20 @@ async function uccsOfBranch(code) {
        JOIN ${ananta.DWH}.tbl_user_info u
          ON upper(btrim(u.ucc)) = upper(btrim(c.ctermcode))
       WHERE upper(btrim(COALESCE(c.branch_id,''))) = $1
-        AND ${ananta.CLIENT_ACTIVE_SQL}
+        AND ${ananta.CLIENT_VISIBLE_SQL}
         AND btrim(COALESCE(c.ctermcode,'')) <> ''
       ORDER BY 1`, [c]);
   return r.map((x) => x.ucc);
 }
 
-/** Does this branch hold this client? The check every branch-scoped write makes. */
+/**
+ * Does this branch hold this client?
+ *
+ * Ownership, not eligibility. This used to answer "no" for a dormant client, and
+ * the caller turns "no" into "That client is not mapped to your branch" - so an AP
+ * looking at their own dormant client was told it belonged to somebody else. The
+ * bid path asks separately whether they may bid, and refuses with the real reason.
+ */
 async function branchHasClient(code, ucc) {
   const c = normCode(code), u = normCode(ucc);
   if (!c || !u) return false;
@@ -131,7 +140,7 @@ async function branchHasClient(code, ucc) {
          ON upper(btrim(u.ucc)) = upper(btrim(c.ctermcode))
       WHERE upper(btrim(COALESCE(c.branch_id,''))) = $1
         AND upper(btrim(COALESCE(c.ctermcode,''))) = $2
-        AND ${ananta.CLIENT_ACTIVE_SQL}
+        AND ${ananta.CLIENT_VISIBLE_SQL}
       LIMIT 1`, [c, u]);
   return !!r;
 }

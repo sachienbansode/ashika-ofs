@@ -571,10 +571,23 @@ function placePage(i, mine) {
       '<label class="cp-f"><span class="k">Quantity</span>' +
         '<input type="number" min="1" step="1" data-bf="qty"' +
         (mine ? ' value="' + esc(String(mine.qty)) + '"' : '') + '></label>' +
-      '<label class="cp-f"><span class="k">Price</span>' +
-        '<input type="number" min="0" step="' + (Number(i.tick) || 0.05) + '" data-bf="price"' +
-        (mine && !mine.is_cutoff ? ' value="' + esc(String(Number(mine.price))) + '"' : '') +
-        (mine && !mine.is_cutoff ? '' : ' disabled') + ' placeholder="At or above floor"></label>' +
+      (function () {
+        /* A cut-off bid is not a bid without a price. It takes the price this
+         * offer sets — the floor, or the retail cut-off minimum where one is
+         * published — and it is held and margined at exactly that. The box used
+         * to be emptied and greyed out, so an investor choosing "Cut-off price"
+         * saw no price anywhere on the form and no total against their quantity.
+         * Now it shows the figure, readonly. */
+        var isCut = !mine || mine.is_cutoff;
+        var cp = cutoffPriceFor(i, cat);
+        return '<label class="cp-f"><span class="k">Price</span>' +
+          '<input type="number" min="0" step="' + (Number(i.tick) || 0.05) + '" data-bf="price"' +
+          (isCut ? (cp == null ? '' : ' value="' + esc(String(cp)) + '" data-cutfill="1"') +
+                   ' readonly placeholder="Set by the offer"'
+                 : ' value="' + esc(String(Number(mine.price))) + '"' +
+                   ' placeholder="At or above floor"') +
+          '></label>';
+      }()) +
       exchangeField(i, mine).replace('bb-f', 'cp-f') +
     '</div>' +
     '<div class="cp-total"><span class="k">Total value</span>' +
@@ -622,7 +635,59 @@ function renderPlace() {
   var keep = captureBidForms();
   box.innerHTML = placePage(i, mine || null);
   restoreBidForms(keep);
+  applyPriceMode(box.querySelector('.bidbox'));
   recalcTotal();
+}
+
+/**
+ * What a cut-off bid is priced at, for a category.
+ *
+ * Retail takes the published cut-off minimum where the offer has one and the floor
+ * otherwise; non-retail always takes the floor. The server computes the same two
+ * figures and sends them with the offer, so the screen never has to guess — which
+ * matters, because the total this draws and the margin the server holds have to be
+ * the same number.
+ *
+ * recalcTotal used to read min_price_retail whatever the category, so an HNI
+ * cut-off bid was totalled at the retail price.
+ */
+function cutoffPriceFor(i, cat) {
+  if (!i) return null;
+  var p = Number(cat === 'HNI' ? i.min_price_hni : i.min_price_retail);
+  if (isFinite(p) && p > 0) return p;
+  var f = Number(i.floor_price);
+  return isFinite(f) && f > 0 ? f : null;
+}
+
+/**
+ * Put the price box into the mode the bid type asks for.
+ *
+ * Cut-off: the offer's own price, readonly. Own price: empty and typeable, unless
+ * the investor already typed something that is theirs to keep. One function, called
+ * from both the Place bid page and the issues list, because two copies of this rule
+ * is how the two screens disagreed about whether a cut-off bid has a price.
+ */
+function applyPriceMode(box) {
+  if (!box) return;
+  var g = function (k) { return box.querySelector('[data-bf="' + k + '"]'); };
+  var price = g('price');
+  if (!price) return;
+  var i = ISSUES_BY_ID[box.getAttribute('data-bid-issue')];
+  var cutoff = g('type') && g('type').value === 'cutoff';
+  if (cutoff) {
+    var cp = cutoffPriceFor(i, (g('cat') && g('cat').value) || 'Retail');
+    price.value = cp == null ? '' : String(cp);
+    price.readOnly = true;
+    price.disabled = false;
+    price.setAttribute('data-cutfill', '1');
+  } else {
+    if (price.getAttribute('data-cutfill') === '1') {
+      price.value = '';
+      price.removeAttribute('data-cutfill');
+    }
+    price.readOnly = false;
+    price.disabled = false;
+  }
 }
 
 /** The derived total, so the figure is there before Check is pressed. */
@@ -635,7 +700,9 @@ function recalcTotal() {
   var i = ISSUES_BY_ID[box.getAttribute('data-bid-issue')];
   var qty = Number(g('qty') && g('qty').value) || 0;
   var cutoff = g('type') && g('type').value === 'cutoff';
-  var price = cutoff ? Number(i && i.min_price_retail) || 0 : Number(g('price') && g('price').value) || 0;
+  var cat = (g('cat') && g('cat').value) || 'Retail';
+  var price = cutoff ? Number(cutoffPriceFor(i, cat)) || 0
+                     : Number(g('price') && g('price').value) || 0;
   out.textContent = qty && price ? rupee(qty * price, 0) : '—';
 }
 
@@ -685,7 +752,10 @@ function fillSuggested(box) {
     return showVerdict(box, 'bad', ['This offer has no published floor price to work from yet.']);
   }
   g('type').value = 'limit';
+  // A suggested bid is a price bid, so the box becomes the investor's again.
   g('price').disabled = false;
+  g('price').readOnly = false;
+  g('price').removeAttribute('data-cutfill');
   g('price').value = sug.price;
   g('qty').value = sug.qty;
   var ex = g('exch');
@@ -1309,10 +1379,10 @@ async function boot() {
     var box = e.target.closest('.bidbox');
     if (!box) return;
     if (e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
-    if (e.target.matches('[data-bf="type"]')) {
-      var price = box.querySelector('[data-bf="price"]');
-      price.disabled = e.target.value === 'cutoff';
-      if (price.disabled) price.value = '';
+    // The category matters as well as the type: a cut-off bid switched from
+    // Retail to HNI is priced at the floor, not at the retail minimum.
+    if (e.target.matches('[data-bf="type"]') || e.target.matches('[data-bf="cat"]')) {
+      applyPriceMode(box);
     }
     recalcTotal();
   });
@@ -1350,12 +1420,9 @@ async function boot() {
     var box = e.target.closest('.bidbox');
     if (!box) return;
     if (e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
-    // A cut-off bid has no price of its own; leaving the field live would invite a
-    // number that is then silently discarded.
-    if (e.target.matches('[data-bf="type"]')) {
-      var price = box.querySelector('[data-bf="price"]');
-      price.disabled = e.target.value === 'cutoff';
-      if (price.disabled) price.value = '';
+    // A cut-off bid's price is the offer's, not the investor's — shown, readonly.
+    if (e.target.matches('[data-bf="type"]') || e.target.matches('[data-bf="cat"]')) {
+      applyPriceMode(box);
     }
   });
 

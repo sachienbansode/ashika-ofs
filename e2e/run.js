@@ -365,6 +365,17 @@ async function main() {
     return { detail: 'no margin row -> margin_at null, so the panel shows a dash, not zero' };
   }, { expected: 'no record and a recorded zero are different facts' });
 
+  await scenario('MGN-11', 'The margin list carries the branch code', async () => {
+    await PUT('/api/margin/ASH1001', { available: 500000, source: 'manual' }, { session: 'desk' });
+    const list = await GET('/api/margin', { session: 'desk' });
+    eq(list.status, 200, 'the margin list failed');
+    const row = (list.json.margins || []).find((m) => m.client_ucc === 'ASH1001');
+    must(row, 'ASH1001 has no margin row');
+    eq(row.branch, 'A016', 'the margin list sends no branch code');
+    must(row.client_name, 'the margin row lost its client name');
+    return { detail: 'ASH1001 · ' + row.client_name + ' · branch ' + row.branch };
+  }, { expected: 'the desk sorts its day by branch' });
+
   await scenario('MGN-10', 'A margin file written by a spreadsheet imports', async () => {
     const { csvParse, csvObjects, csvNum } = require('../public/backoffice/csv');
     const file = 'Client UCC,Available Margin\r\n' +
@@ -729,12 +740,12 @@ async function main() {
     return { detail: '4 desk endpoints all refused' };
   });
 
-  await scenario('AP-9', 'A branch book holds only its own ACTIVE clients', async () => {
+  await scenario('AP-9', 'A branch book holds its own clients and nobody else\'s', async () => {
     const list = await GET('/client/api/me/clients?limit=50', { session: 'ap' });
     eq(list.status, 200, 'the branch client list failed');
     const uccs = (list.json.clients || []).map((c) => c.ucc);
     must(!uccs.includes('ASH9001') && !uccs.includes('ASH7002'),
-      'an inactive account is in the branch book: ' + uccs.join(', '));
+      'a closed or statusless account is in the branch book: ' + uccs.join(', '));
     const r = await POST('/client/api/branch/bids/validate', {
       issue_id: ISSUE.id, client_ucc: 'ASH7002', exchange: 'BSE',
       category: 'Retail', qty: 100, price: 400
@@ -743,6 +754,47 @@ async function main() {
       'the partner path let an ineligible client through');
     return { detail: uccs.join(', ') + ' - and an ineligible client is refused' };
   }, { expected: 'one rule, every door' });
+
+  /* "Display Active and Dormant clients for respective AP, order can be placed
+   * for active clients only."
+   *
+   * The list and the bid gate were one piece of SQL, so a dormant client was not
+   * on the AP's screen at all - and typing the code answered "That UCC is not one
+   * of your clients", which is untrue and sends the AP to the wrong person. */
+  await scenario('AP-17', 'A dormant client is on the branch book, labelled, and not biddable', async () => {
+    const list = await GET('/client/api/me/clients?limit=50', { session: 'ap' });
+    eq(list.status, 200, 'the branch client list failed');
+    const row = (list.json.clients || []).find((c) => c.ucc === 'ASH1003');
+    must(row, 'the dormant client is missing from the branch book entirely');
+    eq(row.active, false, 'a dormant client is reported as able to bid');
+    eq(String(row.status || '').toLowerCase(), 'dormant',
+      'the row carries no status word, so the screen can only say "Inactive"');
+    eq(row.branch, 'A016', 'the row carries no branch code');
+
+    // Openable, so the AP can read the margin and the history.
+    const open = await GET('/client/api/me/clients/ASH1003', { session: 'ap' });
+    eq(open.status, 200, 'the AP cannot open its own dormant client (' + open.status + ')');
+    eq(open.json.client.active, false, 'the panel says a dormant client may bid');
+
+    // And still refused at the bid, by name.
+    const v = await POST('/client/api/branch/bids/validate', {
+      issue_id: ISSUE.id, client_ucc: 'ASH1003', exchange: 'BSE',
+      category: 'Retail', qty: 100, price: 400
+    }, { session: 'ap' });
+    must(v.status >= 400 || ((v.json && v.json.errors) || []).length,
+      'a dormant client was allowed to bid');
+    return { detail: 'listed as Dormant under A016, openable, and refused at the bid' };
+  }, { expected: 'seen is not the same as allowed' });
+
+  await scenario('AP-18', 'A closed account is still neither seen nor biddable', async () => {
+    const list = await GET('/client/api/me/clients?limit=50', { session: 'ap' });
+    const uccs = (list.json.clients || []).map((c) => c.ucc);
+    must(!uccs.includes('ASH9001'), 'an Inactive account reached the branch book');
+    must(!uccs.includes('ASH7002'), 'a blank status reached the branch book');
+    const open = await GET('/client/api/me/clients/ASH9001', { session: 'ap' });
+    eq(open.status, 404, 'a closed account was openable by the branch');
+    return { detail: 'widening the list to dormant did not widen it to everything' };
+  }, { expected: 'only dormant was added' });
 
   const API = (await POST('/api/issues', {
     symbol: 'APPORT' + Math.floor(Math.random() * 100000), company: 'Partner Portal Test Ltd',
@@ -1435,6 +1487,44 @@ async function main() {
     eq(first && first.ucc, 'ASH1001', 'the client whose code was typed is not the first row');
     return { detail: 'typed ASH1001, got ASH1001 at the top' };
   }, { expected: 'exact match, then prefix, then the rest' });
+
+  /* "Display Branch code in client listing in clients tab and in margin listing" */
+  await scenario('CLT-10', 'Every client row carries its branch code', async () => {
+    const r = await GET('/api/clients?limit=50', { session: 'desk' });
+    eq(r.status, 200, 'client list failed');
+    const rows = r.json.clients || [];
+    const one = rows.find((c) => c.ucc === 'ASH1001');
+    must(one, 'ASH1001 is not in the list');
+    eq(one.branch, 'A016', 'the desk list sends no branch code');
+    // A client held in the account record with no client-master row has no branch
+    // to show, and a null is the honest answer rather than a made-up code.
+    const orphan = rows.find((c) => c.ucc === 'ASH7001');
+    if (orphan) must(!orphan.branch, 'a client with no branch mapping was given one');
+    return { detail: 'ASH1001 -> A016, and an unmapped client carries none' };
+  }, { expected: 'the branch was selected but never sent' });
+
+  await scenario('CLT-11', 'The desk list names the status, not just a flag', async () => {
+    const r = await GET('/api/clients?limit=50', { session: 'desk' });
+    const row = (r.json.clients || []).find((c) => c.ucc === 'ASH1003');
+    must(row, 'the dormant client is missing from the desk list');
+    eq(String(row.status || '').toLowerCase(), 'dormant', 'no status word on the row');
+    eq(row.active, false, 'a dormant client is reported as able to bid');
+    const live = (r.json.clients || []).find((c) => c.ucc === 'ASH1001');
+    eq(String(live.status || '').toLowerCase(), 'active', 'an active client lost its word');
+    return { detail: 'ASH1003 Dormant (cannot bid) · ASH1001 Active' };
+  }, { expected: '"Inactive" was the only word a boolean could produce' });
+
+  await scenario('CLT-12', 'The desk refuses a bid for a dormant client, by name', async () => {
+    const r = await POST('/api/bids/validate', {
+      issue_id: ISSUE.id, client_ucc: 'ASH1003', exchange: 'BSE',
+      category: 'Retail', qty: 100, price: 400
+    }, { session: 'desk' });
+    const errs = (r.json && r.json.errors) || [];
+    must(r.status >= 400 || errs.length, 'the desk let a dormant client bid');
+    must(errs.join(' ').toLowerCase().includes('dormant') || r.status >= 400,
+      'the refusal does not say what is wrong: ' + errs.join(' | '));
+    return { detail: errs.length ? errs.join(' | ') : 'refused ' + r.status };
+  }, { expected: 'the desk is held to the same rule as the AP' });
 
   await scenario('PRD-1', 'The fixed test OTP is floored off in production', async () => {
     const otp = require('../lib/otp');

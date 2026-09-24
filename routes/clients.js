@@ -47,7 +47,15 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
      * path never looked at this field. It was purely a screen telling the desk the
      * opposite of the truth. */
     const merged = (await marginView.attach(page.clients, 'ucc'))
-      .map((c) => Object.assign({}, c, { active: c.is_active === true }));
+      .map((c) => Object.assign({}, c, {
+        active: c.is_active === true,
+        // The branch a client belongs to, under the name the partner endpoint
+        // already uses, so one table renders both shells with one column.
+        branch: c.branch_id || null,
+        // "Dormant" is a status the desk acts on differently from "Closed", and a
+        // boolean cannot tell them apart.
+        status: c.dwh_status || null
+      }));
     res.json({
       clients: maskRows(merged, canViewPII(req, PAGE)),
       total: page.total, limit: page.limit, offset: page.offset,
@@ -79,7 +87,9 @@ router.get('/:ucc', requirePage(PAGE), async (req, res, next) => {
       client: maskRow(Object.assign({}, client, {
         available_margin: available, margin_at: side.margin_at || null,
         // Both spellings, for the same reason as the list above.
-        active: client.is_active === true
+        active: client.is_active === true,
+        branch: client.branch_id || null,
+        status: client.dwh_status || null
       }), canViewPII(req, PAGE)),
       margin_used: used,
       free_margin: available - used,

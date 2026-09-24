@@ -26,8 +26,25 @@ const conn = make('ANANTA', 'ashika-ofs-app');
  */
 const CLIENT_ACTIVE_SQL = "lower(btrim(COALESCE(u.status, ''))) = 'active'";
 
+/**
+ * Whether a client may be SEEN, which is a different question.
+ *
+ * A dormant account is one of the branch's clients - it is on their book, it has a
+ * margin, it has a history - it simply cannot bid today. Scoping the branch's list
+ * to active only meant a dormant client vanished from the screen entirely, and
+ * typing their code answered "That UCC is not one of your clients", which is not
+ * true and sends the AP to the wrong person to fix it.
+ *
+ * So the list is active AND dormant, and every write still asks CLIENT_ACTIVE_SQL
+ * (through ldAdapter.eligibility) before a bid is allowed. Seen is not the same as
+ * allowed, and the two are separate strings here so they cannot be confused.
+ *
+ * Anything else - closed, suspended, blank - stays out of both.
+ */
+const CLIENT_VISIBLE_SQL = "lower(btrim(COALESCE(u.status, ''))) IN ('active', 'dormant')";
+
 module.exports = {
-  DWH, STG, ADMIN, CLIENT_ACTIVE_SQL,
+  DWH, STG, ADMIN, CLIENT_ACTIVE_SQL, CLIENT_VISIBLE_SQL,
   label: conn.label,
   getPool: conn.getPool,
   query: conn.query,

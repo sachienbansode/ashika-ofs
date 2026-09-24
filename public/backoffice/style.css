@@ -340,6 +340,16 @@ table.fit td .tag,table.fit td .chip{white-space:nowrap}
 .chip.open{background:rgba(11,177,131,.11);border-color:rgba(11,177,131,.25);color:#07845f}
 .chip.soon{background:rgba(217,138,31,.11);border-color:rgba(217,138,31,.28);color:#96610f}
 .chip.closed,.chip.grey{background:#f1f5f9;border-color:var(--hair);color:#6b7f9e}
+/* On the book, but not trading today — a dormant client is neither green nor grey. */
+.chip.warn{background:rgba(217,138,31,.11);border-color:rgba(217,138,31,.28);color:#96610f}
+/* A price the issue decides, shown rather than hidden. readonly, not disabled:
+   a greyed-out empty box reads as broken, a filled one that will not take a
+   keystroke reads as "this is the number". */
+#pbPrice[readonly],#pbPrice:read-only{background:#f1f5f9;color:var(--ink);cursor:default}
+/* The UCC field says what is wrong with the UCC, beside the UCC. */
+#pane-place .pb-row .f.bad input{border-color:var(--red);background:#fff5f5}
+#pane-place .pb-row .f .fh.bad{color:var(--red);font-weight:600}
+#pane-place .pb-row .f .fh.warn{color:#96610f;font-weight:600}
 .tag{background:#f1f5f9;border-color:var(--hair)}
 .tag.ret{background:rgba(11,177,131,.1);border-color:rgba(11,177,131,.22)}
 .tag.hni{background:rgba(36,63,142,.08);border-color:rgba(36,63,142,.18)}
@@ -898,6 +908,11 @@ td.n.neg{color:var(--red);font-weight:650}
      and go where they only restated the label. */
   #pane-place .pb-row .f .fh { font-size: 10.5px; line-height: 1.35; }
   #pane-place .pb-row .f #pbUccHint { display: none; }
+  /* ...except when it is carrying the reason the UCC is refused, or the reason
+     the client cannot bid. Compaction hides the hints to fit the form on one
+     screen; it must not hide the one sentence that stops a wasted bid. */
+  #pane-place .pb-row .f #pbUccHint.bad,
+  #pane-place .pb-row .f #pbUccHint.warn { display: block; }
 
   #pane-place .pb-total { margin-top: 8px; padding: 6px 10px; display: flex;
     align-items: baseline; gap: 10px; }

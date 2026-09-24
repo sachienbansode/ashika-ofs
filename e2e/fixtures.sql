@@ -58,6 +58,11 @@ VALUES ('A016','Andheri Branch','ASK-000001','B','Y','branch.a016@example.com','
 INSERT INTO dwh.tbl_user_info (ucc,name_asper_pan,pan,mobile,email,ucc_client_category,city,state,status)
 VALUES ('ASH1001','ACTIVE CLIENT ONE','AAAPZ1234A','9811100001','client1@example.com','Individual','Mumbai','MH','Active'),
        ('ASH1002','ACTIVE CLIENT TWO','AAAPZ1234B','9811100002','client2@example.com','Individual','Mumbai','MH','Active'),
+       -- On the branch's book and NOT trading. A dormant client is still their
+       -- client: they see it, they can read its margin and its history, and a bid
+       -- for it is refused by name rather than by pretending the code is a
+       -- stranger's. This is the row that used to vanish from the list entirely.
+       ('ASH1003','DORMANT CLIENT',   'AAAPZ1234C','9811100003','client4@example.com','Individual','Mumbai','MH','Dormant'),
        ('ASH9001','INACTIVE CLIENT',  'AAAPZ9999Z','9811109001','client9@example.com','Individual','Pune','MH','Inactive'),
        ('ASH2001','OTHER BRANCH CLI', 'AAAPZ2222C','9811102001','client3@example.com','Individual','Pune','MH','Active'),
        -- Held in the user table, but with NO row in the client master below. This
@@ -77,6 +82,7 @@ VALUES ('ASH1001','ACTIVE CLIENT ONE','AAAPZ1234A','9811100001','client1@example
 INSERT INTO stg.ask_clientmast (ctermcode,cclientname,mobile,email_id,client_category,branch_id,cstatus,activation_status)
 VALUES ('ASH1001','ACTIVE CLIENT ONE','9811100001','client1@example.com','Individual','A016','Active','Y'),
        ('ASH1002','ACTIVE CLIENT TWO','9811100002','client2@example.com','Individual','A016','Active','Y'),
+       ('ASH1003','DORMANT CLIENT',   '9811100003','client4@example.com','Individual','A016','Active','Y'),
        ('ASH9001','INACTIVE CLIENT',  '9811109001','client9@example.com','Individual','A016','Inactive','N'),
        ('ASH2001','OTHER BRANCH CLI', '9811102001','client3@example.com','Individual','A017','Active','Y'),
        ('ASH7002','BLANK STATUS',     '9811107002','client8@example.com','Individual','A016','','Y'),

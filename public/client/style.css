@@ -263,3 +263,9 @@
 @media (pointer: fine) and (min-width: 700px) {
   .cp-f input, .cp-f select { font-size: 12.5px; padding: 5px 8px; height: 30px; }
 }
+
+/* The cut-off price is a real number the bid is held at, not a greyed-out
+   placeholder. It cannot be typed into, so it is readonly — but it reads in
+   ordinary ink, because an investor has to be able to see what their bid costs. */
+.cp-f input[readonly][data-cutfill],
+.bb-f input[readonly][data-cutfill] { color: var(--ink, #0f172a); font-weight: 600; }

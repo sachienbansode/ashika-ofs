@@ -1187,7 +1187,7 @@ async function loadClients(reset) {
     renderClientTotals(d);
 
     $('#clientsTbl').innerHTML = list.length ? (
-      '<thead><tr><th>UCC</th><th class="hide-stack">Client</th><th>Category</th><th>Status</th>' +
+      '<thead><tr><th>UCC</th><th class="hide-stack">Client</th><th>Branch</th><th>Category</th><th>Status</th>' +
       '<th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
       '<th></th></tr></thead><tbody>' +
       list.map(function (c) {
@@ -1202,9 +1202,13 @@ async function loadClients(reset) {
         return '<tr><td class="m rowhead"><b>' + esc(c.ucc) + '</b>' +
             '<span class="sub"> · ' + esc(c.name || c.client_name || '—') + '</span></td>' +
           '<td class="hide-stack">' + esc(c.name || c.client_name || '—') + '</td>' +
+          // Which branch or partner the client sits under. The desk sorts its
+          // day by it, and an AP checking a code reads it to see the client is
+          // theirs at all.
+          '<td class="m" data-label="Branch">' + esc(clientBranch(c) || '—') + '</td>' +
           '<td data-label="Category">' + esc(c.category || '—') + '</td>' +
-          '<td data-label="Status"><span class="chip ' + (clientActive(c) ? 'open' : 'closed') + '">' +
-            (clientActive(c) ? 'Active' : 'Inactive') + '</span></td>' +
+          '<td data-label="Status"><span class="chip ' + clientStatusChip(c) + '">' +
+            esc(clientStatusLabel(c)) + '</span></td>' +
           '<td class="n" data-label="Available">' + inr(c.available_margin, 0) + '</td>' +
           // Used is only interesting when there is something behind it, and the
           // bid count is what makes the figure checkable against the book.
@@ -1216,7 +1220,10 @@ async function loadClients(reset) {
           // than offering a button that leads straight to a refusal.
           '<td class="act">' + (clientActive(c)
             ? '<button class="mini" data-bidfor="' + esc(c.ucc) + '">Place bid</button>'
-            : '<span class="sub">cannot bid</span>') + '</td></tr>';
+            // Listed, and plainly not biddable. A dormant client is on the book
+            // and says so rather than offering a button that ends in a refusal.
+            : '<span class="sub">' + esc(clientStatusLabel(c).toLowerCase() === 'dormant'
+                ? 'dormant — cannot bid' : 'cannot bid') + '</span>') + '</td></tr>';
       }).join('') + '</tbody>'
     ) : ('<tbody><tr><td class="empty">' +
          (CL.q ? 'No client matches that search.'
@@ -1310,6 +1317,7 @@ function clearBidForm(alsoClient) {
     var ucc = $('#pbUcc');
     if (ucc) ucc.value = '';
     PB_BLOCKED = null;
+    uccVerdict('', null);
     var panel = $('#pbClient');
     if (panel) {
       panel.className = 'note';
@@ -1701,14 +1709,42 @@ function refreshBidForm() {
                      : 'Cut-off bidding is switched off for this issue.');
 
   var isCut = typeSel.value === 'cutoff';
-  $('#pbPrice').disabled = isCut;
-  if (isCut) $('#pbPrice').value = '';
-
   var mp = BIDMATH.minPriceFor(i, cat);
-  $('#pbPriceHint').textContent = i
-    ? (mp == null ? 'No floor published yet for this issue.'
-                  : 'At or above ' + rupee(mp) + ', in steps of ' + inr(i.tick, 2) + '.')
-    : '';
+
+  /* A cut-off bid HAS a price — the issue's, not the desk's.
+   *
+   * The box used to be emptied and greyed out, which says "there is no price
+   * here". There is: a cut-off bid is held, valued and margined at the floor
+   * (at the retail cut-off minimum where the issue publishes one), by this
+   * screen, by the server and by the exchange. Leaving it blank meant the desk
+   * read a total of ₹0 against a bid that consumes real margin, and had to open
+   * the issue to find the figure everything else was already using.
+   *
+   * So it is shown, and it is readonly rather than disabled: a filled box that
+   * will not take a keystroke reads as "this is the number", where a greyed
+   * empty one reads as broken. It is never sent — readBidBox puts null in the
+   * body for a cut-off bid, and the server derives its own price regardless.
+   */
+  var pEl = $('#pbPrice');
+  if (isCut) {
+    pEl.value = mp == null ? '' : String(mp);
+    pEl.readOnly = true;
+    pEl.disabled = false;
+    pEl.dataset.cutfill = '1';
+  } else {
+    // Switching back to a price bid must not leave the issue's figure sitting
+    // there as though somebody had typed it.
+    if (pEl.dataset.cutfill === '1') { pEl.value = ''; delete pEl.dataset.cutfill; }
+    pEl.readOnly = false;
+    pEl.disabled = false;
+  }
+
+  $('#pbPriceHint').textContent = !i ? ''
+    : isCut
+      ? (mp == null ? 'No floor published yet — this bid has no value until there is one.'
+                    : 'Cut-off: this bid takes ' + rupee(mp) + ', the price this issue sets.')
+      : (mp == null ? 'No floor published yet for this issue.'
+                    : 'At or above ' + rupee(mp) + ', in steps of ' + inr(i.tick, 2) + '.');
 
   var price = isCut ? mp : (Number($('#pbPrice').value) || 0);
   var minQ = i ? BIDMATH.minQtyFor(i, cat, price, cfg) : 1;
@@ -1744,6 +1780,8 @@ function fillSuggestedBid() {
   if (!sug) { toast('No suggestion', 'This issue has no published floor to work from.', 'warn'); return; }
   $('#pbType').value = 'price';
   $('#pbPrice').disabled = false;
+  $('#pbPrice').readOnly = false;
+  delete $('#pbPrice').dataset.cutfill;
   $('#pbPrice').value = sug.price;
   $('#pbQty').value = sug.qty;
   refreshBidForm();
@@ -1759,11 +1797,37 @@ function onUccTyped() {
   if (uccTimer) clearTimeout(uccTimer);
   if (v.length < 3) {
     PB_BLOCKED = null;
+    uccVerdict('', null);
     $('#pbClient').className = 'note';
     $('#pbClient').textContent = 'Enter a UCC to see client, margin and limits.';
     return;
   }
+  uccVerdict('Checking ' + v + '…', null);
   uccTimer = setTimeout(function () { loadClientPanel(v); }, 350);
+}
+
+/**
+ * Say it at the field, not only in the panel.
+ *
+ * "That UCC is not one of your clients" lived in the Client & margin panel on the
+ * far side of the form — which on a desk screen is the part nobody is looking at
+ * while typing a code, and which the compact layout pushes further away still. So
+ * an AP typed a code, filled in a quantity and a price, pressed Validate, and only
+ * then learned the client was never theirs. The sentence now lands under the box
+ * the code was typed into, and the box itself turns red, the moment the lookup
+ * answers. The panel still carries the detail.
+ *
+ * kind: 'bad' for a refusal, 'warn' for on-the-book-but-not-biddable, null for
+ * an ordinary hint.
+ */
+function uccVerdict(text, kind) {
+  var hint = $('#pbUccHint');
+  var field = $('#pbUcc') ? $('#pbUcc').closest('.f') : null;
+  if (hint) {
+    hint.textContent = text || 'Client and margin appear as soon as this matches.';
+    hint.className = 'fh' + (kind ? ' ' + kind : '');
+  }
+  if (field) field.classList.toggle('bad', kind === 'bad');
 }
 
 /* The client's existing live bid on the selected issue, or null.
@@ -1792,8 +1856,21 @@ async function loadClientPanel(ucc) {
      * on our own books may bid, so an ineligible one says so here, in a banner, and
      * says why - a client missing from the client master is somebody's data problem,
      * a closed account is not. */
-    var blocked = c.is_active === false;
+    var blocked = clientActive(c) === false;
     PB_BLOCKED = blocked ? (c.inactive_reason || 'this client is not active') : null;
+    /* Under the box: the name when it is fine, the reason when it is not. A
+     * dormant client is a warning, not a refusal of the code — the code is right,
+     * the client simply cannot bid today. */
+    /* "Dormant — cannot bid" already says the status; repeating the server's
+     * "account status is dormant" underneath it is the same sentence twice. The
+     * reason is printed only when it adds something the label does not. */
+    var label = clientStatusLabel(c);
+    var extra = new RegExp('status is ' + label + '$', 'i').test(PB_BLOCKED || '')
+      ? '' : ' ' + String(PB_BLOCKED || '').charAt(0).toUpperCase() + String(PB_BLOCKED || '').slice(1) + '.';
+    uccVerdict(
+      blocked ? (c.name || ucc) + ' is ' + label.toLowerCase() + ' — cannot bid.' + extra
+              : (c.name || ucc) + (clientBranch(c) ? ' · ' + clientBranch(c) : ''),
+      blocked ? 'warn' : null);
     $('#pbClient').className = '';
     $('#pbClient').innerHTML =
       (blocked
@@ -1811,12 +1888,17 @@ async function loadClientPanel(ucc) {
       '</div>' + (d.pii_unmasked ? '' : '<div class="note">PII is masked. An explicit unmask grant is required to see full values.</div>');
   } catch (e) {
     PB_BLOCKED = null;
-    $('#pbClient').className = 'note';
     // No internal system names in anything a user reads. "LD" means nothing to a
     // desk and less to an AP; what they can act on is whether the UCC is theirs.
-    $('#pbClient').textContent = e.status === 404
+    var why = e.status === 404
       ? (PARTNER ? 'That UCC is not one of your clients.' : 'No client found for that UCC.')
-      : e.message;
+      : apiMessage(e);
+    uccVerdict(why, 'bad');
+    $('#pbClient').className = 'note bad';
+    $('#pbClient').innerHTML = '<b>' + esc(ucc) + '</b> — ' + esc(why) +
+      (e.status === 404 && PARTNER
+        ? ' Check the code, or find the client on the Clients tab.'
+        : '');
   }
 }
 
@@ -2002,7 +2084,9 @@ function startModify(id) {
   $('#pbQty').value = bid.qty;
   $('#pbType').value = bid.is_cutoff ? 'cutoff' : 'price';
   $('#pbPrice').value = bid.is_cutoff ? '' : bid.price;
-  $('#pbPrice').disabled = !!bid.is_cutoff;
+  // refreshBidForm, a few lines down, puts the issue's own price in the box for
+  // a cut-off bid and makes it readonly. Nothing here has to guess it.
+  $('#pbPrice').readOnly = !!bid.is_cutoff;
   $('#pbPlace').textContent = 'Update bid';
   $('#pbPlace').disabled = true;
   $('#pbResult').innerHTML = '';
@@ -2587,6 +2671,32 @@ function clientActive(c) {
   if (typeof c.active === 'boolean') return c.active;
   if (typeof c.is_active === 'boolean') return c.is_active;
   return true;
+}
+
+/**
+ * The word, not the boolean.
+ *
+ * A branch's list now carries dormant clients as well as active ones, and every
+ * one of them used to render as the flat "Inactive" a yes/no forces — which reads
+ * as "closed account" and is the wrong thing to tell somebody about a client who
+ * is simply not trading today. The status the account record actually carries is
+ * sent alongside the flag, so the chip can say it.
+ */
+function clientStatusLabel(c) {
+  var raw = String((c && c.status) || '').trim();
+  if (raw) return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  return clientActive(c) ? 'Active' : 'Inactive';
+}
+
+/** open = may bid, warn = on the book but not today, closed = neither. */
+function clientStatusChip(c) {
+  if (clientActive(c)) return 'open';
+  return /dormant/i.test(String((c && c.status) || '')) ? 'warn' : 'closed';
+}
+
+/** The branch a client belongs to, whichever endpoint answered. */
+function clientBranch(c) {
+  return (c && (c.branch || c.branch_id || c.branch_code)) || '';
 }
 
 function dtLocal(v) {
@@ -3314,11 +3424,12 @@ function renderMargins() {
   }
   try {
     pagedTable('margins', $('#marginTbl'), r, function (page) {
-      return '<thead><tr><th>UCC</th><th>Client</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
+      return '<thead><tr><th>UCC</th><th>Client</th><th>Branch</th><th class="n">Available</th><th class="n">Used</th><th class="n">Free</th>' +
       '<th>Source</th><th>Updated</th><th>By</th><th></th></tr></thead><tbody>' +
       page.map(function (m) {
         return '<tr><td class="m">' + esc(m.client_ucc) + '</td>' +
           '<td>' + esc(m.client_name || '—') + '</td>' +
+          '<td class="m">' + esc(clientBranch(m) || '—') + '</td>' +
           '<td class="n">' + inr(m.available, 0) + '</td><td class="n">' + inr(m.used, 0) + '</td>' +
           '<td class="n' + (Number(m.free) < 0 ? ' neg' : '') + '">' + inr(m.free, 0) + '</td>' +
           '<td>' + esc(m.source) + '</td>' +
@@ -3388,7 +3499,9 @@ function marginRows() {
   if (!q) return all;
   return all.filter(function (m) {
     return String(m.client_ucc || '').toUpperCase().indexOf(q) >= 0 ||
-           String(m.client_name || '').toUpperCase().indexOf(q) >= 0;
+           String(m.client_name || '').toUpperCase().indexOf(q) >= 0 ||
+           // A branch code in the box narrows the list to that branch's clients.
+           String(clientBranch(m)).toUpperCase().indexOf(q) >= 0;
   });
 }
 
@@ -3426,8 +3539,10 @@ function marginModal(ucc, existing) {
           '<input type="text" id="mmUcc" autocomplete="off" value="' + esc(ucc || '') + '"' +
           (editing ? ' readonly' : '') + '></label>' +
         '<div class="note" id="mmWho">' +
-          (editing ? esc(existing && existing.client_name ? existing.client_name : ucc)
-                   : 'Type the client code, then the amount.') + '</div>' +
+          (editing
+            ? esc((existing && existing.client_name ? existing.client_name : ucc) +
+                  (clientBranch(existing) ? ' · branch ' + clientBranch(existing) : ''))
+            : 'Type the client code, then the amount.') + '</div>' +
         '<label>Available margin' +
           '<input type="number" id="mmAmt" step="1" min="0" value="' +
           (existing ? esc(String(Number(existing.available))) : '') + '"></label>' +
@@ -3470,7 +3585,10 @@ function marginModal(ucc, existing) {
         var c = d.client || {};
         resolved = { ucc: v };
         $('#mmWho').textContent = (c.name || v) +
-          (c.is_active === false ? ' · cannot bid: ' + (c.inactive_reason || 'not active') : '');
+          (clientBranch(c) ? ' · branch ' + clientBranch(c) : '') +
+          (clientActive(c) === false
+            ? ' · ' + clientStatusLabel(c).toLowerCase() + ', cannot bid'
+            : '');
       } catch (e2) {
         $('#mmWho').textContent = e2.status === 404 ? 'No client found for ' + v : apiMessage(e2);
       }
@@ -3485,7 +3603,9 @@ function marginModal(ucc, existing) {
     if (!editing && (!resolved || resolved.ucc !== code)) {
       return say('Press Tab to confirm the client code first.', true);
     }
+    var whoLine = ($('#mmWho') && $('#mmWho').textContent) || '';
     if (!window.confirm((editing ? 'Change the margin for ' : 'Set a margin for ') + code +
+        (whoLine ? ' (' + whoLine + ')' : '') +
         ' to ' + rupee(amt, 0) + '?' +
         (existing ? '\n\nIt is ' + rupee(existing.available, 0) + ' now.' : '') +
         '\n\nThe change is written to the margin history.')) return;
@@ -3515,8 +3635,13 @@ function editMargin(ucc) {
 }
 
 async function deleteMargin(ucc, force) {
+  var m = (STATE.margins || []).filter(function (x) { return x.client_ucc === ucc; })[0];
   if (!force && !window.confirm('Remove the margin record for ' + ucc +
-      '?\n\nThe history is kept — only the current figure goes.')) return;
+      (m && m.client_name ? ' — ' + m.client_name : '') +
+      (m && clientBranch(m) ? ' (branch ' + clientBranch(m) + ')' : '') +
+      '?' +
+      (m ? '\n\nIt holds ' + rupee(m.available, 0) + ' now.' : '') +
+      '\n\nThe history is kept — only the current figure goes.')) return;
   try {
     await api('/margin/' + encodeURIComponent(ucc), { method: 'DELETE', body: force ? { force: 'true' } : {} });
     toast('Margin removed', ucc + ' has no margin record now.', 'ok');
