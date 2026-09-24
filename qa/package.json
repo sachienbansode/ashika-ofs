@@ -1,0 +1,16 @@
+{
+  "name": "ashika-ofs-qa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Front-end test suite for the Ashika OFS module. Separate from the app: its own dependencies, never installed on the app server, never loaded by server.js.",
+  "scripts": {
+    "test": "node run.js",
+    "test:headed": "node run.js --headed",
+    "make-plan": "node scripts/make-plan.js",
+    "report": "playwright show-report results/html"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "exceljs": "^4.4.0"
+  }
+}

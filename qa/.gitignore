@@ -1,0 +1,6 @@
+node_modules/
+results/
+# The plan workbook carries live credentials. Keep the filled-in copy out of the
+# repo entirely — pass its path with --book, or set OFS_QA_BOOK.
+plan/*.xlsx
+!plan/OFS_Test_Plan_TEMPLATE.xlsx
