@@ -34,7 +34,11 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
      * said how many there were, and the only way to reach client number 101 was to
      * guess a narrower search. Same shape the partner endpoint has always
      * returned, so one screen renders both. */
-    const page = await ld.searchPage(req.query.q, req.query.limit || 10, req.query.offset);
+    /* The status filter goes to SQL, not to the browser. This book is a hundred
+     * and thirty thousand clients paged ten at a time — a filter applied after
+     * the page was fetched would narrow ten rows and report the rest as absent. */
+    const page = await ld.searchPage(req.query.q, req.query.limit || 10,
+      req.query.offset, req.query.status);
     /* `active`, spelled the way the screen reads it.
      *
      * The comment above says this endpoint returns the same shape as the partner
@@ -53,13 +57,19 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
         // already uses, so one table renders both shells with one column.
         branch: c.branch_id || null,
         // "Dormant" is a status the desk acts on differently from "Closed", and a
-        // boolean cannot tell them apart.
-        status: c.dwh_status || null
+        // boolean cannot tell them apart. A BLANK status stays a blank string
+        // rather than collapsing to null: "no status recorded" is a real answer
+        // and the screen labels it as one, where null means "this payload is
+        // older than the field".
+        status: c.dwh_status == null ? null : String(c.dwh_status).trim()
       }));
     res.json({
       clients: maskRows(merged, canViewPII(req, PAGE)),
       total: page.total, limit: page.limit, offset: page.offset,
       q: String(req.query.q || '').trim() || null,
+      status: page.status,
+      // What the dropdown may offer, named by the side that does the filtering.
+      statuses: ld.STATUS_BUCKETS,
       // Across the rows on THIS page, not across every client on the platform —
       // the screen says which, because a total whose scope is unclear is worse
       // than none.
@@ -89,7 +99,7 @@ router.get('/:ucc', requirePage(PAGE), async (req, res, next) => {
         // Both spellings, for the same reason as the list above.
         active: client.is_active === true,
         branch: client.branch_id || null,
-        status: client.dwh_status || null
+        status: client.dwh_status == null ? null : String(client.dwh_status).trim()
       }), canViewPII(req, PAGE)),
       margin_used: used,
       free_margin: available - used,

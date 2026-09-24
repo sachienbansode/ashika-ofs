@@ -1253,19 +1253,55 @@ function renderIssueInfo() {
  * shown NEGATIVE when it is negative — that is margin cut after bids went live, and
  * somebody has to choose which bid gives way before the exchange file is built.
  */
-var CL = { offset: 0, limit: 10, q: '', total: 0 };
+var CL = { offset: 0, limit: 10, q: '', status: '', total: 0 };
+
+/** What the dropdown is set to, as the server spells it. */
+/**
+ * Trim the menu to what the viewer's scope can actually contain.
+ *
+ * A branch or an AP sees active and dormant clients and nothing else, by design.
+ * Leaving Closed, Inactive and Other on their dropdown offers three choices that
+ * can only ever answer "none" — which reads as missing data rather than as a
+ * filter that was never going to match.
+ */
+function trimStatusMenu() {
+  var el = $('#clStatus');
+  if (!el || !PARTNER) return;
+  ['closed', 'inactive', 'other'].forEach(function (v) {
+    var o = el.querySelector('option[value="' + v + '"]');
+    if (o) o.remove();
+  });
+}
+
+function clStatus() {
+  var el = $('#clStatus');
+  return el ? String(el.value || '').trim().toLowerCase() : '';
+}
+
+/** "Dormant" from "dormant" — for the count line, which is read as a sentence. */
+function clStatusLabel() {
+  var el = $('#clStatus');
+  if (!el || !el.value) return '';
+  var o = el.options[el.selectedIndex];
+  return o ? o.textContent : el.value;
+}
 
 async function loadClients(reset) {
   if (reset) CL.offset = 0;
   CL.q = (($('#clQ') && $('#clQ').value) || '').trim();
+  CL.status = clStatus();
   try {
     /* One paged request for both shells. The desk's endpoint used to be a capped
      * search with no offset and no total — the first hundred of tens of thousands,
      * with no way to reach the rest — so this had to fork. It does not any more:
      * both answer {clients, total, limit, offset} and ten rows is ten rows on a
      * phone and on a desk alike. */
+    /* Sent to the server, never applied here. The desk's book runs to six
+     * figures and this list is paged in SQL, so a filter applied to the ten rows
+     * already fetched would report every client past page one as absent. */
     var qs = '?limit=' + CL.limit + '&offset=' + CL.offset +
-             (CL.q ? '&q=' + encodeURIComponent(CL.q) : '');
+             (CL.q ? '&q=' + encodeURIComponent(CL.q) : '') +
+             (CL.status ? '&status=' + encodeURIComponent(CL.status) : '');
     var d = await api('/clients' + qs);
     var list = d.clients || [];
     CL.total = Number(d.total) || 0;
@@ -1282,9 +1318,15 @@ async function loadClients(reset) {
     // which of them is on the screen in front of them.
     var from = CL.total ? CL.offset + 1 : 0;
     var to = Math.min(CL.offset + CL.limit, CL.total);
+    /* Two narrowings, and the line has to name both — "no clients" under a
+     * Dormant filter reads as an empty book rather than as a filter nobody
+     * noticed was set. */
+    var lbl = clStatusLabel();
+    var tail = (CL.status ? ' · status ' + lbl : '') +
+               (CL.q ? ' · matching “' + CL.q + '”' : '');
     $('#clCount').textContent = CL.total
-      ? from + '–' + to + ' of ' + inr(CL.total, 0) + (CL.q ? ' matching' : '') + ' client(s)'
-      : (CL.q ? 'no client matches “' + CL.q + '”' : 'no clients');
+      ? from + '–' + to + ' of ' + inr(CL.total, 0) + ' client(s)' + tail
+      : 'no clients' + tail;
 
     renderClientTotals(d);
 
@@ -1328,9 +1370,14 @@ async function loadClients(reset) {
                 ? 'dormant — cannot bid' : 'cannot bid') + '</span>') + '</td></tr>';
       }).join('') + '</tbody>'
     ) : ('<tbody><tr><td class="empty">' +
-         (CL.q ? 'No client matches that search.'
-               : PARTNER ? 'No clients are mapped to your branch.'
-                         : 'No clients found.') +
+         (CL.q && CL.status
+            ? 'No client with status “' + esc(clStatusLabel()) + '” matches that search.'
+            : CL.q ? 'No client matches that search.'
+            : CL.status
+              ? (PARTNER ? 'None of your clients have status “' + esc(clStatusLabel()) + '”.'
+                         : 'No client has status “' + esc(clStatusLabel()) + '”.')
+            : PARTNER ? 'No clients are mapped to your branch.'
+                      : 'No clients found.') +
          '</td></tr></tbody>');
 
     renderClientsPager();
@@ -2817,6 +2864,11 @@ function clientActive(c) {
 function clientStatusLabel(c) {
   var raw = String((c && c.status) || '').trim();
   if (raw) return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  /* Recorded as blank is not the same as "not sent". A client with no status on
+   * the account record falls in the Other bucket, and labelling that row
+   * "Inactive" put it under the same word as the clients whose status IS
+   * Inactive — two filters, two different rows, one label. */
+  if (c && c.status === '') return 'Not set';
   return clientActive(c) ? 'Active' : 'Inactive';
 }
 
@@ -4828,7 +4880,17 @@ async function boot() {
   });
 
   bindIf('#clGo', 'click', function () { loadClients(true); });
-  bindIf('#clClear', 'click', function () { $('#clQ').value = ''; loadClients(true); });
+  // Changing the filter searches at once. Making the desk pick a status and THEN
+  // press Search is a second step for a control whose whole point is one click.
+  bindIf('#clStatus', 'change', function () { loadClients(true); });
+  trimStatusMenu();
+  // Clear means clear: the search box AND the filter. Leaving a status set behind
+  // a cleared search box is how a desk concludes half its book has vanished.
+  bindIf('#clClear', 'click', function () {
+    $('#clQ').value = '';
+    if ($('#clStatus')) $('#clStatus').value = '';
+    loadClients(true);
+  });
   bindIf('#clQ', 'keydown', function (e) { if (e.key === 'Enter') loadClients(true); });
   bindIf('#clPager', 'click', function (e) {
     var b = e.target.closest('[data-clpage]');

@@ -278,10 +278,23 @@ router.get('/me/clients', async (req, res, next) => {
                branch: c.branch_id || null, branch_id: c.branch_id || null,
                // The word itself, not just the yes/no, so the screen can say
                // "Dormant" rather than the flat "Inactive" a boolean forces.
-               status: c.dwh_status || null,
+               status: c.dwh_status == null ? null : String(c.dwh_status).trim(),
                active: c.is_active === true };
     });
     if (q) list = list.filter((c) => c.ucc.includes(q) || String(c.name || '').toUpperCase().includes(q));
+
+    /* Same filter the desk has, over a scope that is already narrowed to this
+     * branch. A branch's book only ever holds active and dormant clients, so the
+     * other buckets are answerable here and simply come back empty rather than
+     * being refused — "none of yours are closed" is a true answer. */
+    const want = String(req.query.status || '').trim().toLowerCase();
+    if (want && want !== 'all') {
+      const named = ld.STATUS_BUCKETS;
+      list = list.filter((c) => {
+        const s = String(c.status || '').trim().toLowerCase();
+        return want === 'other' ? named.indexOf(s) < 0 : s === want;
+      });
+    }
 
     // Paged on the SERVER. 121 clients is already too many to scroll, and the AP
     // with the biggest book has several hundred — a screen that renders all of them
@@ -303,6 +316,8 @@ router.get('/me/clients', async (req, res, next) => {
      */
     const withMargin = await marginView.attach(page, 'ucc');
     res.json({ actor: whoAmI(req), clients: withMargin, total, limit, offset, q: q || null,
+               status: want && want !== 'all' ? want : null,
+               statuses: ld.STATUS_BUCKETS,
                totals: marginView.totalsOf(withMargin),
                book: await marginView.totalsFor(scope) });
   } catch (e) { next(e); }
@@ -720,7 +735,7 @@ router.get('/me/clients/:ucc', async (req, res, next) => {
         ucc: ucc, name: c.name || null, category: c.category || null,
         pan: masked.pan, mobile: masked.mobile, email: masked.email,
         branch_id: c.branch_id || null, branch: c.branch_id || null,
-        status: c.dwh_status || null,
+        status: c.dwh_status == null ? null : String(c.dwh_status).trim(),
         active: el.active === true, is_active: el.active === true,
         inactive_reason: el.reason || null,
         available_margin: available, margin_at: mv.margin_at

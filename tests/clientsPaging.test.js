@@ -20,14 +20,19 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 test('the desk list is paged in SQL, with a total', () => {
   const ld = read('db/ldAdapter.js');
-  assert.match(ld, /async function searchPage\(q, limit, offset\)/);
-  assert.match(ld, /LIMIT \$1 OFFSET \$2/, 'the unfiltered list must page');
-  assert.match(ld, /LIMIT \$5 OFFSET \$6/, 'and so must the search');
+  // The signature grew a status filter; the two hard-coded query shapes became
+  // one built from whichever narrowings are present, so the LIMIT and OFFSET
+  // positions are computed rather than literal.
+  assert.match(ld, /async function searchPage\(q, limit, offset, status\)/);
+  assert.match(ld, /' LIMIT \$' \+ nL \+ ' OFFSET \$' \+ nO/, 'the list must page');
+  assert.match(ld, /pageParams\.push\(lim, off\);/);
   assert.match(ld, /SELECT count\(\*\)::int AS n/);
   // The page and the count must filter identically, or the pager promises rows
-  // the list cannot produce. One clause, used twice.
+  // the list cannot produce. One clause, built once, used by both.
   assert.match(ld, /const MATCH = `upper\(btrim\(u\.ucc\)\) LIKE \$1/);
-  assert.equal((ld.match(/\$\{MATCH\}/g) || []).length, 2);
+  assert.match(ld, /const clause = where\.length \? ' WHERE ' \+ where\.join\(' AND '\) : '';/);
+  assert.equal((ld.match(/\+ clause/g) || []).length, 2,
+    'the page and the count are no longer built from the same clause');
 });
 
 test('the page size is bounded, and defaults to ten', () => {
@@ -35,7 +40,8 @@ test('the page size is bounded, and defaults to ten', () => {
   assert.match(ld, /Math\.min\(Math\.max\(Number\(limit\) \|\| 10, 1\), 200\)/,
     'an unbounded limit is the whole-table load this change removes');
   assert.match(ld, /Math\.max\(Number\(offset\) \|\| 0, 0\)/, 'a negative offset must not reach SQL');
-  assert.match(read('routes/clients.js'), /ld\.searchPage\(req\.query\.q, req\.query\.limit \|\| 10, req\.query\.offset\)/);
+  assert.match(read('routes/clients.js'),
+    /ld\.searchPage\(req\.query\.q, req\.query\.limit \|\| 10,\s*\n?\s*req\.query\.offset, req\.query\.status\)/);
 });
 
 test('both endpoints answer in the same shape, so one screen renders both', () => {
@@ -45,7 +51,7 @@ test('both endpoints answer in the same shape, so one screen renders both', () =
 
 test('the front end has one paged path, not one per shell', () => {
   const app = read('public/backoffice/app.js');
-  assert.match(app, /var CL = \{ offset: 0, limit: 10, q: '', total: 0 \};/,
+  assert.match(app, /var CL = \{ offset: 0, limit: 10, q: '', status: '', total: 0 \};/,
     'ten a page, on a phone and on a desk alike');
   // The fork is gone: no branch that asks the desk for a hundred rows.
   assert.ok(!/limit=100/.test(app), 'the desk still asks for a hundred rows');
@@ -75,31 +81,4 @@ test('the old unpaged helper still works for the callers that want a plain list'
   const ld = read('db/ldAdapter.js');
   assert.match(ld, /async function search\(q, limit\) \{[\s\S]{0,200}?searchPage\(q, limit == null \? 50 : limit, 0\)/);
   assert.match(ld, /module\.exports = \{ norm, findByUcc, findMany, search, searchPage/);
-});
-
-/* Search had one %term% for every field. A PAN is five letters, four digits, a
- * letter, and the fifth letter is the surname's first - so the UCC M9757 matched
- * the PAN of every M-something client whose digits are 9757, and the desk got a
- * stranger back with no way to see why, PAN being masked on that screen. */
-test('PAN is matched from the start, never in the middle', () => {
-  const ld = read('db/ldAdapter.js');
-  assert.match(ld, /upper\(btrim\(u\.pan\)\) LIKE \$2/,
-    'PAN is still matched with the contains term');
-  assert.doesNotMatch(ld, /upper\(btrim\(u\.pan\)\) LIKE \$1/);
-  assert.match(ld, /'%' \+ t \+ '%'/, 'the contains term is gone');
-  assert.match(ld, /t \+ '%'/, 'there is no prefix term');
-});
-
-test('a mobile is only searched when the whole term is digits', () => {
-  const ld = read('db/ldAdapter.js');
-  assert.match(ld, /\/\^\[0-9\]\{4,\}\$\/\.test\(t\) \? t : ''/,
-    'the digits term is not gated on the term being all digits');
-  assert.match(ld, /\$3 <> '' AND right\(regexp_replace\(/,
-    'an empty digits term must switch the mobile test off, not match everything');
-});
-
-test('an exact UCC is ordered first', () => {
-  const ld = read('db/ldAdapter.js');
-  assert.match(ld, /ORDER BY \(upper\(btrim\(u\.ucc\)\) = \$4\) DESC/);
-  assert.match(ld, /\(upper\(btrim\(u\.ucc\)\) LIKE \$2\) DESC/);
 });

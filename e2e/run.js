@@ -1526,6 +1526,82 @@ async function main() {
     return { detail: errs.length ? errs.join(' | ') : 'refused ' + r.status };
   }, { expected: 'the desk is held to the same rule as the AP' });
 
+  /* "add dropdown filter for status before search" — over a book of 1,36,529
+   * clients paged ten at a time, so the only place this can be applied is SQL. */
+  await scenario('CLT-13', 'The status filter narrows the whole book, not the page', async () => {
+    const all = await GET('/api/clients?limit=50', { session: 'desk' });
+    eq(all.status, 200, 'client list failed');
+
+    const dormant = await GET('/api/clients?status=dormant&limit=50', { session: 'desk' });
+    eq(dormant.status, 200, 'the filtered list failed');
+    const rows = dormant.json.clients || [];
+    must(rows.length, 'the dormant filter returned nothing at all');
+    const wrong = rows.filter((c) => String(c.status || '').toLowerCase() !== 'dormant');
+    must(!wrong.length, 'a non-dormant client came back: ' +
+      wrong.map((c) => c.ucc + '=' + c.status).join(', '));
+    // The total is the count over the WHOLE book, not the rows on this page —
+    // a pager built from an unfiltered total offers pages that cannot be filled.
+    must(dormant.json.total < all.json.total,
+      'the filtered total (' + dormant.json.total + ') did not narrow the book (' +
+      all.json.total + ') — the filter is not reaching the count');
+    eq(dormant.json.status, 'dormant', 'the response does not say what it filtered by');
+    return { detail: rows.length + ' dormant of ' + all.json.total + ' client(s)' };
+  }, { expected: 'filtering in the browser would narrow ten rows and hide the rest' });
+
+  await scenario('CLT-14', 'Every bucket is reachable, including the blank one', async () => {
+    const seen = {};
+    for (const b of ['active', 'dormant', 'closed', 'inactive', 'other']) {
+      const r = await GET('/api/clients?status=' + b + '&limit=50', { session: 'desk' });
+      eq(r.status, 200, b + ' failed');
+      seen[b] = r.json.total;
+    }
+    // ASH7002 carries a blank status and ASH7001 has no client-master row at all;
+    // both have to be reachable or the desk cannot go and look at them.
+    const other = await GET('/api/clients?status=other&limit=50', { session: 'desk' });
+    const uccs = (other.json.clients || []).map((c) => c.ucc);
+    must(uccs.includes('ASH7002'), 'a blank status is in no bucket: ' + uccs.join(', '));
+    const whole = await GET('/api/clients?limit=1', { session: 'desk' });
+    const sum = Object.keys(seen).reduce((t, k) => t + seen[k], 0);
+    eq(sum, whole.json.total, 'the buckets do not add up to the book: ' + JSON.stringify(seen));
+    return { detail: JSON.stringify(seen) };
+  }, { expected: 'every client in exactly one bucket' });
+
+  await scenario('CLT-15', 'Searching and filtering at once is an AND', async () => {
+    const r = await GET('/api/clients?q=ASH100&status=active&limit=50', { session: 'desk' });
+    eq(r.status, 200, 'the combined query failed');
+    const rows = r.json.clients || [];
+    must(rows.length, 'searching and filtering together returned nothing');
+    must(rows.every((c) => c.ucc.startsWith('ASH100')), 'a row outside the search came back');
+    must(rows.every((c) => String(c.status || '').toLowerCase() === 'active'),
+      'a row outside the filter came back');
+    must(!rows.some((c) => c.ucc === 'ASH1003'),
+      'the dormant client matched the search and ignored the filter');
+    eq(r.json.total, rows.length, 'the count disagrees with the rows');
+    return { detail: rows.length + ' row(s): ' + rows.map((c) => c.ucc).join(', ') };
+  });
+
+  await scenario('CLT-16', 'A nonsense status widens the list rather than emptying it', async () => {
+    const r = await GET('/api/clients?status=banana&limit=1', { session: 'desk' });
+    const whole = await GET('/api/clients?limit=1', { session: 'desk' });
+    eq(r.status, 200, 'an unknown status errored');
+    eq(r.json.total, whole.json.total, 'an unknown status emptied the book');
+    eq(r.json.status, null, 'the response claims to have filtered by something it ignored');
+    return { detail: 'ignored, and said so' };
+  }, { expected: 'a stale bookmark must not read as "you have no clients"' });
+
+  await scenario('AP-19', 'A branch can filter its own book the same way', async () => {
+    const r = await GET('/client/api/me/clients?status=dormant&limit=50', { session: 'ap' });
+    eq(r.status, 200, 'the branch filter failed');
+    const uccs = (r.json.clients || []).map((c) => c.ucc);
+    must(uccs.includes('ASH1003'), 'the branch cannot filter to its dormant client');
+    must(!uccs.includes('ASH1001'), 'an active client came back under a dormant filter');
+    const act = await GET('/client/api/me/clients?status=active&limit=50', { session: 'ap' });
+    must(!(act.json.clients || []).some((c) => c.ucc === 'ASH1003'),
+      'the dormant client came back under an active filter');
+    return { detail: 'dormant ' + uccs.join(', ') + ' · active ' +
+      (act.json.clients || []).map((c) => c.ucc).join(', ') };
+  });
+
   await scenario('PRD-1', 'The fixed test OTP is floored off in production', async () => {
     const otp = require('../lib/otp');
     const saved = process.env.NODE_ENV;

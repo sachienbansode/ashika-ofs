@@ -248,6 +248,15 @@
   <section class="pane hide" id="pane-clients">
     <div class="card">
       <div class="bar">
+        <label class="inline"><span>Status</span>
+          <select id="clStatus" style="min-width:140px">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="dormant">Dormant</option>
+            <option value="closed">Closed</option>
+            <option value="inactive">Inactive</option>
+            <option value="other">Other or not set</option>
+          </select></label>
         <input type="search" id="clQ" placeholder="Search UCC or name" autocomplete="off"
                style="flex:1 1 260px">
         <button class="btn ghost" id="clGo" type="button">Search</button>

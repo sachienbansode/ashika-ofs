@@ -133,6 +133,29 @@ function searchTerms(term) {
   ];
 }
 
+/**
+ * The status buckets the desk filters by.
+ *
+ * Every client falls in exactly ONE of them: the four named statuses, and 'other'
+ * for everything else — which includes the blank status, because a client with no
+ * status recorded is precisely the row somebody needs to be able to go and look
+ * at, and a filter that can reach every row except those is a filter with a blind
+ * spot. 'all' and anything unrecognised filter nothing, so a stale bookmark or a
+ * hand-typed query string widens the list rather than emptying it.
+ */
+const STATUS_BUCKETS = ['active', 'dormant', 'closed', 'inactive'];
+
+const STATUS_COL = "lower(btrim(COALESCE(u.status, '')))";
+
+/** { sql, param } for one bucket, or null when nothing should be narrowed. */
+function statusClause(status, at) {
+  const s = String(status || '').trim().toLowerCase();
+  if (!s || s === 'all') return null;
+  if (s === 'other') return { sql: STATUS_COL + ' <> ALL($' + at + '::text[])', param: STATUS_BUCKETS };
+  if (STATUS_BUCKETS.indexOf(s) < 0) return null;
+  return { sql: STATUS_COL + ' = $' + at, param: s };
+}
+
 const FROM = `FROM ${DWH}.tbl_user_info u
               LEFT JOIN ${STG}.ask_clientmast c
                 ON upper(btrim(c.ctermcode)) = upper(btrim(u.ucc))`;
@@ -149,34 +172,59 @@ const FROM = `FROM ${DWH}.tbl_user_info u
  * would be free per row but still makes Postgres walk every matching row before
  * returning the first page, and on an unfiltered list that is the whole table.
  */
-async function searchPage(q, limit, offset) {
+/**
+ * One page of clients, and how many there are in total.
+ *
+ * The search term and the status filter are two independent narrowings and the
+ * WHERE is built from whichever are present, rather than the two hard-coded
+ * shapes this used to have. The status filter in particular HAS to be applied
+ * here: the desk's book is a hundred and thirty thousand clients paged ten at a
+ * time, so a filter applied in the browser would narrow the ten rows on screen
+ * and silently claim there were no dormant clients past page one.
+ *
+ * The page and the count are built from the same clause and the same parameters,
+ * or the pager promises a number of rows the list cannot produce.
+ */
+async function searchPage(q, limit, offset, status) {
   const lim = Math.min(Math.max(Number(limit) || 10, 1), 200);
   const off = Math.max(Number(offset) || 0, 0);
   const term = String(q || '').trim();
 
-  if (!term) {
-    const [list, n] = await Promise.all([
-      ananta.rows(SELECT + ` ORDER BY u.ucc LIMIT $1 OFFSET $2`, [lim, off]),
-      ananta.one(`SELECT count(*)::int AS n ` + FROM)
-    ]);
-    return { clients: list, total: (n && n.n) || 0, limit: lim, offset: off };
+  /* MATCH is written against $1 $2 $3, so the search terms go in first and
+   * everything after them is numbered from wherever they left off. */
+  const where = [], params = [];
+  if (term) {
+    const t = searchTerms(term);
+    params.push(t[0], t[1], t[2]);
+    where.push('(' + MATCH + ')');
   }
+  const st = statusClause(status, params.length + 1);
+  if (st) { params.push(st.param); where.push(st.sql); }
+  const clause = where.length ? ' WHERE ' + where.join(' AND ') : '';
 
-  /* $1 contains, $2 prefix, $3 digits - the three MATCH expects - then $4 the
-   * term exactly, for the ordering below. */
-  const t = searchTerms(term).concat([norm(term)]);
   /* An exact UCC first, then the ones that start with what was typed, then the
    * rest. Typing a whole client code and finding it third is its own small
    * failure, even when every row in the list does match it somehow. */
-  const ORDER = `ORDER BY (upper(btrim(u.ucc)) = $4) DESC,
-                          (upper(btrim(u.ucc)) LIKE $2) DESC,
-                          u.ucc`;
+  const pageParams = params.slice();
+  let order = ' ORDER BY u.ucc';
+  if (term) {
+    pageParams.push(norm(term));
+    order = ' ORDER BY (upper(btrim(u.ucc)) = $' + pageParams.length + ') DESC,' +
+            ' (upper(btrim(u.ucc)) LIKE $2) DESC, u.ucc';
+  }
+  pageParams.push(lim, off);
+  const nL = pageParams.length - 1, nO = pageParams.length;
+
   const [list, n] = await Promise.all([
-    ananta.rows(SELECT + ` WHERE ${MATCH} ${ORDER} LIMIT $5 OFFSET $6`,
-      [t[0], t[1], t[2], t[3], lim, off]),
-    ananta.one(`SELECT count(*)::int AS n ` + FROM + ` WHERE ${MATCH}`, [t[0], t[1], t[2]])
+    ananta.rows(SELECT + clause + order + ' LIMIT $' + nL + ' OFFSET $' + nO, pageParams),
+    ananta.one('SELECT count(*)::int AS n ' + FROM + clause, params)
   ]);
-  return { clients: list, total: (n && n.n) || 0, limit: lim, offset: off };
+  return {
+    clients: list, total: (n && n.n) || 0, limit: lim, offset: off,
+    // Echoed back so the screen can show what it is actually looking at, and so a
+    // value the server ignored does not leave the dropdown claiming otherwise.
+    status: st ? String(status).trim().toLowerCase() : null
+  };
 }
 
 /** The old shape, still used where a plain list is wanted (the bid form's lookup). */
@@ -221,4 +269,5 @@ async function enrich(rows, uccField, into) {
   });
 }
 
-module.exports = { norm, findByUcc, findMany, search, searchPage, exists, eligibility, enrich };
+module.exports = { norm, findByUcc, findMany, search, searchPage, exists, eligibility, enrich,
+  STATUS_BUCKETS, statusClause };

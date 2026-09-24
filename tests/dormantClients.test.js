@@ -74,9 +74,14 @@ test('the refusal no longer blames the status', () => {
 /* --------------------------------------------------------------- the screens */
 
 test('every client row carries the status word, not just a flag', () => {
-  assert.match(PORTAL, /status: c\.dwh_status \|\| null/, 'the partner list sends no status');
-  assert.match(DESK, /status: c\.dwh_status \|\| null/, 'the desk list sends no status');
-  assert.match(DESK, /status: client\.dwh_status \|\| null/, 'one client sends no status');
+  /* A blank status stays a blank STRING. "Recorded as blank" and "this payload is
+   * older than the field" are different answers and the screen labels them
+   * differently, so they must not both arrive as null. */
+  const keeps = /status: c\.dwh_status == null \? null : String\(c\.dwh_status\)\.trim\(\)/;
+  assert.match(PORTAL, keeps, 'the partner list sends no status');
+  assert.match(DESK, keeps, 'the desk list sends no status');
+  assert.match(DESK, /status: client\.dwh_status == null \? null : String\(client\.dwh_status\)\.trim\(\)/,
+    'one client sends no status');
 });
 
 test('the screen says Dormant rather than the flat Inactive', () => {
