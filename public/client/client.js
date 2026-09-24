@@ -41,12 +41,44 @@ function initials(n) {
   return String(n || '?').trim().split(/\s+/).slice(0, 2)
     .map(function (w) { return w[0]; }).join('').toUpperCase();
 }
-function toast(title, msg, kind) {
+/**
+ * A notification, bottom of the screen, that closes itself.
+ *
+ * Same shape as the desk's: a Close button for anyone who wants it gone now, and
+ * a timer that stops while the card is touched or focused so a reference number
+ * cannot vanish part-way through being written down.
+ */
+function toast(title, msg, kind, ms) {
   var b = document.createElement('div');
   if (kind) b.className = kind;
-  b.innerHTML = '<b>' + esc(title) + '</b><p>' + esc(msg || '') + '</p>';
+  b.setAttribute('role', 'status');
+  b.innerHTML = '<button class="tx" type="button" aria-label="Close">&times;</button>' +
+    '<b>' + esc(title) + '</b><p>' + esc(msg || '') + '</p>';
   $('#toast').appendChild(b);
-  setTimeout(function () { b.remove(); }, 6000);
+
+  var wait = ms == null ? 6000 : Number(ms);
+  var timer = null, left = wait, from = 0;
+  var go = function () {
+    if (timer) clearTimeout(timer);
+    left = Math.max(1500, left);
+    from = Date.now();
+    timer = setTimeout(function () { b.remove(); }, left);
+  };
+  var hold = function () {
+    if (!timer) return;
+    clearTimeout(timer); timer = null; left -= Date.now() - from;
+  };
+  b.addEventListener('mouseenter', hold);
+  b.addEventListener('focusin', hold);
+  b.addEventListener('touchstart', hold, { passive: true });
+  b.addEventListener('mouseleave', go);
+  b.addEventListener('focusout', go);
+  b.querySelector('.tx').addEventListener('click', function () {
+    if (timer) clearTimeout(timer);
+    b.remove();
+  });
+  if (wait > 0) go();
+  return b;
 }
 
 async function api(path, opts) {
@@ -494,8 +526,9 @@ function issueRow(i) {
   var hniOpen = i.hni_status === 'Open';
   var open = retOpen || hniOpen;
   var mine = i.my_bid;
-  var close = retOpen ? i.ret_close : hniOpen ? i.hni_close
-            : (new Date(i.ret_close) > new Date(i.hni_close) ? i.ret_close : i.hni_close);
+  var close = retOpen ? closeOf(i, 'Retail') : hniOpen ? closeOf(i, 'HNI')
+            : (new Date(closeOf(i, 'Retail')) > new Date(closeOf(i, 'HNI'))
+                 ? closeOf(i, 'Retail') : closeOf(i, 'HNI'));
 
   return '<tr>' +
     '<td class="rowhead"><b>' + esc(i.symbol) + '</b>' +
@@ -552,7 +585,8 @@ function placePage(i, mine) {
       fact('Tick', inr(i.tick, 2)) +
       fact('Lot', inr(i.lot || 1, 0)) +
       (Number(i.discount_pct) ? fact('Retail discount', inr(i.discount_pct, 2) + '%') : '') +
-      fact('Closes', '<span style="font-size:11px">' + dt(retOpen ? i.ret_close : i.hni_close) + '</span>') +
+      fact('Closes', '<span style="font-size:11px">' +
+        dt(closeOf(i, retOpen ? 'Retail' : 'HNI')) + '</span>') +
     '</div>' +
     '<div class="cp-row">' +
       '<label class="cp-f"><span class="k">Issue</span>' +
@@ -826,7 +860,7 @@ async function submitBid(box, otp) {
       ? await api(bidBase() + '/' + editing.id, { method: 'PUT', body: body })
       : await api(bidBase(), { method: 'POST', body: body });
     toast(editing ? 'Bid updated' : 'Bid placed',
-      (r.bid && r.bid.ref ? r.bid.ref + ' — ' : '') + 'your bid is with the OFS desk.', 'ok');
+      (r.bid && r.bid.ref ? r.bid.ref + ' — ' : '') + 'your bid is with the OFS desk.', 'ok', 20000);
     await loadIssues();
     /* loadIssues rebuilds every card, so the confirmation is written AFTER it —
      * into the fresh box, not the one that was just replaced. It stays on the
@@ -968,7 +1002,9 @@ function showCutoff(list, settings) {
   var closes = (list || [])
     .filter(function (i) { return i.ret_status === 'Open' || i.hni_status === 'Open'; })
     .map(function (i) {
-      var t = [i.ret_close, i.hni_close]
+      // The enforced close, not the typed one, or the strip counts down to a time
+      // the cut-off will not honour.
+      var t = [closeOf(i, 'Retail'), closeOf(i, 'HNI')]
         .map(function (v) { return v ? new Date(v).getTime() : NaN; })
         .filter(function (v) { return !isNaN(v) && v > now; });
       return t.length ? Math.min.apply(null, t) : NaN;
@@ -982,6 +1018,27 @@ function showCutoff(list, settings) {
   }
   el.textContent = (settings && settings.daily_cutoff) || el.textContent;
   if (label) label.textContent = 'Cut-off';
+}
+
+/**
+ * The close this offer will actually be held to.
+ *
+ * The issue master carries the time somebody typed; bidding stops at the desk
+ * cut-off, on every day the offer runs. Printing the typed time told an investor
+ * an offer took bids until 05:15 PM and then refused them at 15:15. The server
+ * sends the enforced close alongside the typed one; this reads it, and falls back
+ * to the typed value so nothing renders blank.
+ */
+function closeOf(i, cat) {
+  if (!i) return null;
+  return cat === 'HNI' ? (i.hni_close_eff || i.hni_close)
+                       : (i.ret_close_eff || i.ret_close);
+}
+
+/** When bidding on this offer stops today, or null once the offer is over. */
+function stopsToday(i, cat) {
+  if (!i) return null;
+  return cat === 'HNI' ? (i.hni_stops_today || null) : (i.ret_stops_today || null);
 }
 
 /** HH:MM in Indian time, whatever the device is set to. */

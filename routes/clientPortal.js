@@ -8,7 +8,7 @@ const { SCHEMA, rows, one, query } = require('../db/ofsAdapter');
 const { requireClient, requireSingleClient } = require('../middleware/clientAuth');
 const branches = require('../db/branchAdapter');
 const ba = require('../lib/branchAuth');
-const { issueStatus, catStatus, minPrice, validateBid, openOnDay, issueOpenOnDay,
+const { issueStatus, catStatus, minPrice, validateBid, openOnDay, issueOpenOnDay, windowFields,
         marketState, closedMessage } = require('../lib/domain');
 const settings = require('../lib/settings');
 const bids = require('../lib/bidService');
@@ -120,7 +120,7 @@ router.get('/issues', async (req, res, next) => {
       // on one we are not live on. The SERVER still refuses either way.
       settings: { retail_cap: s.retail_cap, hni_min: s.hni_min, daily_cutoff: s.daily_cutoff,
                   allowed_exchanges: s.allowed_exchanges },
-      issues: list.map((i) => Object.assign({}, i, {
+      issues: list.map((i) => Object.assign({}, i, windowFields(i, now, s), {
         status_label: issueStatus(i, now, s),
         ret_status: catStatus(i, 'Retail', now, s),
         hni_status: catStatus(i, 'HNI', now, s),
@@ -851,7 +851,7 @@ router.get('/me/dashboard', async (req, res, next) => {
     const list = issues.map((i) => {
       const issueQty = Number(i.issue_qty) || 0;
       const retQty = Number(i.retail_qty) || 0;
-      return Object.assign({}, i, {
+      return Object.assign({}, i, windowFields(i, now, s), {
         status_label: issueStatus(i, now, s),
         hni_status: catStatus(i, 'HNI', now, s),
         ret_status: catStatus(i, 'Retail', now, s),

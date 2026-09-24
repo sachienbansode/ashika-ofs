@@ -145,12 +145,20 @@ table.tbl th.n{font-family:var(--sans)}
 /* ---------- toast ---------- */
 .toast{position:fixed;right:18px;bottom:18px;z-index:70;display:flex;flex-direction:column;gap:9px}
 .toast>div{background:#fff;border:1px solid var(--line);border-left:3px solid var(--teal);border-radius:10px;
-  padding:11px 15px;max-width:360px;box-shadow:var(--shadow);animation:drop .22s ease}
+  padding:11px 15px;max-width:360px;box-shadow:var(--shadow);animation:drop .22s ease;position:relative}
 .toast>div.ok{border-left-color:var(--green)}
 .toast>div.bad{border-left-color:var(--red)}
 .toast>div.warn{border-left-color:var(--amber)}
-.toast b{display:block;font-size:13px;margin-bottom:2px}
+.toast b{display:block;font-size:13px;margin-bottom:2px;padding-right:18px}
 .toast p{margin:0;font-size:11.5px;color:var(--muted)}
+.toast p+p{margin-top:5px}
+.toast p.line{color:var(--ink);font-size:12px}
+.toast>div.ok{border-left-color:var(--green)}
+.toast>div.wide{max-width:420px}
+/* Close, not Dismiss - and a target big enough to hit without aiming. */
+.toast .tx{position:absolute;top:4px;right:6px;width:22px;height:22px;line-height:1;
+  border:0;background:none;color:var(--muted);font-size:17px;cursor:pointer;border-radius:6px}
+.toast .tx:hover{background:var(--wash,#f1f5f9);color:var(--ink)}
 @keyframes drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 
 /* ============================================================ touch devices ==

@@ -3,7 +3,7 @@
 const express = require('express');
 const { SCHEMA, rows, one } = require('../db/ofsAdapter');
 const { requirePage } = require('../middleware/pageAccess');
-const { issueStatus, catStatus, minPrice, openOnDay, issueOpenOnDay,
+const { issueStatus, catStatus, minPrice, openOnDay, issueOpenOnDay, windowFields,
         marketState, closedMessage } = require('../lib/domain');
 const settings = require('../lib/settings');
 
@@ -105,7 +105,7 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
       const issueQty = Number(i.issue_qty) || 0;
       const retQty = Number(i.retail_qty) || 0;
       const nonRetQty = issueQty && retQty ? issueQty - retQty : 0;
-      return Object.assign({}, i, {
+      return Object.assign({}, i, windowFields(i, now, s), {
         status_label: issueStatus(i, now, s),
         hni_status: catStatus(i, 'HNI', now, s),
         ret_status: catStatus(i, 'Retail', now, s),

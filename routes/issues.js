@@ -6,7 +6,7 @@ const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAcce
 const { maskRows } = require('../lib/pii');
 const settings = require('../lib/settings');
 const domain = require('../lib/domain');
-const { issueStatus, catStatus } = domain;
+const { issueStatus, catStatus, windowFields } = domain;
 const audit = require('../lib/audit');
 const dbErr = require('../lib/dbErrors');
 const { sourceFor, capability } = require('../lib/issueSource');
@@ -32,7 +32,7 @@ function decorate(r) {
     status_label: issueStatus(r, null, settings.cachedAll()),
     hni_status: catStatus(r, 'HNI', null, settings.cachedAll()),
     ret_status: catStatus(r, 'Retail', null, settings.cachedAll())
-  });
+  }, windowFields(r, null, settings.cachedAll()));
 }
 
 router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {

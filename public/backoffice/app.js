@@ -245,12 +245,63 @@ function chipCls(st) {
 function statusCls(s) {
   return s === 'Live' ? 'live' : s === 'Cancelled' ? 'canc' : s === 'Rejected' ? 'rej' : 'mod';
 }
-function toast(title, msg, kind) {
+/**
+ * A notification, bottom right, that closes itself.
+ *
+ * Every message the desk gets now comes out of here, including the one that used
+ * to be a banner pinned above the panes with a Dismiss button on it. Three things
+ * this has that the old setTimeout did not:
+ *
+ *   a Close button, so it can be got rid of at once rather than waited out;
+ *   a timer that STOPS while the pointer is on the card or anything in it holds
+ *   focus, because the desk reads a reference number back to a client on the
+ *   phone and a card that vanishes mid-sentence is worse than no card;
+ *   and it resumes with the time that was left, not from the top, so hovering
+ *   does not make it outstay its welcome either.
+ */
+function notify(opts) {
+  opts = opts || {};
   var box = document.createElement('div');
-  if (kind) box.className = kind;
-  box.innerHTML = '<b>' + esc(title) + '</b><p>' + esc(msg || '') + '</p>';
+  box.className = (opts.kind || '') + (opts.wide ? ' wide' : '');
+  // polite, not assertive: a confirmation should not interrupt a screen reader
+  // mid-word, and there is a Close button for anyone who wants it gone now.
+  box.setAttribute('role', 'status');
+  box.innerHTML =
+    '<button class="tx" type="button" aria-label="Close">&times;</button>' +
+    '<b>' + esc(opts.title || '') + '</b>' +
+    (opts.html || '<p>' + esc(opts.msg || '') + '</p>');
   $('#toast').appendChild(box);
-  setTimeout(function () { box.remove(); }, 6000);
+
+  var ms = opts.ms == null ? 6000 : Number(opts.ms);
+  var timer = null, left = ms, from = 0;
+  var go = function () {
+    if (timer) clearTimeout(timer);
+    // Never less than a second and a half on resume - a card that disappears the
+    // instant the pointer leaves it reads as a glitch.
+    left = Math.max(1500, left);
+    from = Date.now();
+    timer = setTimeout(function () { box.remove(); }, left);
+  };
+  var hold = function () {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    left -= Date.now() - from;
+  };
+  box.addEventListener('mouseenter', hold);
+  box.addEventListener('focusin', hold);
+  box.addEventListener('mouseleave', go);
+  box.addEventListener('focusout', go);
+  box.querySelector('.tx').addEventListener('click', function () {
+    if (timer) clearTimeout(timer);
+    box.remove();
+  });
+  if (ms > 0) go();
+  return box;
+}
+
+function toast(title, msg, kind) {
+  return notify({ title: title, msg: msg, kind: kind });
 }
 
 /* ================================================================ pagination ===
@@ -1063,16 +1114,63 @@ function canBidNow(i) {
 function issueOptionLabel(i, withWindow) {
   var base = i.symbol + ' — ' + (i.company || '');
   if (!withWindow) return base;
-  var which = i.ret_status === 'Open' ? { w: 'Retail', t: i.ret_close }
-            : i.hni_status === 'Open' ? { w: 'HNI', t: i.hni_close }
+  // The ENFORCED close, not the typed one: this label is the desk's first answer
+  // to "how long have I got", and it was quoting a time the cut-off overrules.
+  var which = i.ret_status === 'Open' ? { w: 'Retail', t: closeOf(i, 'Retail') }
+            : i.hni_status === 'Open' ? { w: 'HNI', t: closeOf(i, 'HNI') }
             : i.ret_status === 'Upcoming' ? { w: 'Retail opens', t: i.ret_open }
             : i.hni_status === 'Upcoming' ? { w: 'HNI opens', t: i.hni_open }
             : null;
   if (which) return base + '  ·  ' + which.w + ' ' + dt(which.t);
   // A closed issue still needs to be told apart from the other closed issue on the
   // same scrip — "COALINDIA · closed" twice is the same problem one line down.
-  var end = new Date(Math.max(new Date(i.ret_close), new Date(i.hni_close)));
+  var end = new Date(Math.max(new Date(closeOf(i, 'Retail')), new Date(closeOf(i, 'HNI'))));
   return base + '  ·  closed' + (isNaN(end) ? '' : ' ' + dt(end));
+}
+
+/** "2h 17m", from a count of minutes. */
+function hoursMins(mins) {
+  var n = Math.max(0, Math.floor(Number(mins) || 0));
+  var h = Math.floor(n / 60);
+  return (h ? h + 'h ' : '') + (n % 60) + 'm';
+}
+
+/**
+ * What the panel was never saying.
+ *
+ * The windows above it name the days this offer runs. What stops a bid at 16:58
+ * is not the offer, it is the desk's cut-off, which applies on EVERY one of those
+ * days — and the panel showed no trace of it. So the desk read "Retail to
+ * 25-Sep 05:15 PM", pressed Place bid, and was told the 15:15 cut-off had passed.
+ *
+ * The refusal's own words are reused rather than rewritten: the server already
+ * composes that sentence for the bid path, it rides along on the dashboard
+ * payload, and two hand-written copies of "why bidding is shut" would eventually
+ * say different things.
+ */
+function cutoffNote(i) {
+  // Once the offer itself is over there is no "today" left for it, and the status
+  // chip has already said so.
+  if (!stopsToday(i, 'Retail') && !stopsToday(i, 'HNI')) return '';
+  var m = STATE.market || null;
+  if (m && m.open === false) {
+    return '<div class="note warn" style="margin-top:9px"><b>No bid can be placed right now.</b> ' +
+      esc(m.message || 'Bidding is closed for today.') +
+      ' This offer itself runs to ' + esc(dt(latestClose(i))) + '.</div>';
+  }
+  var cut = (m && m.effectiveClose) ||
+            (STATE.settings && STATE.settings.daily_cutoff) || '15:15';
+  return '<div class="note" style="margin-top:9px">Bidding stops at <b>' + esc(cut) +
+    ' IST</b> on every day this offer runs' +
+    (m && m.minutesLeft ? ' — <b>' + hoursMins(m.minutesLeft) + '</b> left today' : '') +
+    '.</div>';
+}
+
+/** The later of the two enforced closes — when this offer is finally over. */
+function latestClose(i) {
+  var a = new Date(closeOf(i, 'Retail')), b = new Date(closeOf(i, 'HNI'));
+  var t = Math.max(isNaN(a) ? -Infinity : a.getTime(), isNaN(b) ? -Infinity : b.getTime());
+  return isFinite(t) ? new Date(t) : null;
 }
 
 /** The issue currently selected on the bid form. */
@@ -1111,7 +1209,10 @@ function renderIssueInfo() {
   box.innerHTML =
     '<div class="bar" style="margin-bottom:8px"><b>' + esc(i.symbol) + '</b>' +
       '<span class="tag">' + esc(exchLabel(i.exchange)) + '</span>' +
-      '<span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span></div>' +
+      '<span class="chip ' + chipCls(i.status_label) + '">' + esc(i.status_label) + '</span>' +
+      // "Both open" beside a refusal reads as a contradiction. The offer IS open;
+      // the desk has stopped for the day, and those are two different facts.
+      (marketShut() ? '<span class="chip closed">shut for today</span>' : '') + '</div>' +
     '<div class="grid2 pairs">' +
       f('Company', esc(i.company || '—')) +
       f('ISIN', '<span class="m">' + esc(i.isin || '—') + '</span>') +
@@ -1124,9 +1225,10 @@ function renderIssueInfo() {
       // Full width, and last: a timestamp clipped mid-stamp is the one thing on this
       // panel nobody can afford to misread, and a full-width row in the middle of a
       // grid breaks the alignment of everything under it.
-      f('HNI window', windowCell(i.hni_open, i.hni_close), 'row') +
-      f('Retail window', windowCell(i.ret_open, i.ret_close), 'row') +
+      f('HNI window', windowCell(i.hni_open, closeOf(i, 'HNI')), 'row') +
+      f('Retail window', windowCell(i.ret_open, closeOf(i, 'Retail')), 'row') +
     '</div>' +
+    cutoffNote(i) +
     (i.floor_price == null
       ? '<div class="note warn" style="margin-top:9px">The seller has not published a floor price for this issue yet. ' +
         'A cut-off bid cannot be valued against the retail cap until they do.</div>'
@@ -2028,41 +2130,45 @@ async function placeBid(withOtp) {
 /**
  * The confirmation for a bid that was accepted.
  *
- * It is a BANNER, above the panes, not a toast and not the form's result box.
- * Three reasons, all learned the hard way:
+ * It was a banner pinned above the panes, with a Dismiss button and no timer, and
+ * it read as part of the page rather than as something that had just happened -
+ * a block of text that appeared at the top and then sat there until somebody
+ * cleared it by hand. It is now a notification at the bottom with the rest of
+ * them, it closes itself, and the button on it says Close.
  *
- *   a modify jumps to the bid book, and endModify() clears the form's box on the
- *   way, so anything written there is gone before it is read;
- *   a toast clears itself after six seconds, and the desk reads this back to the
- *   client on the phone, which takes longer than that;
- *   the condition matters. This bid is in OUR book. The exchange blocks margin
- *   when the file is uploaded, against whatever the client has at that moment —
- *   not against the margin we checked when the form was filled. Saying so at the
- *   time is the difference between a condition and an excuse.
+ * Twenty seconds rather than the usual six, and the timer holds while the pointer
+ * is on it: the desk reads the reference number back to the client on the phone,
+ * and that takes longer than a normal toast lives. Nothing is lost when it does
+ * go - the bid is in the book, with its reference, a tab away.
+ *
+ * The condition still rides along. This bid is in OUR book; the exchange blocks
+ * margin when the file is uploaded, against whatever the client holds at that
+ * moment, not against the margin checked when the form was filled. Saying so at
+ * the time is the difference between a condition and an excuse.
  */
+var BID_DONE = null;
+
 function showBidDone(r, editing) {
-  var el = $('#bidDone');
-  if (!el || !r || !r.bid) return;
+  if (!r || !r.bid) return;
   var b = r.bid;
-  el.className = 'note good';
-  el.innerHTML =
-    '<b>' + esc(editing ? 'Bid modified' : 'Bid placed') + ' — ' + esc(b.ref) + '</b>' +
-    '<button class="mini" id="bidDoneX" type="button" style="float:right">Dismiss</button>' +
-    '<div style="margin-top:4px">' +
-      esc(b.client_ucc || '') + ' · ' + inr(b.qty, 0) + ' shares · ' +
-      (b.is_cutoff ? 'cut-off' : rupee(b.price, 2)) + ' · ' + rupee(b.value, 0) +
-      (b.exchange ? ' · ' + esc(b.exchange) : '') +
-    '</div>' +
-    '<div class="sub" style="margin-top:6px">' + esc(r.notice || BID_ACCEPTED_NOTE) + '</div>';
-  var x = $('#bidDoneX');
-  if (x) x.addEventListener('click', function () { clearBidDone(); });
+  clearBidDone();
+  BID_DONE = notify({
+    kind: 'ok', wide: true, ms: 20000,
+    title: (editing ? 'Bid modified' : 'Bid placed') + ' — ' + b.ref,
+    html: '<p class="line"><span class="m">' + esc(b.client_ucc || '') + '</span> · ' +
+        esc(inr(b.qty, 0)) + ' shares · ' +
+        esc(b.is_cutoff ? 'cut-off' : rupee(b.price, 2)) + ' · ' +
+        esc(rupee(b.value, 0)) + (b.exchange ? ' · ' + esc(b.exchange) : '') + '</p>' +
+      '<p>' + esc(r.notice || BID_ACCEPTED_NOTE) + '</p>'
+  });
 }
 
 function clearBidDone() {
+  if (BID_DONE) { BID_DONE.remove(); BID_DONE = null; }
+  // The banner is gone from the markup; this stays so an older cached shell that
+  // still has the element does not keep a stale confirmation on screen.
   var el = $('#bidDone');
-  if (!el) return;
-  el.className = 'hide';
-  el.innerHTML = '';
+  if (el) { el.className = 'hide'; el.innerHTML = ''; }
 }
 
 /* ---- modify an existing bid: the place-bid form doubles as the edit form ---- */
@@ -2554,6 +2660,32 @@ function windowCell(open, close) {
   if (!open && !close) return '<span class="sub">—</span>';
   return '<div class="win m">' + esc(dt(open)) + '</div>' +
          '<div class="win m to">' + esc(dt(close)) + '</div>';
+}
+
+/**
+ * The close this offer will actually be held to.
+ *
+ * The issue master carries the time somebody typed; the desk stops at the cut-off
+ * in Settings, on every day the offer runs. Those were different numbers on the
+ * same screen — the panel said "Retail 25-Sep 05:15 PM" while the refusal said
+ * "the desk cut-off of 15:15 IST has passed", and nothing on the screen explained
+ * which of the two governed. The server now sends the enforced close beside the
+ * typed one, and every screen that tells a desk WHEN prints the enforced one.
+ *
+ * Falls back to the typed value, so an issue fetched before this field existed
+ * still renders rather than showing a blank where a time belongs.
+ */
+function closeOf(i, cat) {
+  if (!i) return null;
+  return cat === 'HNI'
+    ? (i.hni_close_eff || i.hni_close)
+    : (i.ret_close_eff || i.ret_close);
+}
+
+/** When bidding on this offer stops today, or null once the offer itself is over. */
+function stopsToday(i, cat) {
+  if (!i) return null;
+  return cat === 'HNI' ? (i.hni_stops_today || null) : (i.ret_stops_today || null);
 }
 
 async function loadIssues() {

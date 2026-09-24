@@ -83,6 +83,12 @@ test('the desk confirmation outlives the screen it was created on', () => {
   assert.match(src, /function showBidDone\(/);
   assert.match(src, /if \(editing\) \{ endModify\(\); showTab\('book'\); \}\n\s*\/\/[\s\S]{0,200}?showBidDone\(r, editing\);/,
     'showBidDone must run AFTER endModify and the tab switch');
-  assert.match(read('public/backoffice/index.html'), /<div id="bidDone" class="hide"><\/div>/,
-    'the banner lives above the panes, not inside one');
+  // It used to be a banner pinned above the panes, which is one way of living
+  // outside them. It is now a notification in the fixed stack at the bottom of
+  // the screen, which is another - and that stack is a sibling of every pane, so
+  // switching tabs cannot take the confirmation with it.
+  assert.match(read('public/backoffice/index.html'), /<div class="toast" id="toast"><\/div>/,
+    'there is no notification stack for the confirmation to live in');
+  assert.match(read('public/backoffice/app.js'), /BID_DONE = notify\(\{/,
+    'the confirmation is not going through the notification stack');
 });
