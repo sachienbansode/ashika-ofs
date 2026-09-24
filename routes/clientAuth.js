@@ -47,27 +47,34 @@ router.post('/start', startLimiter, async (req, res) => {
 
   const cfg = await settings.all();
 
-  // Two answers are possible when nothing matches, and the choice is a real
-  // trade-off rather than a detail:
-  //
-  //   'reveal'  (default) says "no client found". Kinder — a client who mistypes a
-  //             code learns it now instead of waiting for an SMS that never comes,
-  //             and the desk stops fielding "I never got my OTP" calls. The cost is
-  //             that the endpoint confirms whether an identifier is an Ashika
-  //             client, so it is kept behind the throttle below.
-  //   'generic' answers identically either way, so the endpoint cannot be used to
-  //             discover which mobiles/emails belong to clients at all. Choose this
-  //             if enumeration is the bigger worry.
-  //
-  // Masters -> Settings -> "Unknown sign-in identifier".
-  /* Defaults to the GENERIC answer now. 'reveal' is friendlier — "no account for
-   * that mobile number" is exactly what an investor who mistyped needs — but as a
-   * default it hands an unauthenticated caller a yes/no oracle over Ashika's
-   * client base, and the per-identifier throttle cannot help: a miss inserts no
-   * challenge row, so the counter it reads never moves for exactly the requests
-   * being used to enumerate. The desk can turn it back on in Settings once they
-   * have weighed that. */
-  const reveal = String(cfg.client_login_unknown || 'generic') === 'reveal';
+  /* Two answers are possible when nothing matches, and which one is right depends
+   * entirely on whether misses can be made at scale.
+   *
+   *   'reveal'  (default) says "no account found for that email address", at step
+   *             one, and sends nothing. This is what an investor who mistyped
+   *             actually needs, and it is the only answer that is TRUE.
+   *   'generic' answers identically either way, so the endpoint cannot be used to
+   *             discover which mobiles or emails belong to clients.
+   *
+   * Masters -> Settings -> "Unknown sign-in identifier".
+   *
+   * This defaulted to generic, on the grounds that reveal hands an unauthenticated
+   * caller a yes/no oracle over Ashika's client base — and the argument was sound
+   * while nothing counted misses: throttled() counts CHALLENGE rows, a miss makes
+   * none, so the limiter never moved for exactly the requests being used to
+   * enumerate. It said so in its own comment.
+   *
+   * What it cost was paid by every real investor. A mistyped code, an address that
+   * belongs to no account, a staff member using the client door: all of them were
+   * carried to a code step, told a code might be on its way, and left at a box
+   * that would never be filled. That is a support call every time, and it is the
+   * one case a sign-in page exists to handle well.
+   *
+   * ca.missThrottled() closes the hole the old comment described, by counting
+   * misses per address in the attempt log rather than challenges in the OTP table.
+   * With that in place the honest answer is also the safe one, so it is the
+   * default; the desk can still choose generic. */
+  const reveal = String(cfg.client_login_unknown || 'reveal') === 'reveal';
 
   // The generic answer. Every success path returns exactly this, so a caller cannot
   // learn whether an identifier belongs to a client.
@@ -101,6 +108,16 @@ router.post('/start', startLimiter, async (req, res) => {
 
     if (!clients.length) {
       if (!reveal) return res.json(generic);               // deliberately indistinguishable
+
+      /* Naming a miss is safe for somebody who mistyped and unsafe at volume, so
+       * the volume is what is capped. The miss above is already in the log, so
+       * this count includes it. */
+      if (await ca.missThrottled(ip)) {
+        await ca.logAttempt({ event: 'blocked', ip, userAgent: ua, reason: 'miss_throttled' });
+        return res.status(429).json({ error: 'too_many_requests',
+          message: 'Too many unrecognised sign-in attempts from this connection. '
+                 + 'Please wait a few minutes, or contact your relationship manager.' });
+      }
 
       // Name what was actually typed back to them: "no client found" against a
       // number they did not enter is its own kind of confusing.

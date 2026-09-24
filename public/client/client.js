@@ -223,6 +223,24 @@ function identifierKind() {
   return UCC_RE.test(v) ? 'ucc' : null;
 }
 
+/* The exact identifier the server turned down, lower-cased, or null.
+ *
+ * Two different kinds of wrong live in this field and they do not clear at the
+ * same moment. SHAPE - "that is not a client code, a mobile or an email" - is a
+ * fact about what is in the box, and is recomputed on every keystroke. REFUSED -
+ * "well formed, and no account has it" - is a fact about a VALUE, and it stands
+ * until that value changes.
+ *
+ * Conflating them broke both directions. A well-formed address that belongs to
+ * nobody is still well formed, so refreshDetails set aria-invalid back to false
+ * the instant the refusal arrived and a screen reader was told the field was
+ * fine. And the red sentence was pinned the other way: the hint was only
+ * rewritten when it was NOT already marked bad, so once an error had been shown
+ * it stayed, word for word, while the investor corrected the address in front of
+ * it - a wrong answer to a question they had already fixed.
+ */
+var REFUSED = null;                 // { id, message }
+
 /**
  * Validity is shown as it is typed rather than on submit: a tick when a field is
  * well-formed, and Send stays disabled until both are. Nobody should press a button
@@ -232,19 +250,34 @@ function refreshDetails() {
   var el = $('#idInput');
   var kind = identifierKind();
   var typed = el.value.trim().length > 0;
+  var refused = REFUSED !== null && el.value.trim().toLowerCase() === REFUSED.id;
 
-  el.closest('.field').classList.toggle('valid', !!kind);
-  // Only complain once the field has been left, never mid-typing.
-  el.setAttribute('aria-invalid', String(!kind && typed && document.activeElement !== el));
+  // No green tick on a value the server has already turned down, however
+  // well-formed it is.
+  el.closest('.field').classList.toggle('valid', !!kind && !refused);
+  // Only complain about the SHAPE once the field has been left, never
+  // mid-typing. A refusal complains immediately, because it is already an answer.
+  el.setAttribute('aria-invalid',
+    String(refused || (!kind && typed && document.activeElement !== el)));
 
   // Say which one was recognised, so a typo in an email is obvious immediately.
   var hint = $('#detailsHint');
-  if (!hint.classList.contains('bad')) {
+  if (refused) {
+    /* Put the server's sentence back. Typing the refused value in again marked
+     * the field and took the tick away but left the neutral "Recognised as an
+     * email address" underneath it - so a screen reader was told the field was
+     * invalid while the screen said nothing was wrong. */
+    hint.className = 'hint bad';
+    hint.textContent = REFUSED.message;
+  } else {
+    hint.className = 'hint';
     hint.textContent = kind === 'mobile' ? 'Recognised as a mobile number.'
       : kind === 'email' ? 'Recognised as an email address.'
       : kind === 'ucc' ? 'Recognised as a client code.'
       : 'Use whichever you have — it must match your Ashika account.';
   }
+  // Still pressable on a refused value: an account activated this morning is a
+  // reason to try the same address again.
   $('#sendBtn').disabled = !kind;
 }
 
@@ -267,6 +300,7 @@ async function sendCode() {
   }
   hint.className = 'hint';
 
+  REFUSED = null;                     // this value is being asked about again
   busy('#sendBtn', true, 'Sending…');
   try {
     var r = await api('/client/auth/start', { method: 'POST', body: { identifier: identifier } });
@@ -297,8 +331,15 @@ async function sendCode() {
   } catch (e) {
     // A miss must NOT advance to the code step — there is no code coming. Stay put,
     // mark the field, and say so.
+    /* Only a refusal of the VALUE is remembered. "Too many requests" and "we could
+     * not send it just now" are about the moment, not about what was typed, so
+     * they clear on the next keystroke like any other transient message. */
+    var said = (e.body && e.body.message) || e.message || 'Could not send a code just now.';
+    if (e.body && e.body.error === 'no_client') {
+      REFUSED = { id: identifier.toLowerCase(), message: said };
+    }
     hint.className = 'hint bad';
-    hint.textContent = (e.body && e.body.message) || e.message || 'Could not send a code just now.';
+    hint.textContent = said;
     $('#idInput').setAttribute('aria-invalid', 'true');
     $('#idInput').focus();
     $('#idInput').select();

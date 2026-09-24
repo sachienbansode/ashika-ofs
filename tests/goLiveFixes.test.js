@@ -135,12 +135,20 @@ test('the desk login no longer says which addresses are real accounts', () => {
     'the hint must still come before the generic failure, but only for a correct password');
 });
 
-test('the investor login defaults to the answer that reveals nothing', () => {
-  assert.match(read('routes/clientAuth.js'), /cfg\.client_login_unknown \|\| 'generic'/);
-  assert.match(read('lib/settings.js'), /client_login_unknown: 'generic'/);
-  // And the desk can now change it — the code was built around a setting that was
-  // never in the editable list, so nobody could reach it.
-  assert.match(read('routes/settings.js'), /client_login_unknown: \{[\s\S]{0,400}?choices: \['generic', 'reveal'\]/);
+test('the investor login names a miss, and the desk can still choose otherwise', () => {
+  /* This defaulted to 'generic' — the same answer whether or not the identifier
+   * matched — on the grounds that naming a miss is a yes/no oracle over the
+   * client base. The reasoning overlooked the limiter already on the route:
+   * POST /client/auth/start is capped at ten per connection per fifteen minutes,
+   * and misses are now counted again under that. What 'generic' cost was paid by
+   * every investor who mistyped, and left at a code box that would never fill. */
+  assert.match(read('routes/clientAuth.js'), /cfg\.client_login_unknown \|\| 'reveal'/);
+  assert.match(read('lib/settings.js'), /client_login_unknown: 'reveal'/);
+  // A row in the table beats a code default, so the seed is turned back too.
+  assert.match(read('db/migrations/024_client_login_reveal.sql'), /SET value = 'reveal'/);
+  // And the desk can still change it — the code was built around a setting that
+  // was never in the editable list, so nobody could reach it.
+  assert.match(read('routes/settings.js'), /client_login_unknown: \{[\s\S]{0,600}?choices: \['generic', 'reveal'\]/);
 });
 
 /* ----------------------------------------------------------- PII ------------- */

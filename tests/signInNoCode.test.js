@@ -29,14 +29,19 @@ const fn = (src, name, len) => {
  * What was missing is anything telling the person what to check.
  * ------------------------------------------------------------------------- */
 
-test('the same answer either way is still the default, and still a choice', () => {
-  assert.match(AUTH, /const reveal = String\(cfg\.client_login_unknown \|\| 'generic'\) === 'reveal';/,
-    'the policy is no longer a setting, or no longer defaults to generic');
+test('the answer that reveals nothing is still there, as a choice', () => {
+  /* The default is 'reveal' now: a miss is named at step one and no code is sent.
+   * This panel is for the case that remains — a code that WAS sent and has not
+   * arrived — and for a desk that has chosen 'generic', where it is the only
+   * thing on the screen with anything useful to say. */
+  assert.match(AUTH, /const reveal = String\(cfg\.client_login_unknown \|\| 'reveal'\) === 'reveal';/,
+    'the policy is no longer a setting');
   assert.match(AUTH, /If that matches an active account, a code has been sent/,
-    'the generic wording changed — it must not hint at whether the account exists');
-  // Every success path returns the same object, or the shape itself is the oracle.
+    'the generic wording changed — under that setting it must not hint at whether the account exists');
+  // Under generic, every success path returns the same object, or the shape
+  // itself is the oracle.
   assert.match(AUTH, /Every success path returns exactly this/);
-  assert.match(SETTINGS, /client_login_unknown: \{[\s\S]{0,400}choices: \['generic', 'reveal'\]/,
+  assert.match(SETTINGS, /client_login_unknown: \{[\s\S]{0,600}choices: \['generic', 'reveal'\]/,
     'the desk can no longer choose');
 });
 

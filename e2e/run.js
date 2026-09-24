@@ -976,13 +976,34 @@ async function main() {
     return { detail: 'refused 401' };
   });
 
-  await scenario('CL-2', 'An unknown identifier gives the generic answer, not a yes/no', async () => {
-    const a = await POST('/client/auth/start', { identifier: 'ASH1001' });
+  /* "we should say invalid User on screen 1 only, in fact no otp to be sent."
+   *
+   * An identifier that belongs to nobody is refused where it was typed, and
+   * nothing is sent. The reason that is safe to say out loud is the miss limiter
+   * below: naming a miss is fine for somebody who mistyped and dangerous at
+   * volume, so the volume is what is capped. */
+  await scenario('CL-2', 'An identifier that matches no client is refused at step one', async () => {
+    const r = await POST('/client/auth/start', { identifier: 'nobody@example-not-a-client.com' });
+    eq(r.status, 404, 'an unknown address was carried to the code step');
+    eq(r.json.error, 'no_client', 'the refusal does not name itself');
+    must(/no active ashika account found for that email address/i.test(r.json.message || ''),
+      'the refusal does not say what was wrong: ' + (r.json.message || ''));
+    must(!r.json.ref, 'a challenge was created for an identifier that matches nobody');
+    return { detail: r.json.message };
+  }, { expected: 'it used to answer 200 and wait at a code box that would never be filled' });
+
+  await scenario('CL-2c', 'The desk can still choose the answer that reveals nothing', async () => {
+    await PUT('/api/settings', { key: 'client_login_unknown', value: 'generic' }, { session: 'desk' });
+    const a = await POST('/client/auth/start', { identifier: 'ASH1002' });
     const b = await POST('/client/auth/start', { identifier: 'NOSUCHCLIENT' });
-    eq(a.status, b.status, 'a real client and an invented one answer differently (' +
-      a.status + ' vs ' + b.status + ') — that is an enumeration oracle');
-    return { detail: 'both answered ' + a.status };
-  }, { expected: 'used to answer 200 vs 404' });
+    eq(a.status, b.status, 'under generic a real client and an invented one answer differently (' +
+      a.status + ' vs ' + b.status + ') — that is the oracle this setting exists to close');
+    eq(a.json.message, b.json.message, 'the two answers differ in wording');
+    await PUT('/api/settings', { key: 'client_login_unknown', value: 'reveal' }, { session: 'desk' });
+    return { detail: 'both answered ' + a.status + ', identically' };
+  }, { expected: 'the setting still works both ways' });
+
+
 
   /* The investor's own portal, checked against the desk rather than on its own.
    * Three verbs, one rule set: an investor who can place a bid can change it and
@@ -1000,6 +1021,21 @@ async function main() {
     must(jar.inv, 'no session cookie was set for the investor');
     return { detail: 'signed in as ' + ((v.json.client && v.json.client.ucc) || 'a client') };
   }, { expected: 'the code goes to the contacts on the client record, never to the request' });
+
+  /* "Client name is not available in csv download." The CSV is built from this
+   * endpoint, and a client session was skipping enrichment entirely - so the
+   * Client column came out empty on every row of an investor's own file. */
+  await scenario('CL-4a', 'An investor’s own rows carry their own name', async () => {
+    const r = await GET('/client/api/me/bids?all=1', { session: 'inv' });
+    eq(r.status, 200, 'the investor cannot read their own bids');
+    const rows = r.json.bids || [];
+    must(rows.length, 'no bids to check the name on');
+    const blank = rows.filter((x) => !x.client_name);
+    must(!blank.length, blank.length + ' of ' + rows.length +
+      ' row(s) came back with no client name — the CSV column is empty on those');
+    must(rows.every((x) => x.client_ucc === 'ASH1001'), 'a row outside the session appeared');
+    return { detail: rows.length + ' row(s), all named ' + rows[0].client_name };
+  }, { expected: 'a branch got names and the client did not' });
 
   await scenario('CL-4', 'The investor sees only their own account', async () => {
     const me = await GET('/client/api/me/bids?limit=50', { session: 'inv' });
@@ -1616,6 +1652,27 @@ async function main() {
       return { detail: 'setting "test" is honoured off production, ignored on it' };
     } finally { process.env.NODE_ENV = saved; }
   }, { expected: 'a desk setting must never weaken a production server' });
+
+  /* LAST in the run, deliberately: it exhausts the per-connection sign-in budget,
+   * and any scenario after it would be refused a code it had every right to.
+   *
+   * This is what makes naming a miss safe. Saying "no account found" is only a
+   * yes/no oracle if the question can be asked at volume, and it cannot: ten
+   * starts per connection per fifteen minutes at the HTTP layer, and a second,
+   * tighter count of MISSES in the attempt log underneath it. Walking Ashika's
+   * client codes at that rate would take months from one address. */
+  await scenario('SEC-4', 'Sign-in starts are capped per connection, so a miss cannot be asked at volume', async () => {
+    let named = 0, blocked = 0;
+    for (let i = 0; i < 16; i++) {
+      const r = await POST('/client/auth/start', { identifier: 'NOPE' + i + '@example.com' });
+      if (r.status === 404) named++;
+      if (r.status === 429) blocked++;
+    }
+    must(blocked > 0, 'sixteen unknown identifiers in a row were all answered — nothing caps enumeration');
+    must(named > 0, 'the very first miss was blocked, which would refuse an investor one typo');
+    must(named <= 10, named + ' misses were named before the cap bit — the budget is too wide');
+    return { detail: named + ' named, then ' + blocked + ' refused' };
+  }, { expected: 'an investor gets a few goes; a script gets ten' });
 
   /* ================================================================ report */
   const pass = results.filter((r) => r.status === 'PASS').length;

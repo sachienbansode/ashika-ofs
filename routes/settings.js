@@ -75,10 +75,12 @@ const EDITABLE = {
   },
   client_login_unknown: {
     label: 'Unknown sign-in identifier', kind: 'choice', choices: ['generic', 'reveal'],
-    hint: 'generic gives the same answer whether or not the client code, mobile or email belongs to '
-      + 'an account, so nobody can use the sign-in page to find out which ones exist. reveal says '
-      + '"no account found", which is friendlier to an investor who mistyped — and tells anyone '
-      + 'else the same thing. Default is generic.',
+    hint: 'reveal says "no account found" at the first step and sends no code, which is what an '
+      + 'investor who mistyped needs. Misses are counted per connection, so the page cannot be '
+      + 'used to work through a range of client codes. generic instead gives the same answer '
+      + 'whether or not the identifier belongs to an account — nothing can be learned from it at '
+      + 'all, at the cost of leaving anyone who mistypes at a code box that will never be filled. '
+      + 'Default is reveal.',
     check: (v) => ['generic', 'reveal'].includes(String(v)) || 'Use generic or reveal'
   },
   export_email_enabled: {

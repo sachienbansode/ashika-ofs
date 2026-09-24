@@ -211,10 +211,17 @@ router.get('/me/bids', async (req, res, next) => {
         ${all ? '' : `LIMIT $${p.length + 1} OFFSET $${p.length + 2}`}`,
       all ? p : p.concat([limit, offset]));
 
-    // Client names for a branch list; a branch reading a column of bare UCCs cannot
-    // tell which of its clients is which.
+    /* Client names. A branch reading a column of bare UCCs cannot tell which of
+     * its clients is which - and a client's own download had the same column,
+     * empty on every row.
+     *
+     * Enrichment used to be skipped entirely for a client session, on the grounds
+     * that a client knows who they are. True of the SCREEN, and wrong about the
+     * file: the CSV carries a Client column, so a record an investor keeps, or
+     * forwards to whoever does their tax, identified the account by a bare code
+     * and nothing else. It is their own name; there is nothing to withhold. */
     const withNames = req.portal.kind === 'client'
-      ? b
+      ? await ownName(req, b)
       : maskPortalRows(req, await ld.enrich(b, 'client_ucc'));
 
     // Margin is a per-client fact, so it is only meaningful on a client session.
@@ -261,6 +268,21 @@ router.get('/me/allotments', async (req, res, next) => {
     res.json({ actor: whoAmI(req), allotments: a });
   } catch (e) { next(e); }
 });
+
+/**
+ * The signed-in client's own name, on their own rows.
+ *
+ * One lookup for the session rather than ld.enrich's per-row merge: a client
+ * session has exactly one client in scope, and enrich would also pull back the
+ * PAN, mobile and email that none of these rows need.
+ */
+async function ownName(req, list) {
+  const ucc = String((req.portal && req.portal.ucc) || '').trim().toUpperCase();
+  if (!ucc || !(list || []).length) return list;
+  const c = await ld.findByUcc(ucc);
+  const name = (c && c.name) || null;
+  return list.map((r) => Object.assign({}, r, { client_name: name }));
+}
 
 /**
  * GET /client/api/me/clients — the clients this branch may act for.
