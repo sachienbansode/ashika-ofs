@@ -433,10 +433,13 @@ function showCTab(t, fromHash) {
   }
 
   $$('#cTabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.ctab === t); });
-  ['issues', 'bids', 'allot', 'rules'].forEach(function (k) {
+  ['issues', 'place', 'bids', 'allot', 'rules'].forEach(function (k) {
     var el = $('#cpane-' + k);
     if (el) el.classList.toggle('hide', k !== t);
   });
+  // Reached straight from the tab bar or from a refreshed URL, with no offer
+  // chosen: draw whatever is chosen, or the line saying how to choose one.
+  if (t === 'place') renderPlace();
   if (t === 'bids') loadBids(0);
   if (t === 'allot') loadAllotments();
   if (t === 'rules') renderRules($('#rulesBox'));
@@ -477,101 +480,166 @@ function chipFor(st) {
   return 'closed';
 }
 
-function issueCard(i) {
+/* ------------------------------------------------------------- the offers --
+ *
+ * One row per offer, and one thing to do with it.
+ *
+ * This was a stack of large cards with a whole bid form inside each, so an
+ * investor scrolled past three forms to read the fourth offer, and the form for
+ * the offer they wanted was never the one on screen. The list says what is on;
+ * Place bid takes them to the form, which lives on its own page now.
+ */
+function issueRow(i) {
   var retOpen = i.ret_status === 'Open';
   var hniOpen = i.hni_status === 'Open';
-  var close = retOpen ? new Date(i.ret_close) : hniOpen ? new Date(i.hni_close)
-            : new Date(Math.max(new Date(i.ret_close), new Date(i.hni_close)));
+  var open = retOpen || hniOpen;
   var mine = i.my_bid;
+  var close = retOpen ? i.ret_close : hniOpen ? i.hni_close
+            : (new Date(i.ret_close) > new Date(i.hni_close) ? i.ret_close : i.hni_close);
 
-  return '<div class="issue">' +
-    '<div class="hd">' +
-      '<div style="flex:1">' +
-        '<div class="sym">' + esc(i.symbol) + '</div>' +
-        '<div class="co">' + esc(i.company) + '</div>' +
-        '<div class="isin">' + esc(i.isin) + '</div>' +
-      '</div>' +
-      '<span class="chip ' + chipFor(i.status_label) + '">' +
-        (retOpen || hniOpen ? '<span class="dot live"></span>' : '') + esc(i.status_label) + '</span>' +
-    '</div>' +
-    '<div class="facts">' +
-      '<div><div class="k">Floor price</div><div class="v">' + rupee(i.floor_price) + '</div></div>' +
-      '<div><div class="k">Retail min</div><div class="v">' + rupee(i.min_price_retail) + '</div></div>' +
-      '<div><div class="k">Tick</div><div class="v">' + inr(i.tick, 2) + '</div></div>' +
-      (Number(i.discount_pct) ? '<div><div class="k">Retail discount</div><div class="v">' +
-        inr(i.discount_pct, 2) + '%</div></div>' : '') +
-      '<div><div class="k">Retail window</div><div class="v" style="font-size:11px">' +
-        dt(i.ret_open) + '</div></div>' +
-      '<div><div class="k">Closes</div><div class="v" style="font-size:11px">' + dt(i.ret_close) + '</div></div>' +
-    '</div>' +
-    (mine
-      ? '<div class="note good" style="margin-top:11px">Your bid ' + esc(mine.ref) + ' — ' +
-        inr(mine.qty, 0) + ' shares at ' + (mine.is_cutoff ? 'cut-off' : rupee(mine.price)) +
-        ' · ' + rupee(mine.value, 0) + ' (' + esc(mine.status) + ')</div>'
-      : '') +
-    bidBox(i, mine, retOpen, hniOpen) +
-    '<div class="cdn" data-close="' + close.toISOString() + '">—</div>' +
-  '</div>';
+  return '<tr>' +
+    '<td class="rowhead"><b>' + esc(i.symbol) + '</b>' +
+      '<div class="sub">' + esc(i.company || '') + '</div>' +
+      '<div class="sub m">' + esc(i.isin || '') + '</div></td>' +
+    '<td data-label="Status"><span class="chip ' + chipFor(i.status_label) + '">' +
+      (open ? '<span class="dot live"></span>' : '') + esc(i.status_label) + '</span></td>' +
+    '<td class="n" data-label="Floor">' + rupee(i.floor_price) + '</td>' +
+    '<td class="n" data-label="Retail min">' + rupee(i.min_price_retail) + '</td>' +
+    '<td class="m" data-label="Closes">' + dt(close) +
+      '<div class="cdn sub" data-close="' + esc(new Date(close).toISOString()) + '">—</div></td>' +
+    '<td data-label="Your bid">' + (mine
+      ? '<span class="chip ' + (mine.status === 'Live' ? 'open' : 'grey') + '">' + esc(mine.status) +
+        '</span><div class="sub">' + inr(mine.qty, 0) + ' at ' +
+        (mine.is_cutoff ? 'cut-off' : rupee(mine.price)) + '</div>'
+      : '<span class="sub">—</span>') + '</td>' +
+    '<td class="act">' + (!open ? '<span class="sub">Closed</span>'
+      : !OFS_BIDMATH.issueTradable(i, SETTINGS)
+        ? '<span class="sub">' + esc(OFS_BIDMATH.notTradableMessage(i, SETTINGS)) + '</span>'
+      : '<button class="btn btn-p btn-sm" data-place="' + esc(i.id) + '">' +
+        (mine ? 'Change bid' : 'Place bid') + '</button>') + '</td>' +
+  '</tr>';
 }
 
-/* -------------------------------------------------------------- bidding UI --
- * The form only appears while a category is actually open. Every number typed
- * here is checked again on the server against the same rules the desk runs, so
- * this is for telling the client early — not for deciding anything.
+/**
+ * The bid form, on its own page.
+ *
+ * Deliberately a .bidbox with the same data-bf fields every other bid form in
+ * this app has, so fillSuggested, readBidBox, checkBid, submitBid and
+ * withdrawBid all work on it unchanged. A second implementation of a bid form is
+ * a second set of rules to keep in step with the server, and it never stays in
+ * step.
  */
-function bidBox(i, mine, retOpen, hniOpen) {
-  if (!retOpen && !hniOpen) {
-    return '<div class="note" style="margin-top:11px">Bidding is closed for this offer.</div>';
-  }
-  /* An offer listed only on an exchange the desk is not live on. The offer is
-   * real and stays on the screen — the client may have read about it — but there
-   * is no form, because filling one in would end in a refusal. The server refuses
-   * it too; this is so nobody has to find that out by trying. */
+function placePage(i, mine) {
   if (!OFS_BIDMATH.issueTradable(i, SETTINGS)) {
-    return '<div class="note warn" style="margin-top:11px">' +
-      esc(OFS_BIDMATH.notTradableMessage(i, SETTINGS)) + '</div>';
+    return '<div class="note bad">' + esc(OFS_BIDMATH.notTradableMessage(i, SETTINGS)) + '</div>';
   }
-  var id = i.id;
+  var retOpen = i.ret_status === 'Open';
+  var hniOpen = i.hni_status === 'Open';
   var cats = [];
-  if (retOpen) cats.push('Retail');
-  if (hniOpen) cats.push('HNI');
-  var sel = mine && cats.indexOf(mine.category) >= 0 ? mine.category : cats[0];
+  if (retOpen) cats.push(['Retail', 'Retail']);
+  if (hniOpen) cats.push(['HNI', 'HNI / Non-Retail']);
+  var cat = mine && cats.some(function (c) { return c[0] === mine.category; })
+    ? mine.category : (cats[0] || ['Retail'])[0];
 
-  return '<div class="bidbox" data-bid-issue="' + id + '">' +
-    (mine
-      ? '<div class="bb-head">Change your bid <span class="bb-sub">allowed until the cut-off</span></div>'
-      : '<div class="bb-head">Place a bid</div>') +
-    '<div class="bb-row">' +
-      (cats.length > 1
-        ? '<label class="bb-f"><span>Category</span><select data-bf="cat">' +
-          cats.map(function (c) {
-            return '<option value="' + c + '"' + (c === sel ? ' selected' : '') + '>' + c + '</option>';
-          }).join('') + '</select></label>'
-        : '<label class="bb-f"><span>Category</span><input type="text" value="' + esc(sel) +
-          '" data-bf="cat" readonly></label>') +
-      '<label class="bb-f"><span>Quantity</span>' +
-        '<input type="number" min="' + (Number(i.lot) || 1) + '" step="' + (Number(i.lot) || 1) +
-        '" data-bf="qty" value="' + (mine ? Number(mine.qty) : '') + '" placeholder="Shares"></label>' +
-      '<label class="bb-f"><span>Bid type</span><select data-bf="type">' +
+  var fact = function (k, v) {
+    return '<div><div class="k">' + esc(k) + '</div><div class="v">' + v + '</div></div>';
+  };
+
+  return '<div class="bidbox" data-bid-issue="' + esc(i.id) + '">' +
+    '<div class="cp-facts">' +
+      fact('Floor price', rupee(i.floor_price)) +
+      fact('Retail min', rupee(i.min_price_retail)) +
+      fact('Tick', inr(i.tick, 2)) +
+      fact('Lot', inr(i.lot || 1, 0)) +
+      (Number(i.discount_pct) ? fact('Retail discount', inr(i.discount_pct, 2) + '%') : '') +
+      fact('Closes', '<span style="font-size:11px">' + dt(retOpen ? i.ret_close : i.hni_close) + '</span>') +
+    '</div>' +
+    '<div class="cp-row">' +
+      '<label class="cp-f"><span class="k">Issue</span>' +
+        '<input type="text" value="' + esc(i.symbol) + '" readonly></label>' +
+      '<label class="cp-f"><span class="k">Client code</span>' +
+        '<input type="text" value="' + esc((S.client && S.client.ucc) || '') + '" readonly></label>' +
+      '<label class="cp-f"><span class="k">Category</span><select data-bf="cat">' +
+        cats.map(function (c) {
+          return '<option value="' + c[0] + '"' + (c[0] === cat ? ' selected' : '') + '>' +
+            esc(c[1]) + '</option>';
+        }).join('') + '</select></label>' +
+      '<label class="cp-f"><span class="k">Bid type</span><select data-bf="type">' +
         '<option value="cutoff"' + (mine && mine.is_cutoff ? ' selected' : '') + '>Cut-off price</option>' +
         '<option value="limit"' + (mine && !mine.is_cutoff ? ' selected' : '') + '>My own price</option>' +
       '</select></label>' +
-      '<label class="bb-f"><span>Price</span>' +
-        '<input type="number" min="0" step="' + (Number(i.tick) || 0.05) + '" data-bf="price" ' +
-        (mine && !mine.is_cutoff ? 'value="' + Number(mine.price) + '" ' : '') +
-        (mine && !mine.is_cutoff ? '' : 'disabled ') + 'placeholder="At or above floor"></label>' +
-      exchangeField(i, mine) +
+      '<label class="cp-f"><span class="k">Quantity</span>' +
+        '<input type="number" min="1" step="1" data-bf="qty"' +
+        (mine ? ' value="' + esc(String(mine.qty)) + '"' : '') + '></label>' +
+      '<label class="cp-f"><span class="k">Price</span>' +
+        '<input type="number" min="0" step="' + (Number(i.tick) || 0.05) + '" data-bf="price"' +
+        (mine && !mine.is_cutoff ? ' value="' + esc(String(Number(mine.price))) + '"' : '') +
+        (mine && !mine.is_cutoff ? '' : ' disabled') + ' placeholder="At or above floor"></label>' +
+      exchangeField(i, mine).replace('bb-f', 'cp-f') +
     '</div>' +
+    '<div class="cp-total"><span class="k">Total value</span>' +
+      '<b data-bf="value">—</b><span class="sub">Quantity × price.</span></div>' +
     '<div class="bb-verdict" data-bf="verdict"></div>' +
-    '<div class="bb-actions">' +
+    '<div class="bar" style="padding:0">' +
       '<button class="btn btn-o btn-sm" data-bf="fill">Fill suggested bid</button>' +
       '<button class="btn btn-o btn-sm" data-bf="check">Check</button>' +
       '<button class="btn btn-p btn-sm" data-bf="submit">' +
         (mine ? 'Update bid' : 'Place bid') + '</button>' +
       (mine ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
+      '<div class="sp"></div>' +
+      '<button class="btn btn-o btn-sm" data-bf="back">Back to issues</button>' +
     '</div>' +
   '</div>';
 }
+
+/** Open the Place bid page on one offer, with it already selected. */
+function openPlace(issueId) {
+  PLACE_ON = String(issueId || '');
+  showCTab('place');
+  renderPlace();
+}
+
+function renderPlace() {
+  var box = $('#cpForm');
+  if (!box) return;
+  var i = ISSUES_BY_ID[PLACE_ON];
+  var none = $('#cpNone');
+  if (!i) {
+    box.innerHTML = '';
+    if (none) none.classList.remove('hide');
+    if ($('#cpFor')) $('#cpFor').textContent = '';
+    return;
+  }
+  if (none) none.classList.add('hide');
+  var mine = BIDS_BY_ISSUE[PLACE_ON];
+  if ($('#cpTitle')) $('#cpTitle').textContent = mine ? 'Change your bid' : 'Place a bid';
+  if ($('#cpFor')) {
+    $('#cpFor').textContent = i.symbol + ' · ' + (i.company || '') +
+      ((S.client && S.client.ucc) ? ' · ' + S.client.ucc : '');
+  }
+  /* Same rule as the issues list: a background refresh must not empty a form the
+   * investor is part way through typing into. */
+  var keep = captureBidForms();
+  box.innerHTML = placePage(i, mine || null);
+  restoreBidForms(keep);
+  recalcTotal();
+}
+
+/** The derived total, so the figure is there before Check is pressed. */
+function recalcTotal() {
+  var box = document.querySelector('#cpForm .bidbox');
+  if (!box) return;
+  var out = box.querySelector('[data-bf="value"]');
+  if (!out) return;
+  var g = function (k) { return box.querySelector('[data-bf="' + k + '"]'); };
+  var i = ISSUES_BY_ID[box.getAttribute('data-bid-issue')];
+  var qty = Number(g('qty') && g('qty').value) || 0;
+  var cutoff = g('type') && g('type').value === 'cutoff';
+  var price = cutoff ? Number(i && i.min_price_retail) || 0 : Number(g('price') && g('price').value) || 0;
+  out.textContent = qty && price ? rupee(qty * price, 0) : '—';
+}
+
+var PLACE_ON = '';
 
 /**
  * Which exchange this bid goes to.
@@ -762,16 +830,15 @@ function bidStillOpen(x) {
  * rather than build a thinner copy that can disagree with it.
  */
 function modifyFromList(issueId) {
-  showCTab('issues');
   var go = function () {
-    var box = document.querySelector('.bidbox[data-bid-issue="' + issueId + '"]');
-    if (!box) return toast('That offer is closed', 'This bid can no longer be changed.', 'bad');
-    var card = box.closest('.card') || box;
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    var qty = box.querySelector('[data-bf="qty"]');
+    if (!ISSUES_BY_ID[String(issueId)]) {
+      return toast('That offer is closed', 'This bid can no longer be changed.', 'bad');
+    }
+    openPlace(issueId);
+    var qty = document.querySelector('#cpForm [data-bf="qty"]');
     if (qty && qty.focus) qty.focus();
   };
-  if (document.querySelector('.bidbox[data-bid-issue="' + issueId + '"]')) go();
+  if (ISSUES_BY_ID[String(issueId)]) go();
   else loadIssues().then(go);
 }
 
@@ -910,12 +977,19 @@ async function loadIssues(quiet) {
       if (i.my_bid) BIDS_BY_ISSUE[String(i.id)] = i.my_bid;
     });
     showCutoff(list, d.settings || {});
-    var keep = captureBidForms();
+    if ($('#issuesCount')) {
+      $('#issuesCount').textContent = list.length
+        ? inr(list.length, 0) + ' offer(s)' : '';
+    }
     $('#clientIssues').innerHTML = list.length
-      ? list.map(issueCard).join('')
-      : '<div class="tbl-empty">There is no open Offer for Sale right now. ' +
-        'Issues appear here as soon as Ashika publishes them.</div>';
-    restoreBidForms(keep);
+      ? '<thead><tr><th>Scrip</th><th>Status</th><th class="n">Floor</th>' +
+        '<th class="n">Retail min</th><th>Closes</th><th>Your bid</th><th></th></tr></thead>' +
+        '<tbody>' + list.map(issueRow).join('') + '</tbody>'
+      : '<tbody><tr><td class="tbl-empty">There is no open Offer for Sale right now. ' +
+        'Issues appear here as soon as Ashika publishes them.</td></tr></tbody>';
+    // The form lives on its own page and is redrawn there, keeping whatever is
+    // half-typed in it — the list above carries no inputs to lose.
+    renderPlace();
   } catch (e) {
     if (e.status === 401) return sessionLost();
     if (!quiet) toast('Could not load issues', e.message, 'bad');
@@ -1220,9 +1294,39 @@ async function boot() {
   // Bid forms are rebuilt on every refresh of the issue list, so delegate from the
   // container rather than re-binding after each render.
   $('#clientIssues').addEventListener('click', function (e) {
+    var go = e.target.closest('[data-place]');
+    if (go) { e.preventDefault(); openPlace(go.getAttribute('data-place')); }
+  });
+
+  $('#cpForm').addEventListener('input', function (e) {
+    var box = e.target.closest('.bidbox');
+    if (box && e.target.matches('[data-bf]')) {
+      DIRTY[box.getAttribute('data-bid-issue')] = true;
+      recalcTotal();
+    }
+  });
+  $('#cpForm').addEventListener('change', function (e) {
     var box = e.target.closest('.bidbox');
     if (!box) return;
-    if (e.target.closest('[data-bf="fill"]'))   { e.preventDefault(); fillSuggested(box); return; }
+    if (e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
+    if (e.target.matches('[data-bf="type"]')) {
+      var price = box.querySelector('[data-bf="price"]');
+      price.disabled = e.target.value === 'cutoff';
+      if (price.disabled) price.value = '';
+    }
+    recalcTotal();
+  });
+  $('#cpForm').addEventListener('click', function (e) {
+    var box = e.target.closest('.bidbox');
+    if (!box) return;
+    if (e.target.closest('[data-bf="back"]'))   { e.preventDefault(); showCTab('issues'); return; }
+    if (e.target.closest('[data-bf="fill"]'))   {
+      e.preventDefault();
+      fillSuggested(box);
+      DIRTY[box.getAttribute('data-bid-issue')] = true;
+      recalcTotal();
+      return;
+    }
     if (e.target.closest('[data-bf="check"]'))  { e.preventDefault(); checkBid(box); return; }
     if (e.target.closest('[data-bf="submit"]')) {
       e.preventDefault();

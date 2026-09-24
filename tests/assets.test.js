@@ -30,7 +30,7 @@ const ASSETS = [
   // /partner — so the markers cover the partner half too.
   { file: 'public/backoffice/app.js',     min: 40000, markers: ['function boot(', 'function applyGrants(',
                                                                  'function partnerPath(', 'function loadClients('] },
-  { file: 'public/client/client.js',      min: 12000, markers: ['function boot(', 'function bidBox(',
+  { file: 'public/client/client.js',      min: 12000, markers: ['function boot(', 'function placePage(',
                                                                  'function sendBranchCode(', 'function bidBase('] },
   { file: 'public/shared/rules.js',       min: 3000, markers: [] }
 ];

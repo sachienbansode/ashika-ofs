@@ -20,11 +20,20 @@ const fn = (name) => {
 test('the background refresh keeps what is half-typed', () => {
   assert.match(SRC, /function captureBidForms\(\)/);
   assert.match(SRC, /function restoreBidForms\(snap\)/);
-  const load = fn('loadIssues');
-  assert.ok(load.indexOf('captureBidForms()') < load.indexOf("innerHTML"),
+  /* The form moved to its own page, so the guard moved with it: renderPlace is
+   * what redraws a form that may be half typed into, and the list above it
+   * carries no inputs at all. */
+  const render = fn('renderPlace');
+  // Against the rebuild itself, not the first innerHTML in the function — the
+  // early "nothing chosen" branch clears the box before this line is reached.
+  const build = render.indexOf('box.innerHTML = placePage(');
+  assert.ok(build > 0, 'renderPlace no longer builds the form');
+  assert.ok(render.indexOf('captureBidForms()') < build,
     'the form is captured after the rebuild, which is too late');
-  assert.ok(load.indexOf('restoreBidForms(') > load.indexOf("innerHTML"),
+  assert.ok(render.indexOf('restoreBidForms(') > build,
     'nothing is put back after the rebuild');
+  assert.match(fn('loadIssues'), /renderPlace\(\)/,
+    'a refresh of the list no longer redraws the form');
 });
 
 test('only a form the investor has touched is restored', () => {

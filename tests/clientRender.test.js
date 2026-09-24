@@ -88,23 +88,42 @@ const OPEN_ISSUE = {
   my_bid: null
 };
 
-test('an open issue renders — the whole card, not just the parts we remembered', () => {
+test('an open issue renders as a row, with one thing to do with it', () => {
   const { ctx } = loadClientJs();
   ctx.SETTINGS = { retail_cap: 200000, hni_min: 200000 };
   ctx.ISSUES_BY_ID = { 7: OPEN_ISSUE };
 
   // This is the call that threw in production. It must not throw for ANY of the
   // shapes an investor can be shown.
-  const html = ctx.issueCard(OPEN_ISSUE);
+  const html = ctx.issueRow(OPEN_ISSUE);
   assert.match(html, /COALINDIA/);
-  assert.match(html, /data-bid-issue="7"/, 'the bid box is part of the card');
-  assert.match(html, /data-bf="fill"/, 'Fill suggested bid is on the client screen');
-  assert.match(html, /data-bf="exch"/, 'and the exchange');
+  assert.match(html, /data-place="7"/, 'the row offers no way to bid');
+  assert.ok(!/data-bf=/.test(html), 'the bid form is back inside the row');
   assert.ok(!/undefined/.test(html), 'an undefined leaked into the markup: ' + html.slice(0, 300));
 });
 
-test('every state of the bid box renders', () => {
+test('the Place bid page carries the form, with the client code fixed', () => {
   const { ctx } = loadClientJs();
+  ctx.SETTINGS = { retail_cap: 200000, hni_min: 200000 };
+  ctx.ISSUES_BY_ID = { 7: OPEN_ISSUE };
+  ctx.S = { client: { ucc: 'ASH1001', name: 'A CLIENT' } };
+
+  const html = ctx.placePage(OPEN_ISSUE, null);
+  assert.match(html, /data-bid-issue="7"/, 'the form is not bound to the offer');
+  assert.match(html, /data-bf="fill"/, 'Fill suggested bid is not on the client screen');
+  assert.match(html, /data-bf="exch"/, 'and the exchange');
+  assert.match(html, /data-bf="qty"/);
+  assert.match(html, /ASH1001/, 'the client code is not shown');
+  // Shown, never asked for: the session decides whose bid this is.
+  assert.match(html, /value="ASH1001" readonly/);
+  assert.ok(!/data-bf="ucc"/.test(html), 'the client code is an input the client can change');
+  assert.ok(!/undefined/.test(html), 'an undefined leaked into the markup: ' + html.slice(0, 300));
+});
+
+test('every state of the bid form renders', () => {
+  const { ctx } = loadClientJs();
+  ctx.SETTINGS = { retail_cap: 200000, hni_min: 200000 };
+  ctx.S = { client: { ucc: 'ASH1001' } };
   const mine = { id: 3, ref: 'OFS-3', category: 'Retail', qty: 500, price: 400, is_cutoff: false,
                  value: 200000, status: 'Live', exchange: 'NSE' };
   const cases = [
@@ -116,12 +135,14 @@ test('every state of the bid box renders', () => {
     ['nothing open',             Object.assign({}, OPEN_ISSUE, { ret_status: 'Closed', hni_status: 'Closed' }), null, false, false],
     ['no floor published',       Object.assign({}, OPEN_ISSUE, { floor_price: null, cut_price_min: null }), null, true, false]
   ];
-  for (const [name, issue, bid, ret, hni] of cases) {
-    assert.doesNotThrow(() => ctx.bidBox(issue, bid, ret, hni), name + ' threw');
+  for (const [name, issue, bid] of cases) {
+    ctx.ISSUES_BY_ID = { 7: issue };
+    assert.doesNotThrow(() => ctx.placePage(issue, bid), name + ' threw');
+    assert.doesNotThrow(() => ctx.issueRow(issue), name + ' threw as a row');
   }
   // The withdraw button belongs to a client who HAS a bid, and to nobody else.
-  assert.match(ctx.bidBox(OPEN_ISSUE, mine, true, false), /data-bf="cancel"/);
-  assert.ok(!/data-bf="cancel"/.test(ctx.bidBox(OPEN_ISSUE, null, true, false)));
+  assert.match(ctx.placePage(OPEN_ISSUE, mine), /data-bf="cancel"/);
+  assert.ok(!/data-bf="cancel"/.test(ctx.placePage(OPEN_ISSUE, null)));
 });
 
 test('the exchange field offers a choice only where there is one', () => {

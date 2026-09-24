@@ -225,3 +225,41 @@
 .mg-c.neg .v{color:var(--red,#d64550)}
 .mg-c.pos .v{color:var(--green,#12805c)}
 @media (max-width:560px){ .mg-grid{grid-template-columns:1fr} }
+
+/* ------------------------------------------------------- the bid form, once --
+ *
+ * The same shape the desk and a partner get, at the size a phone can also use.
+ * Small fields, a fixed grid, and everything from the offer's facts down to the
+ * Place bid button in one view - an investor deciding whether to bid should not
+ * be scrolling between the floor price and the box they type the price into.
+ */
+.cp-facts { display: grid; gap: 8px 12px; margin: 0 0 12px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.cp-facts > div { border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 6px 9px; }
+.cp-facts .k { font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted, #64748b); }
+.cp-facts .v { font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+
+.cp-row { display: grid; gap: 9px 12px; align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.cp-f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cp-f .k { font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--muted, #64748b); }
+.cp-f input, .cp-f select { width: 100%; box-sizing: border-box; }
+.cp-f input[readonly] { background: var(--wash, #f6f8fb); color: var(--muted, #64748b); }
+
+.cp-total { display: flex; align-items: baseline; gap: 10px; margin: 12px 0;
+  padding: 7px 11px; border: 1px solid var(--line, #e2e8f0); border-radius: 11px;
+  background: var(--wash, #f6f8fb); }
+.cp-total .k { font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted, #64748b); }
+.cp-total b { font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 17px; }
+.cp-total .sub { font-size: 10.5px; color: var(--muted, #64748b); }
+
+/* A desk monitor gets the tighter version; a touch screen keeps 16px fields,
+   because anything smaller makes iOS zoom the page when one is focused. */
+@media (pointer: fine) and (min-width: 700px) {
+  .cp-f input, .cp-f select { font-size: 12.5px; padding: 5px 8px; height: 30px; }
+}

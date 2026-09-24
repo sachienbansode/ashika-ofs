@@ -137,7 +137,7 @@ test('the desk form and the client portal both read the setting', () => {
 
   const client = read('public/client/client.js');
   assert.match(client, /OFS_BIDMATH\.exchangesFor\(i, SETTINGS\)/, 'the client dropdown ignores it');
-  assert.match(client, /OFS_BIDMATH\.issueTradable\(i, SETTINGS\)/, 'the client bid box ignores it');
+  assert.match(client, /OFS_BIDMATH\.issueTradable\(i, SETTINGS\)/, 'the client screens ignore it');
 
   // And the portal has to be SENT it, or SETTINGS is empty and everything
   // silently falls back to "both enabled".
@@ -146,10 +146,19 @@ test('the desk form and the client portal both read the setting', () => {
   assert.match(read('routes/dashboard.js'), /settings: s,/);
 });
 
-test('a client sees why an offer has no bid form, not an empty card', () => {
+test('a client sees why an offer cannot be bid on, in the list and on the form', () => {
   const client = read('public/client/client.js');
-  const box = client.slice(client.indexOf('function bidBox('), client.indexOf('function exchangeField('));
-  assert.match(box, /notTradableMessage/, 'the client is left guessing');
-  assert.ok(box.indexOf('issueTradable') < box.indexOf('data-bid-issue'),
+
+  // In the LIST, where the investor is deciding: no button, and the reason in
+  // its place. Finding out two clicks later, on an empty form, is worse.
+  const row = client.slice(client.indexOf('function issueRow('), client.indexOf('function placePage('));
+  assert.match(row, /notTradableMessage/, 'the row leaves the investor guessing');
+  assert.ok(row.indexOf('issueTradable') < row.indexOf('data-place'),
+    'the check must come before the button is offered');
+
+  // And on the form itself, for anyone who reaches it by URL or by a stale tab.
+  const page = client.slice(client.indexOf('function placePage('), client.indexOf('function openPlace('));
+  assert.match(page, /notTradableMessage/, 'the form is built for an offer that cannot take it');
+  assert.ok(page.indexOf('issueTradable') < page.indexOf('data-bid-issue'),
     'the check must come before the form is built');
 });

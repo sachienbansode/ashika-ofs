@@ -161,6 +161,7 @@
 
   <div class="tabs" style="margin-bottom:18px;display:inline-flex" id="cTabs">
     <button data-ctab="issues" class="on">Open issues</button>
+    <button data-ctab="place" id="tabPlace">Place bid</button>
     <button data-ctab="bids" id="tabBids">My bids</button>
     <button data-ctab="allot">Allotments</button>
     <button data-ctab="rules">Bidding rules</button>
@@ -170,8 +171,36 @@
     <div class="card"><div class="card-b"><div id="rulesBox"></div></div></div>
   </div>
 
+  <!-- One row per offer, and one thing to do with it.
+       This was a stack of large cards with a whole bid form inside each: the
+       figures for an offer and the boxes for bidding on it in the same block, so
+       an investor scrolled past three forms to read the fourth offer. The list
+       says what is on, the Place bid button takes them to the form. -->
   <div id="cpane-issues">
-    <div class="card"><div class="card-b"><div class="issues" id="clientIssues"></div></div></div>
+    <div class="card">
+      <div class="card-h"><h3>Open issues</h3><span class="sub" id="issuesCount"></span></div>
+      <div class="tw"><table class="tbl stack" id="clientIssues"></table></div>
+    </div>
+  </div>
+
+  <!-- The bid form, once, on its own page - the same shape the desk and a partner
+       use. The client code is theirs and cannot be changed here, so it is shown
+       rather than asked for. -->
+  <!-- The bid form, once, on its own page - the same shape the desk and a partner
+       use. Built by placePage() so that it is a .bidbox with the same data-bf
+       fields every other bid form here has: one set of handlers, one validate
+       call, one submit, and no second implementation to drift from the first.
+       The client code is theirs and cannot be changed, so it is shown, not asked. -->
+  <div id="cpane-place" class="hide">
+    <div class="card">
+      <div class="card-h"><h3 id="cpTitle">Place a bid</h3>
+        <span class="sub" id="cpFor"></span></div>
+      <div class="card-b">
+        <div class="note" id="cpNone">Choose an offer under <b>Open issues</b> and press
+          <b>Place bid</b> to come here with it selected.</div>
+        <div id="cpForm"></div>
+      </div>
+    </div>
   </div>
 
   <div id="cpane-bids" class="hide">
