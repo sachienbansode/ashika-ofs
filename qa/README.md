@@ -67,6 +67,36 @@ A blank row ends a sheet — the notes below the data are notes, not records.
 - `retries: 0`. A retry re-runs the whole test, and a test that placed a bid
   before it failed would place a second one.
 
+## The QA console
+
+A small web app of its own — own login, own storage on disk, **no connection to
+the OFS app or its databases**. It talks to OFS the way a person does: through a
+browser.
+
+```bash
+npm run set-password          # once, creates the operator account in qa/.env
+npm start                     # http://127.0.0.1:4100
+```
+
+Sign in, download a blank plan template, upload your filled one, pick the
+environment row, the browser and which roles to run, and press Start. The log
+streams as it goes; the Excel and the HTML report are on the row when it
+finishes, with the raw log beside them.
+
+Runs are kept **7 days** and then removed — the plan workbook and the
+credentials in it go with them.
+
+Behind nginx, set `OFS_QA_COOKIE_SECURE=true` in `qa/.env` or the browser drops
+the session cookie. Under PM2 it is a second app: `pm2 start server.js --name
+ashika-ofs-qa --cwd /var/apps/ashika-ofs-qa`.
+
+**Runs started from the console are headless** — there is no window on the
+server and nobody to type a one-time code into it. Accounts that need one must
+carry `otp_mode=static` with the code on the Users sheet; where a code step
+appears and there is no way to answer it, the suite says which column to set
+rather than hanging.
+
+
 ## Adding a case
 
 Selectors live in `pages/`, never in a spec — that is what keeps a hundred cases

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OFS QA console</title>
+<link rel="stylesheet" href="/assets/qa.css">
+</head>
+<body>
+
+<header>
+  <b>OFS QA console</b>
+  <span class="tag">front-end test runs</span>
+  <div class="sp"></div>
+  <span class="who" id="who"></span>
+  <button class="btn sm" id="out">Sign out</button>
+</header>
+
+<main>
+
+  <!-- ------------------------------------------------------------ new run -->
+  <section class="card">
+    <h2>Run the suite</h2>
+    <p class="lead">
+      Upload the filled plan workbook. It carries the URLs and the credentials, so
+      it is kept with this run and removed with it.
+      <a href="#" id="tpl">Download a blank template</a>.
+    </p>
+
+    <form id="new">
+      <div class="row">
+        <div class="f wide">
+          <label for="plan">Plan workbook (.xlsx)</label>
+          <input type="file" id="plan" name="plan" accept=".xlsx" required>
+        </div>
+        <div class="f">
+          <label for="env">Environment row</label>
+          <input id="env" name="env" placeholder="UAT" value="UAT" required>
+        </div>
+        <div class="f">
+          <label for="browser">Browser</label>
+          <select id="browser" name="browser">
+            <option value="chromium">Chromium (bundled)</option>
+            <option value="chrome">Google Chrome</option>
+            <option value="edge">Microsoft Edge</option>
+          </select>
+        </div>
+        <div class="f">
+          <label for="only">Roles</label>
+          <select id="only" name="only">
+            <option value="">All roles</option>
+            <option value="desk">Back office only</option>
+            <option value="ap">Branch / AP only</option>
+            <option value="client">Investor only</option>
+          </select>
+        </div>
+        <div><button class="btn go" id="start">Start run</button></div>
+      </div>
+    </form>
+
+    <div class="note bad hide" id="newErr" style="margin-top:12px"></div>
+    <div class="note hide" id="headless" style="margin-top:12px">
+      Runs started here are <b>headless</b> — there is no window on the server and nobody
+      to type a one-time code into it. Accounts that need one must carry
+      <span class="m">otp_mode=static</span> with the code on the Users sheet, or the
+      suite will say so and stop rather than hang.
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- current -->
+  <section class="card hide" id="live">
+    <h2>Run <span class="m" id="liveId"></span> <span id="liveChip"></span></h2>
+    <p class="lead" id="liveWhat"></p>
+    <div class="row" style="margin-bottom:12px">
+      <div class="counts" id="liveCounts"></div>
+      <div class="sp" style="flex:1"></div>
+      <button class="btn bad sm hide" id="stop">Stop</button>
+    </div>
+    <pre class="log" id="log"></pre>
+  </section>
+
+  <!-- --------------------------------------------------------------- runs -->
+  <section class="card">
+    <h2>Recent runs</h2>
+    <p class="lead" id="keep"></p>
+    <table id="runs"><tbody><tr><td class="empty">Loading…</td></tr></tbody></table>
+  </section>
+
+</main>
+
+<script src="/assets/qa.js"></script>
+</body>
+</html>

@@ -22,9 +22,12 @@ const book = require('./lib/bookSync').loadSync();
 process.env.OFS_QA_ENV_NAME = book.envName;
 process.env.OFS_QA_BASE_URL = book.env.base_url;
 
+/* Where this run's output goes. The QA server hands each run its own directory
+ * so two runs cannot overwrite each other's report; a run from the command line
+ * falls back to results/ as before. */
+const dir = process.env.OFS_QA_OUT || path.join(__dirname, 'results');
 const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-const out = path.join(__dirname, 'results',
-  'OFS_Test_Results_' + book.envName + '_' + stamp + '.xlsx');
+const out = path.join(dir, 'OFS_Test_Results_' + book.envName + '_' + stamp + '.xlsx');
 
 module.exports = defineConfig({
   testDir: './specs',
@@ -39,7 +42,7 @@ module.exports = defineConfig({
   retries: 0,
   reporter: [
     ['list'],
-    ['html', { outputFolder: 'results/html', open: 'never' }],
+    ['html', { outputFolder: path.join(dir, 'html'), open: 'never' }],
     [path.join(__dirname, 'lib', 'xlsx-reporter.js'), { outputFile: out }]
   ],
   use: {
@@ -62,7 +65,7 @@ module.exports = defineConfig({
     actionTimeout: 15 * 1000,
     ignoreHTTPSErrors: true
   },
-  outputDir: 'results/artifacts',
+  outputDir: path.join(dir, 'artifacts'),
   projects: [
     { name: 'desk', testMatch: /.*\/(render|flows)\/backoffice\..*\.spec\.js/ },
     { name: 'ap', testMatch: /.*\/(render|flows)\/partner\..*\.spec\.js/ },

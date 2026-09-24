@@ -25,6 +25,7 @@ let env = process.env.OFS_QA_ENV || '';
 let only = '';
 let browser = process.env.OFS_QA_CHANNEL || '';
 let slow = process.env.OFS_QA_SLOWMO || '';
+let out = process.env.OFS_QA_OUT || '';
 
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -37,6 +38,9 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--browser' || a.startsWith('--browser=')) browser = take();
   // Slow the actions down so a person can follow what is happening.
   else if (a === '--slow' || a.startsWith('--slow=')) slow = a.includes('=') ? take() : (argv[i + 1] && /^\d+$/.test(argv[i + 1]) ? argv[++i] : '400');
+  // Everything one run produces, under one directory. The QA server gives each
+  // run its own, so two runs cannot overwrite each other's report.
+  else if (a === '--out' || a.startsWith('--out=')) out = take();
   else pass.push(a);
 }
 
@@ -56,6 +60,7 @@ if (browser) {
   if (CHANNELS[key]) process.env.OFS_QA_CHANNEL = CHANNELS[key];
 }
 if (slow) process.env.OFS_QA_SLOWMO = String(Number(slow) || 400);
+if (out) process.env.OFS_QA_OUT = path.resolve(out);
 
 /* Read it now, so the failure is here and readable. */
 let plan;

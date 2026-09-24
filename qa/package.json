@@ -7,10 +7,20 @@
     "test": "node run.js",
     "test:headed": "node run.js --headed",
     "make-plan": "node scripts/make-plan.js",
-    "report": "playwright show-report results/html"
+    "report": "playwright show-report results/html",
+    "start": "node server.js",
+    "set-password": "node scripts/set-password.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
     "exceljs": "^4.4.0"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^18.0.3",
+    "express": "^5.2.1",
+    "multer": "^2.4.0"
   }
 }
