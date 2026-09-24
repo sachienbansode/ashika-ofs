@@ -43,7 +43,12 @@ test.beforeAll(async ({ browser }) => {
   const u = plan.requireUser('desk');    // fail here, not in twenty-eight places
   page = await browser.newPage();
   bo = new BackOffice(page, plan.env.backoffice_url);
-  await bo.signIn(u.identifier, u.password);
+  await bo.signIn(u.identifier, u.password, {
+    mode: (u.otp_mode || 'manual').toLowerCase(),
+    code: u.static_otp,
+    who: u.identifier,
+    waitMs: plan.env.otp_wait_ms
+  });
 });
 
 test.afterAll(async () => {

@@ -46,15 +46,73 @@ class BackOffice {
 
   /* ------------------------------------------------------------- signing in */
 
-  async signIn(email, password) {
+  /**
+   * Sign in at the desk.
+   *
+   * Two steps, not one. The password is the first; a staff account with MFA
+   * turned on then gets a six-digit code, and whether it does is per USER
+   * (lib/staffAuth needsMfa reads mfa_enabled on the account), not a property of
+   * the door. So the second step is detected rather than assumed — a suite that
+   * assumed either way would work against one admin and hang against the next.
+   *
+   * `otp` decides what happens if the code step appears:
+   *   { mode: 'static', code: '123456' }  type it
+   *   { mode: 'manual', waitMs, who }     wait for a person to type it
+   * and with neither, a code step is a clear failure rather than a timeout on a
+   * selector that was never going to appear.
+   */
+  async signIn(email, password, otp) {
     await this.page.goto(this.url + 'login.html', { waitUntil: 'domcontentloaded' });
     await this.page.fill('#email', email);
     await this.page.fill('#password', password);
-    await this.page.click('button[type=submit], .btn');
-    // The shell is the proof, not the navigation: a failed sign-in also leaves
-    // the address bar changed on some paths.
-    await this.page.waitForSelector('#pane-dash', { state: 'attached', timeout: 20000 });
+    await this.page.click('#signIn');
+
+    // The shell, the code step, or a refusal — whichever arrives first.
+    const shell = this.page.locator('#pane-dash');
+    const code = this.page.locator('#paneOtp:not(.hide) #code');
+    const err = this.page.locator('#credErr:not(:empty)');
+    await Promise.race([
+      shell.waitFor({ state: 'attached', timeout: 25000 }).catch(() => {}),
+      code.waitFor({ state: 'visible', timeout: 25000 }).catch(() => {}),
+      err.waitFor({ state: 'visible', timeout: 25000 }).catch(() => {})
+    ]);
+
+    if (await err.isVisible().catch(() => false)) {
+      throw new Error('Sign-in refused: ' + (await err.textContent()).trim());
+    }
+
+    if (await code.isVisible().catch(() => false)) {
+      await this.enterStaffOtp(otp);
+    }
+
+    await this.page.waitForSelector('#pane-dash', { state: 'attached', timeout: 25000 });
     await this.settled();
+  }
+
+  /** The code step, however the plan says it is to be answered. */
+  async enterStaffOtp(otp) {
+    const o = otp || {};
+    if (o.mode === 'static' && o.code) {
+      await this.page.fill('#code', String(o.code).replace(/\D/g, ''));
+      await this.page.click('#verify');
+      return;
+    }
+    if (o.mode === 'manual') {
+      const { waitForHumanOtp } = require('../lib/otpPause');
+      await waitForHumanOtp(this.page, {
+        who: o.who || 'the back-office account',
+        label: 'back-office sign-in',
+        timeoutMs: o.waitMs,
+        done: this.page.locator('#pane-dash')
+      });
+      return;
+    }
+    const sentTo = await this.page.locator('#sentTo').textContent().catch(() => '');
+    throw new Error(
+      'The desk account has MFA turned on and this run has no way to answer it.\n' +
+      'The code went to ' + (sentTo || 'the address on the account').trim() + '.\n' +
+      'Set otp_mode=manual on the desk row of the Users sheet to type it yourself, or ' +
+      'otp_mode=static with the code in static_otp where the screen shows a fixed one.');
   }
 
   /**
