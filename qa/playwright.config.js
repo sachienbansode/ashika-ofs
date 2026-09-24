@@ -43,7 +43,15 @@ module.exports = defineConfig({
     [path.join(__dirname, 'lib', 'xlsx-reporter.js'), { outputFile: out }]
   ],
   use: {
+    // On screen by default. Client and AP sign-in pause for a person to type a
+    // real code into the real window, so there has to be a window — and being
+    // able to watch a run is most of what makes a UI suite trustworthy.
     headless: process.env.HEADLESS === '1',
+    // Real Chrome or Edge when asked for; Playwright's own Chromium otherwise.
+    channel: process.env.OFS_QA_CHANNEL || undefined,
+    launchOptions: process.env.OFS_QA_SLOWMO
+      ? { slowMo: Number(process.env.OFS_QA_SLOWMO) }
+      : undefined,
     baseURL: book.env.base_url,
     viewport: { width: 1440, height: 900 },
     // Evidence only when something went wrong: a screenshot of every passing

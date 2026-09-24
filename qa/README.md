@@ -25,9 +25,23 @@ npm test -- --book "C:\Ashika\OFS_Test_Plan.xlsx" --env UAT
 npm test -- --book "C:\Ashika\OFS_Test_Plan.xlsx" --env PROD --only desk
 ```
 
-`--only desk|ap|client` narrows to one role. `HEADLESS=1` hides the window, but
-only once every user has `otp_mode=static` — client and AP sign-in pause for a
-person to type the real code into the visible browser.
+It runs **on screen by default** — a Chromium window opens and you watch it work.
+
+| Flag | |
+|---|---|
+| `--only desk` | one role at a time: `desk`, `ap`, `client` |
+| `--browser chrome` | your real Chrome instead of the bundled Chromium. Also `edge`. |
+| `--slow 400` | 400ms between actions, so a person can follow it |
+| `--ui` | Playwright's UI mode — step through, rewind, re-run one case |
+| `--headed` | explicit, though it is the default |
+| `HEADLESS=1` | no window. Only once every user has `otp_mode=static`, because client and AP sign-in pause for a person to type the real code into the real window. |
+
+`--browser chrome` needs Chrome installed, which it already is; nothing extra to
+download. Watching a run is most of what makes a UI suite trustworthy, so:
+
+```powershell
+npm test -- --book "C:\Ashika\OFS_Test_Plan.xlsx" --env UAT --browser chrome --slow 400
+```
 
 Out comes `results/OFS_Test_Results_<ENV>_<when>.xlsx`: a Summary, a Failures
 sheet when there are any, every case, and one sheet per group. Screenshots,
