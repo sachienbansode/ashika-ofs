@@ -1,0 +1,240 @@
+================================================================================
+ ASHIKA OFS - QA SUITE - COMMANDS
+ Front-end test runs. Separate from the OFS app: own dependencies, own console,
+ no database, and nothing here is ever installed or loaded by the OFS server.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+ A. LOCAL - WINDOWS (PowerShell)
+--------------------------------------------------------------------------------
+
+A1. ONE TIME
+
+    cd "D:\sachin b\projects\OFS\qa"
+    npm install
+    npx playwright install chromium
+
+    Only needed again when package.json changes.
+    "--browser chrome" and "--browser edge" use the browsers already on the
+    machine, so nothing extra is downloaded for those.
+
+
+A2. THE PLAN WORKBOOK
+
+    npm run make-plan
+
+    Writes plan\OFS_Test_Plan_TEMPLATE.xlsx. Fill it in and SAVE IT OUTSIDE THE
+    REPO - it holds live passwords. Three sheets:
+
+      Environment   name, base_url, writes_allowed, otp_wait_seconds
+                    ONE base_url per row. /backoffice, /partner and / are
+                    derived from it - they are fixed mount points in server.js.
+
+      Users         role (desk|ap|client), identifier, password, branch_code,
+                    otp_mode (none|manual|static), static_otp
+
+      TestData      issue_prefix, margin_uccs, bid_ucc, search_ucc, search_name
+
+    A BLANK ROW ENDS A SHEET. The notes under the data are notes, not records.
+
+
+A3. RUN IT
+
+    npm test -- --book "C:\Ashika\OFS_Test_Plan.xlsx" --env UAT
+
+    Flags (all optional):
+
+      --env UAT            which Environment row. UAT, PROD, whatever you named
+      --only desk          one role: desk | ap | client
+      --browser chrome     real Chrome. Also: edge, chromium (default)
+      --slow 400           400ms between actions, so a person can follow it
+      --ui                 Playwright's own mode: step, rewind, re-run one case
+      --headed             explicit; it is already the default
+
+    Watch it work in real Chrome:
+
+      npm test -- --book "C:\Ashika\OFS_Test_Plan.xlsx" --env UAT --browser chrome --slow 400
+
+    Step through it yourself:
+
+      npm test -- --book "C:\Ashika\OFS_Test_Plan.xlsx" --env UAT --ui
+
+    Output lands in qa\results\ :
+      OFS_Test_Results_<ENV>_<when>.xlsx    the plan and the result, one file
+      html\index.html                       the full report
+      artifacts\                            screenshot, video, trace - failures only
+
+
+A4. THE CONSOLE, LOCALLY
+
+    npm run set-password
+    npm start
+
+    Then http://127.0.0.1:4100
+
+
+--------------------------------------------------------------------------------
+ B. THE VM (Ubuntu / Azure)
+--------------------------------------------------------------------------------
+
+B1. ONE TIME - as root or with sudo
+
+    # Put it somewhere of its own. It is NOT part of /var/apps/ashika-ofs-app
+    # and must never be deployed into it.
+    mkdir -p /var/apps/ashika-ofs-qa
+    cd /var/apps/ashika-ofs-qa
+
+    # Copy the qa/ folder here, or:
+    git clone <repo> /tmp/ofs && cp -r /tmp/ofs/qa/. /var/apps/ashika-ofs-qa/
+
+    npm ci --omit=dev=false        # dev deps ARE the tool here; install them all
+    npx playwright install --with-deps chromium
+
+    # --with-deps pulls the system libraries a headless browser needs on a
+    # server (fonts, nss, libdrm and the rest). It needs root, and it is the
+    # step people forget - without it the browser launches and dies with a
+    # shared-library error that says nothing useful.
+
+
+B2. THE OPERATOR ACCOUNT
+
+    npm run set-password
+
+    Writes a bcrypt hash and a fresh signing secret into qa/.env - never a
+    password. Changing it signs out every existing session.
+
+    Behind nginx with TLS, add this to qa/.env or the browser drops the cookie
+    and the door looks broken:
+
+        OFS_QA_COOKIE_SECURE=true
+
+    Other settings in that file:
+        OFS_QA_PORT=4100
+        OFS_QA_KEEP_DAYS=7
+
+
+B3. RUN THE CONSOLE UNDER PM2
+
+    cd /var/apps/ashika-ofs-qa
+    pm2 start server.js --name ashika-ofs-qa --cwd /var/apps/ashika-ofs-qa
+    pm2 save
+    pm2 logs ashika-ofs-qa
+
+    Restart / stop:
+        pm2 reload ashika-ofs-qa --update-env
+        pm2 stop ashika-ofs-qa
+
+    nginx, if it is to be reachable by name - it listens on 127.0.0.1 only:
+
+        location / {
+            proxy_pass         http://127.0.0.1:4100;
+            proxy_set_header   Host              $host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-Proto $scheme;
+            client_max_body_size 8m;          # the plan upload
+        }
+
+
+B4. RUN IT FROM THE VM COMMAND LINE
+
+    cd /var/apps/ashika-ofs-qa
+    HEADLESS=1 npm test -- --book /var/apps/ashika-ofs-qa/plan/OFS_Test_Plan.xlsx --env UAT
+
+    HEADLESS=1 is required on a server - there is no display. Which means there
+    is nobody to type a one-time code either, so see D below.
+
+    Nightly at 22:30 IST, if you want one (crontab -e):
+
+        30 22 * * 1-5  cd /var/apps/ashika-ofs-qa && HEADLESS=1 /usr/bin/npm test -- --book /var/apps/ashika-ofs-qa/plan/OFS_Test_Plan.xlsx --env UAT >> /var/log/ofs-qa.log 2>&1
+
+
+--------------------------------------------------------------------------------
+ C. THE CONSOLE, IN USE
+--------------------------------------------------------------------------------
+
+    Sign in, then:
+      - Download a blank template
+      - Upload your filled plan
+      - Pick the Environment row, the browser and which roles
+      - Start run. The log streams as it goes.
+      - When it finishes the row carries Excel, HTML and Log.
+
+    Runs are kept 7 days and then removed, along with the plan workbook and
+    every credential in it.
+
+    One run at a time. A second request while one is going answers "busy".
+
+
+--------------------------------------------------------------------------------
+ D. THE ONE-TIME CODE
+--------------------------------------------------------------------------------
+
+    Three doors need one, and how the suite answers is the otp_mode column on
+    the Users sheet:
+
+      none      no code on this account (a desk account without MFA)
+      manual    pause and wait for a person to type it into the real window.
+                Needs a window, so it cannot be used headless or from the
+                console.
+      static    type the code in static_otp. Works headless.
+
+    So: runs started from the CONSOLE, or with HEADLESS=1, only cover accounts
+    that sign in without a code or have a static one. Where a code step appears
+    and there is no way to answer it, the suite names the address the code went
+    to and says which column to set - it does not hang.
+
+
+--------------------------------------------------------------------------------
+ E. WHEN IT WILL NOT RUN
+--------------------------------------------------------------------------------
+
+  "No test plan workbook at ..."
+      Pass --book with the full path, or run: npm run make-plan
+
+  "No row named PROD on the Environment sheet"
+      The --env value must match the name column exactly. Case is ignored.
+
+  "Refusing to run write flows at 11:04 IST on a Wed"
+      writes_allowed=yes on that Environment row and it is market hours. A test
+      bid is contained by being withdrawn in the same run and that only holds
+      while nobody is bidding. Run outside 09:00-16:00 IST on a trading day, or
+      set writes_allowed=no for a read-only pass.
+
+  "Executable doesn't exist at .../chrome-headless-shell"
+      npx playwright install chromium      (add --with-deps on the VM)
+
+  "channel chrome is not installed"
+      --browser chrome needs real Chrome on that machine. On a server use
+      --browser chromium, or leave it off.
+
+  Sign-in fails after several runs in quick succession
+      The OFS app rate-limits sign-in per address. Wait a minute. The suite
+      signs in ONCE per file, so a normal run never comes near it.
+
+  "Too many attempts" on the console door itself
+      Deliberate back-off after wrong passwords. It clears itself; the wait
+      grows with each failure and tops out at a minute.
+
+  The console says "NO OPERATOR ACCOUNT" at startup
+      npm run set-password
+
+
+--------------------------------------------------------------------------------
+ F. WHAT IS COVERED TODAY
+--------------------------------------------------------------------------------
+
+    Back office, render:   28 cases - sign-in, all seven panes, all seven
+                           Masters sections, the client list and its status
+                           filter, the bid form including the read-only cut-off
+                           price and the UCC refusal, the margin list, the bid
+                           book, settings.
+
+    Partner / AP:          not built yet - needs the AP email and branch code
+    Investor portal:       not built yet - needs the client UCC or email
+    Flow specs:            not built yet (place, modify, withdraw, margin
+                           add/edit/delete, issue create/import, settings save)
+
+    A SKIP is not a PASS. Three of the bid-form cases skip themselves when no
+    offer is open, so run during a live offer to get the full 28.
