@@ -10,6 +10,8 @@ const { requirePage, requireEdit, canViewPII } = require('../middleware/pageAcce
 const { maskRows } = require('../lib/pii');
 const audit = require('../lib/audit');
 const ld = require('../db/ldAdapter');
+const settings = require('../lib/settings');
+const scope = require('../lib/bidScope');
 const dbErr = require('../lib/dbErrors');
 
 const router = express.Router();
@@ -21,9 +23,12 @@ router.get('/', requirePage('ofs-desk', PAGE), async (req, res, next) => {
       `SELECT m.client_ucc, m.available, m.source, m.note, m.updated_by, m.updated_at,
               COALESCE(u.used,0) AS used, COALESCE(m.available,0) - COALESCE(u.used,0) AS free
          FROM ${SCHEMA}.ofs_margin m
-         LEFT JOIN (SELECT client_ucc, sum(value) AS used FROM ${SCHEMA}.ofs_bid
-                     WHERE status = 'Live' GROUP BY client_ucc) u ON u.client_ucc = m.client_ucc
-        ORDER BY m.client_ucc`);
+         LEFT JOIN (SELECT b.client_ucc, sum(b.value) AS used
+                      FROM ${SCHEMA}.ofs_bid b
+                      JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
+                     WHERE ${scope.workingSql(1)}
+                     GROUP BY b.client_ucc) u ON u.client_ucc = m.client_ucc
+        ORDER BY m.client_ucc`, [scope.cutoffOf(settings.cachedAll())]);
     /* A column of bare UCCs cannot be checked by eye, so the name comes from the
      * client master in one round trip. enrich() also attaches PAN, mobile and
      * email, and this was the only desk list that then sent them out with no
@@ -187,8 +192,10 @@ router.delete('/:ucc', requirePage(PAGE), requireEdit(PAGE), async (req, res, ne
       message: 'No margin record for ' + ucc + '.' });
 
     const live = await one(
-      `SELECT COALESCE(sum(value),0) AS v FROM ${SCHEMA}.ofs_bid
-        WHERE client_ucc = $1 AND status = 'Live'`, [ucc]);
+      `SELECT COALESCE(sum(b.value),0) AS v
+         FROM ${SCHEMA}.ofs_bid b JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
+        WHERE b.client_ucc = $1 AND ${scope.workingSql(2)}`,
+      [ucc, scope.cutoffOf(settings.cachedAll())]);
     // Removing the margin behind a live bid leaves the bid uncovered and the desk
     // unable to see that it is. Say so rather than doing it quietly.
     if (Number(live && live.v) > 0 && String(req.body && req.body.force) !== 'true') {

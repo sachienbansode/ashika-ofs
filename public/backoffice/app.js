@@ -243,7 +243,23 @@ function chipCls(st) {
   return 'closed';
 }
 function statusCls(s) {
-  return s === 'Live' ? 'live' : s === 'Cancelled' ? 'canc' : s === 'Rejected' ? 'rej' : 'mod';
+  return s === 'Live' ? 'live' : s === 'Cancelled' ? 'canc' : s === 'Rejected' ? 'rej'
+       : s === 'Closed' ? 'done' : 'mod';
+}
+/* What the status column says.
+ *
+ * 'Live' is what the client did with the bid; it has never said anything about
+ * whether the offer is still taking bids, so a bid on an offer that closed last
+ * week went on reading LIVE — on the desk book, on the investor's screen, and in
+ * the margin it was still holding. The server now sends status_label, which is the
+ * stored status everywhere except that one case. b.status is the fallback for a
+ * row from an older response. */
+function bidStatus(b) { return (b && (b.status_label || b.status)) || ''; }
+function bidStatusCell(b) {
+  var t = bidStatus(b);
+  return '<span class="st ' + statusCls(t) + '"' +
+    (t === 'Closed' ? ' title="Bidding on this offer has closed. The bid stands with the ' +
+      'exchange and no longer holds margin."' : '') + '>' + esc(t) + '</span>';
 }
 /**
  * A notification, bottom right, that closes itself.
@@ -965,7 +981,7 @@ function renderDash(d) {
         '<td class="n">' + inr(b.qty, 0) + '</td>' +
         '<td class="n">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
         '<td class="n">' + inr(b.value, 0) + '</td>' +
-        '<td><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td></tr>';
+        '<td>' + bidStatusCell(b) + '</td></tr>';
     }).join('') + '</tbody>'
   ) : '<tbody><tr><td class="empty">No bids yet.</td></tr></tbody>';
 }
@@ -2483,8 +2499,10 @@ async function loadExistingBids() {
           '<td class="n" data-label="Qty">' + inr(b.qty, 0) + '</td>' +
           '<td class="n" data-label="Price">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
           '<td class="n" data-label="Value">' + inr(b.value, 0) + '</td>' +
-          '<td data-label="Status"><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
-          '<td class="act">' + (b.status === 'Cancelled' ? '' :
+          '<td data-label="Status">' + bidStatusCell(b) + '</td>' +
+          /* Neither is offered on a bid the offer has closed over: the server
+             refuses both, and a button that always fails is worse than no button. */
+          '<td class="act">' + (b.status === 'Cancelled' || bidStatus(b) === 'Closed' ? '' :
             '<button class="mini" data-edit="' + b.id + '">Modify</button> ' +
             '<button class="mini" data-cancel="' + b.id + '">Withdraw</button>') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
@@ -4443,7 +4461,7 @@ function issueTablesHtml(d) {
             '<td class="n">' + inr(b.qty, 0) + '</td>' +
             '<td class="n">' + (b.is_cutoff ? 'Cut-off' : inr(b.price, 2)) + '</td>' +
             '<td class="n">' + inr(b.value, 0) + '</td>' +
-            '<td><span class="st ' + statusCls(b.status) + '">' + esc(b.status) + '</span></td>' +
+            '<td>' + bidStatusCell(b) + '</td>' +
             '<td class="m">' + dt(b.created_at) + '</td></tr>';
         }).join('') + '</tbody>'
       : '<tbody><tr><td class="empty">No bids were placed.</td></tr></tbody>') + '</table></div>' +

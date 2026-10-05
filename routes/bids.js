@@ -13,6 +13,7 @@ const bidMail = require('../lib/bidMail');
 const dbErr = require('../lib/dbErrors');
 const bidOtp = require('../lib/bidOtp');
 const settings = require('../lib/settings');
+const bidScope = require('../lib/bidScope');
 
 const router = express.Router();
 const PAGE = 'ofs-desk';
@@ -22,7 +23,12 @@ const BID_COLS = `b.id, b.ref, b.issue_id, b.client_ucc, b.cp_code, b.custody_co
   b.reject_reason, b.exch_order_no, b.otp_verified, b.created_at, b.updated_at`;
 
 const ISSUE_JOIN = `LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id`;
-const ISSUE_SEL = `i.symbol, i.company, i.isin, i.exchange, i.floor_price, i.cut_price_min, i.tick, i.lot`;
+/* i.status is ALIASED, and must stay aliased: selected as `status` it lands on the
+   row under the same name as the bid's own status, and the later one wins. The
+   window columns ride along so the screen can tell a bid that is still working
+   from one the offer has already closed over. */
+const ISSUE_SEL = `i.symbol, i.company, i.isin, i.exchange, i.floor_price, i.cut_price_min,
+  i.tick, i.lot, i.status AS issue_status, i.ret_open, i.ret_close, i.hni_open, i.hni_close`;
 
 /** GET /api/bids?issue_id=&category=&status=&q=&limit=&offset= */
 router.get('/', requirePage(PAGE), async (req, res, next) => {
@@ -71,6 +77,10 @@ router.get('/', requirePage(PAGE), async (req, res, next) => {
         ORDER BY b.created_at DESC
         LIMIT $${p.length - 1} OFFSET $${p.length}`, p);
 
+    /* 'Live' is what the CLIENT did; it says nothing about whether the offer is
+       still taking bids. A row on a closed offer went on reading LIVE for ever —
+       see lib/bidScope. */
+    bidScope.decorate(r, new Date(), await settings.all());
     // client identity lives in the other database - one extra round trip, not a join
     const merged = await ld.enrich(r, 'client_ucc');
     // A bid placed before branch stamping, or by the desk before the client's branch

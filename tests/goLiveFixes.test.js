@@ -30,13 +30,16 @@ test('two bids cannot share the same free margin', () => {
   assert.match(src, /'ofs:margin:' \+ String\(ucc\)/, 'per client — not one global lock');
   // The re-read happens INSIDE the lock, or the lock is decoration.
   const guard = /async function marginGuard[\s\S]*?\n}/.exec(src)[0];
-  assert.ok(guard.indexOf('pg_advisory_xact_lock') < guard.indexOf('sum(value)'),
+  assert.ok(guard.indexOf('pg_advisory_xact_lock') < guard.indexOf('sum(b.value)'),
     'the total is read before the lock is taken');
   // Both writers take it: placing spends margin and so does raising a bid.
   assert.match(src, /await marginGuard\(c, b\.client_ucc, ctx\.settings, value, null\)/);
   assert.match(src, /await marginGuard\(c, before\.client_ucc, ctx\.settings, value, before\.id\)/);
   // A modify excludes its own bid, or adding one share is checked against itself.
-  assert.match(guard, /excludeId \? 'AND id <> \$2' : ''/);
+  assert.match(guard, /excludeId \? 'AND b\.id <> \$3' : ''/);
+  // And it counts only the bids still working — a closed offer's bid holds nothing.
+  assert.match(guard, /scope\.workingSql\(2\)/,
+    'the guard must use the one definition in lib/bidScope');
 });
 
 test('the margin refusal reaches the screen as a rejected bid, not a 500', () => {

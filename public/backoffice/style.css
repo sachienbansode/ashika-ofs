@@ -141,6 +141,9 @@ tbody tr:hover{background:#fafcfd}
 .st{font-size:11px;font-weight:600}
 .st.live{color:#07845f} .st.mod{color:var(--amber)} .st.rej{color:var(--red)}
 .st.canc{color:var(--muted);text-decoration:line-through}
+/* The offer closed over this bid: it stands, it is simply not live any more. Grey
+   rather than struck through — nothing was withdrawn. */
+.st.done{color:var(--muted)}
 
 .note{font-size:12px;color:var(--muted);background:#f7fbfc;border:1px solid var(--line-s);
   border-left:3px solid var(--amber);border-radius:9px;padding:11px 14px;margin:12px 0;line-height:1.6}

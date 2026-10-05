@@ -665,8 +665,7 @@ function issueRow(i) {
     '<td class="m" data-label="Closes">' + dt(close) +
       '<div class="cdn sub" data-close="' + esc(new Date(close).toISOString()) + '">—</div></td>' +
     '<td data-label="Your bid">' + (mine
-      ? '<span class="chip ' + (mine.status === 'Live' ? 'open' : 'grey') + '">' + esc(mine.status) +
-        '</span><div class="sub">' + inr(mine.qty, 0) + ' at ' +
+      ? bidStatusChip(mine) + '<div class="sub">' + inr(mine.qty, 0) + ' at ' +
         (mine.is_cutoff ? 'cut-off' : rupee(mine.price)) + '</div>'
       : '<span class="sub">—</span>') + '</td>' +
     '<td class="act">' + (!open ? '<span class="sub">Closed</span>'
@@ -1040,6 +1039,22 @@ async function withdrawBid(box) {
  * showing a dash on every row for the first second, and then buttons, is its own
  * small lie about what the portal can do.
  */
+/* What the status column says about a bid.
+ *
+ * 'Live' is what the investor did with the bid. It has never said anything about
+ * whether the offer is still taking bids, so a bid on an offer that closed days
+ * ago went on reading LIVE here and on the desk's book — and went on holding the
+ * margin behind it. The server now sends status_label, which differs from the
+ * stored status in that one case only. */
+function bidStatus(x) { return (x && (x.status_label || x.status)) || ''; }
+function bidStatusChip(x) {
+  var t = bidStatus(x);
+  var cls = t === 'Live' ? 'open' : t === 'Cancelled' || t === 'Closed' ? 'grey' : 'soon';
+  return '<span class="chip ' + cls + '"' +
+    (t === 'Closed' ? ' title="Bidding on this offer has closed. Your bid stands with ' +
+      'the exchange and no longer holds margin."' : '') + '>' + esc(t) + '</span>';
+}
+
 function bidStillOpen(x) {
   var i = ISSUES_BY_ID[String(x.issue_id)];
   if (i) return (x.category === 'Retail' ? i.ret_status : i.hni_status) === 'Open';
@@ -1259,7 +1274,10 @@ async function loadIssues(quiet) {
  *   Available  what the desk has loaded for today. Margins are cleared each
  *              morning and re-uploaded, so a stale timestamp against a non-zero
  *              figure is worth showing rather than hiding.
- *   Used       the value of live bids. A cancelled bid releases its hold.
+ *   Used       the value of the bids still working — live, on an offer still
+ *              taking bids. A cancelled bid releases its hold, and so does the
+ *              offer closing: that bid is with the exchange and is not held
+ *              against the margin loaded for today.
  *   Free       what is left. Below zero means margin was reduced after bids went
  *              live — the investor has not done anything wrong, but the desk has
  *              to be told, so the card says so instead of showing a red number
@@ -1356,8 +1374,7 @@ async function loadBids(offset) {
           '<td class="n" data-label="Qty">' + inr(x.qty, 0) + '</td>' +
           '<td class="n" data-label="Price">' + (x.is_cutoff ? 'Cut-off' : inr(x.price, 2)) + '</td>' +
           '<td class="n" data-label="Value">' + inr(x.value, 0) + '</td>' +
-          '<td data-label="Status"><span class="chip ' + (x.status === 'Live' ? 'open' : x.status === 'Cancelled' ? 'grey' : 'soon') +
-            '">' + esc(x.status) + '</span></td>' +
+          '<td data-label="Status">' + bidStatusChip(x) + '</td>' +
           '<td class="m" data-label="Placed">' + dt(x.created_at) + '</td>' +
           /* Modify and Withdraw, on the screen the investor actually looks at.
            *
@@ -1368,6 +1385,7 @@ async function loadBids(offset) {
            * Neither is offered on a bid that is no longer live, nor on one whose
            * offer has closed. */
           '<td class="act" data-label="">' + (
+            bidStatus(x) !== 'Closed' &&
             (x.status === 'Live' || x.status === 'Modified') && bidStillOpen(x)
               ? '<button class="btn btn-o btn-sm" data-bid-modify="' + esc(x.issue_id) + '">Modify</button> ' +
                 '<button class="btn btn-o btn-sm" data-bid-cancel="' + esc(x.id) + '" ' +

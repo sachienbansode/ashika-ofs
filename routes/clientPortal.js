@@ -11,6 +11,7 @@ const ba = require('../lib/branchAuth');
 const { issueStatus, catStatus, minPrice, validateBid, openOnDay, issueOpenOnDay, windowFields,
         marketState, closedMessage } = require('../lib/domain');
 const settings = require('../lib/settings');
+const bidScope = require('../lib/bidScope');
 const bids = require('../lib/bidService');
 const audit = require('../lib/audit');
 const notices = require('../lib/notices');
@@ -203,7 +204,10 @@ router.get('/me/bids', async (req, res, next) => {
       `SELECT b.id, b.ref, b.issue_id, b.client_ucc, b.branch_code, b.placed_by, b.placed_by_id,
               b.category, b.qty, b.price, b.is_cutoff, b.value,
               b.status, b.reject_reason, b.otp_verified, b.created_at, b.updated_at,
-              i.symbol, i.company, i.isin, i.exchange, i.floor_price, i.ret_close, i.hni_close
+              i.symbol, i.company, i.isin, i.exchange, i.floor_price,
+              i.ret_open, i.ret_close, i.hni_open, i.hni_close,
+              -- aliased, or it would land on the row over the bid's own status
+              i.status AS issue_status
          FROM ${SCHEMA}.ofs_bid b
          LEFT JOIN ${SCHEMA}.ofs_issue i ON i.id = b.issue_id
         WHERE ${where}
@@ -220,6 +224,9 @@ router.get('/me/bids', async (req, res, next) => {
      * file: the CSV carries a Client column, so a record an investor keeps, or
      * forwards to whoever does their tax, identified the account by a bare code
      * and nothing else. It is their own name; there is nothing to withhold. */
+    /* A bid on an offer that has closed is not LIVE, whatever the stored status
+       says — lib/bidScope. */
+    bidScope.decorate(b, new Date(), s);
     const withNames = req.portal.kind === 'client'
       ? await ownName(req, b)
       : maskPortalRows(req, await ld.enrich(b, 'client_ucc'));
