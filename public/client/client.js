@@ -5,7 +5,7 @@
 var $  = function (s, r) { return (r || document).querySelector(s); };
 var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
-var S = { ref: null, choose: null, resendAt: 0, timer: null, tab: 'issues', client: null };
+var S = { ref: null, choose: null, resendAt: 0, tab: 'issues', client: null };
 
 /* What an accepted bid is, and is not. The server sends this back with every
  * accepted bid (lib/notices); this is the fallback for an older server, and a test
@@ -535,10 +535,42 @@ function enterApp() {
   setStep(3);
   // A refresh lands back where they were, not on Open issues.
   restoreCTabFromHash();
-  loadIssues();
+  loadIssues().then(stampRefreshed, function () {});
   loadBids(0);
-  if (S.timer) clearInterval(S.timer);
-  S.timer = setInterval(function () { loadIssues(true); }, 15000);
+}
+
+/**
+ * No timer here. Deliberately.
+ *
+ * This screen used to re-fetch the offer list every fifteen seconds, which on a
+ * desk is a convenience and on an investor's own bid form is an interruption:
+ * one person, one bid, one form, and a background rebuild under a half-typed
+ * quantity. captureBidForms and DIRTY were written to survive that; not polling
+ * at all is the better answer, because an investor is not watching a book - they
+ * place a bid and leave.
+ *
+ * What replaces it is a Refresh button they press when they want it, which is
+ * also honest about when the figures were last read. The countdown clock still
+ * ticks every second locally; it needs no server.
+ */
+async function refreshNow() {
+  var b = $('#cRefresh');
+  if (b) { b.disabled = true; b.textContent = 'Refreshing…'; }
+  try {
+    await loadIssues(true);
+    await loadBids(0);
+    stampRefreshed();
+  } catch (e) {
+    toast('Could not refresh', e.message || 'Try again in a moment.', 'bad');
+  } finally {
+    if (b) { b.disabled = false; b.textContent = 'Refresh'; }
+  }
+}
+
+/** When this screen last heard from the server, so a stale figure looks stale. */
+function stampRefreshed() {
+  var el = $('#cRefreshed');
+  if (el) el.textContent = 'Updated ' + hhmmIST(new Date());
 }
 
 /**
@@ -1434,7 +1466,6 @@ async function loadAllotments() {
 
 function sessionLost() {
   showIdentifier(null);
-  if (S.timer) clearInterval(S.timer);
   $('#app').classList.add('hide');
   $('#loginStage').classList.remove('hide');
   setStep(1); showPane('details');
@@ -1490,6 +1521,7 @@ async function boot() {
   $('#verifyBtn').addEventListener('click', verifyCode);
   $('#otpBackBtn').addEventListener('click', backToDetails);
   $('#resendBtn').addEventListener('click', sendCode);
+  $('#cRefresh').addEventListener('click', refreshNow);
   $('#acctList').addEventListener('click', function (e) {
     var b = e.target.closest('[data-ucc]');
     if (b) chooseAccount(b.dataset.ucc);

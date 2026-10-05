@@ -181,16 +181,27 @@ test('issue filters carry the window, and drop what cannot be filtered by', () =
   assert.ok(!/issueOptionLabel\(i, false\)/.test(SRC),
     'the short label made every leg of a scrip look identical');
 
-  const fill = SRC.slice(SRC.indexOf('function fillIssueSelects()'));
+  /* The book and export filters moved out of fillIssueSelects into their own
+   * function, so the auto-refresh can keep them current without touching the
+   * bid form beside them. Same rules, one caller fewer. */
+  const fill = SRC.slice(SRC.indexOf('function fillFilterSelects()'));
   const body = fill.slice(0, fill.indexOf('\n}\n'));
-  assert.match(body, /var openOnes = STATE\.issues\.filter\(isBiddable\);/);
+  assert.match(body, /\(STATE\.issues \|\| \[\]\)\.filter\(isBiddable\)/);
   // Closed issues stay ONLY when they hold bids — a desk reconciling yesterday
   // still has to pick them, and a closed issue with none can filter nothing.
   assert.match(body, /!isBiddable\(i\) && Number\(i\.bid_count\) > 0/);
   assert.match(body, /<optgroup label="/);
-  // A selection that is no longer on the list falls back to All, rather than
-  // silently filtering by whichever issue happens to be first.
-  assert.match(body, /el\.value = cur && el\.querySelector\('option\[value="' \+ cur \+ '"\]'\) \? cur : '';/);
+  assert.match(body, /\['#bkIssue', '#exIssue'\]/);
+
+  /* A selection that is no longer on the list falls back to the first option
+   * — "All issues" here — rather than silently filtering by whichever issue
+   * happens to be first. That now lives in setOptions, which also leaves the
+   * DOM alone when the option set has not changed: replacing innerHTML every
+   * thirty seconds closed open dropdowns and dropped focus. */
+  const so = SRC.slice(SRC.indexOf('function setOptions(el, html, want)'));
+  const sob = so.slice(0, so.indexOf('\n}\n'));
+  assert.match(sob, /if \(el\.innerHTML !== html\) \{/);
+  assert.match(sob, /el\.options\.length \? el\.options\[0\]\.value : ''/);
 });
 
 test('two closed issues on one scrip are still told apart', () => {

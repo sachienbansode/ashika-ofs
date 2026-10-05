@@ -979,8 +979,17 @@ async function loadDash() {
     // from the same payload rather than being hard-coded in two places.
     STATE.settings = d.settings || STATE.settings || {};
     renderDash(d);
-    fillIssueSelects();
-    refreshBidForm();
+    /* The dashboard is always redrawn; the BID FORM is not, when somebody is in
+     * the middle of one. A background refresh that moves the issue under a desk
+     * mid-bid is worse than a form that is thirty seconds stale, and the figures
+     * are re-derived at Validate and again on the server. */
+    if (!bidFormBusy()) {
+      fillIssueSelects();
+      refreshBidForm();
+    } else {
+      // Still keep the filter dropdowns current — they are not part of the bid.
+      fillFilterSelects();
+    }
     markRefreshed(d.as_on ? 'pinned' : null);
     var dd = $('#dashDate');
     if (dd) dd.textContent = dtDate(d.server_time) + ' · ' + dtTime(d.server_time) + ' IST';
@@ -1005,6 +1014,53 @@ async function loadDash() {
       toast('Dashboard failed', e.message, 'bad');
     }
   }
+}
+
+/**
+ * Replace a select's options only when the options have actually changed.
+ *
+ * Assigning innerHTML destroys and recreates every option, which closes an open
+ * dropdown, drops focus, and loses the selection whenever the chosen value is no
+ * longer on the list. On a screen that redraws every thirty seconds that is a
+ * guaranteed interruption rather than a possible one - and most ticks change
+ * nothing at all, because the issue master moves a few times a day.
+ *
+ * So: build the html, compare it with what is there, and leave the DOM alone
+ * when they match. Cheap, and it makes the refresh invisible in the common case.
+ */
+function setOptions(el, html, want) {
+  if (!el) return;
+  if (el.innerHTML !== html) {
+    el.innerHTML = html;
+    // Only meaningful after a real rebuild: before it, el.value is still valid.
+    if (want != null) {
+      el.value = want && el.querySelector('option[value="' + CSS.escape(String(want)) + '"]')
+        ? want : (el.options.length ? el.options[0].value : '');
+    }
+  } else if (want != null && el.value !== want &&
+             el.querySelector('option[value="' + CSS.escape(String(want)) + '"]')) {
+    el.value = want;
+  }
+}
+
+/** The book and export filters. Not part of the bid form, so always safe. */
+function fillFilterSelects() {
+  var opt = function (i) {
+    return '<option value="' + i.id + '">' + esc(issueOptionLabel(i, true)) + '</option>';
+  };
+  var openOnes = (STATE.issues || []).filter(isBiddable);
+  var closedWithBids = (STATE.issues || []).filter(function (i) {
+    return !isBiddable(i) && Number(i.bid_count) > 0;
+  });
+  var group = function (label, list) {
+    return list.length ? '<optgroup label="' + esc(label) + '">' + list.map(opt).join('') + '</optgroup>' : '';
+  };
+  var html = '<option value="">All issues</option>' +
+    group('Open', openOnes) + group('Closed — has bids', closedWithBids);
+  ['#bkIssue', '#exIssue'].forEach(function (sel) {
+    var el = $(sel);
+    if (el) setOptions(el, html, el.value);
+  });
 }
 
 function fillIssueSelects() {
@@ -1040,16 +1096,9 @@ function fillIssueSelects() {
   var group = function (label, list) {
     return list.length ? '<optgroup label="' + esc(label) + '">' + list.map(opt).join('') + '</optgroup>' : '';
   };
-  ['#bkIssue', '#exIssue'].forEach(function (sel) {
-    var el = $(sel); if (!el) return;
-    var cur = el.value;
-    el.innerHTML = '<option value="">All issues</option>' +
-      group('Open', openOnes) +
-      group('Closed — has bids', closedWithBids);
-    // Keep the selection if it is still on the list; otherwise fall back to All
-    // rather than silently filtering by whatever happens to be first.
-    el.value = cur && el.querySelector('option[value="' + cur + '"]') ? cur : '';
-  });
+  // Keep the selection if it is still on the list; otherwise fall back to All
+  // rather than silently filtering by whatever happens to be first.
+  fillFilterSelects();
 
   var pb = $('#pbIssue');
   if (pb) {
@@ -1069,12 +1118,22 @@ function fillIssueSelects() {
       var cur = STATE.issues.filter(function (i) { return String(i.id) === c; });
       live = cur.concat(live);
     }
-    pb.innerHTML = live.length
+    var html = live.length
       ? live.map(function (i) {
           return '<option value="' + i.id + '">' + esc(issueOptionLabel(i, true)) + '</option>';
         }).join('')
       : '<option value="">No OFS is open for bidding</option>';
-    if (c) pb.value = c;
+    var before = pb.value;
+    setOptions(pb, html, c || pb.value);
+    /* The one case worth saying out loud. The offer that was selected is no
+     * longer biddable, so it is gone from the list and the form now points
+     * somewhere else. Silently was how a desk filled in a bid for the wrong
+     * scrip. */
+    if (before && pb.value !== before && !STATE.editing) {
+      toast('That offer closed', 'It is no longer open for bidding, so the form has moved to ' +
+        (pb.value ? 'another offer. Check the issue before you place this bid.'
+                  : 'nothing. No OFS is open.'), 'warn');
+    }
     renderIssueInfo();
   }
 }
@@ -1451,8 +1510,41 @@ function renderClientsPager() {
  * Never touches the form while a modify is in progress - that form is bound to a
  * bid that exists.
  */
+/**
+ * Has the desk touched this form since it was last empty?
+ *
+ * The auto-refresh runs every thirty seconds whatever screen you are on, and
+ * loadDash() does not only paint the dashboard - it rebuilds the issue list and
+ * then re-derives the whole bid form from it. So a desk part way through a bid
+ * had the issue dropdown replaced under the cursor, and if the selected offer
+ * had dropped out of the biddable list in the meantime (window closed, cut-off
+ * passed, exchange setting changed) the selection went with it, silently, and
+ * the form was suddenly pointed at a different issue.
+ *
+ * The investor portal solved this months ago - captureBidForms, restoreBidForms
+ * and a DIRTY map in client.js. The desk form never got it. This is that idea,
+ * smaller: the desk's form is one form, so one flag will do.
+ *
+ * Set on any real keystroke or selection, cleared when the form is emptied or a
+ * bid completes. While it is set the timer leaves the form alone.
+ */
+var PB_DIRTY = false;
+
+/** The refresh may rebuild the bid form only when nobody is part way through one. */
+function bidFormBusy() {
+  // Modifying an existing bid is the strongest form of busy: that form is bound
+  // to a row that exists, and clearBidForm already refuses to touch it.
+  if (STATE.editing) return true;
+  if (PB_DIRTY) return true;
+  // Focus alone counts. Replacing the options of a select while its dropdown is
+  // open closes it, and nothing above would have caught that.
+  var a = document.activeElement;
+  return !!(a && a.closest && a.closest('#pane-place'));
+}
+
 function clearBidForm(alsoClient) {
   if (STATE.editing) return;
+  PB_DIRTY = false;
   ['#pbQty', '#pbPrice'].forEach(function (sel) { var el = $(sel); if (el) el.value = ''; });
   var type = $('#pbType');
   if (type) type.value = 'price';
@@ -2408,6 +2500,7 @@ async function loadExistingBids() {
 
 function endModify() {
   STATE.editing = null;
+  PB_DIRTY = false;              // the form is free again, so the refresh is too
   $('#pbTitle').textContent = 'Bid on behalf of a client';
   $('#pbEditBar').classList.add('hide');
   $('#pbEditBar').innerHTML = '';
@@ -4749,12 +4842,14 @@ async function boot() {
   $('#pbCheck').addEventListener('click', validateBid);
   $('#pbPlace').addEventListener('click', function () { placeBid(false); });
   $('#pbDefault').addEventListener('click', fillSuggestedBid);
-  $('#pbUcc').addEventListener('input', onUccTyped);
+  $('#pbUcc').addEventListener('input', function () { PB_DIRTY = true; onUccTyped(); });
   // Everything on this form is derived from something else on it, so one handler
   // recomputes the lot rather than six that each know about two fields.
   ['#pbIssue', '#pbExch', '#pbCat', '#pbType', '#pbQty', '#pbPrice'].forEach(function (sel) {
-    $(sel).addEventListener('change', refreshBidForm);
-    $(sel).addEventListener('input', refreshBidForm);
+    // A user event, never a programmatic one: assigning .value from script fires
+    // neither of these, which is exactly why the flag can be trusted.
+    $(sel).addEventListener('change', function () { PB_DIRTY = true; refreshBidForm(); });
+    $(sel).addEventListener('input', function () { PB_DIRTY = true; refreshBidForm(); });
   });
   $('#pbIssue').addEventListener('change', function () {
     // Quantity and price were worked out for the previous offer. Fill suggested

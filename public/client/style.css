@@ -282,3 +282,15 @@
 .nocode b { color: var(--ink, #0f172a); }
 .nocode ul { margin: 7px 0 7px; padding-left: 17px; }
 .nocode li { margin: 3px 0; }
+
+/* ------------------------------------------------------------- refresh ----
+ * This screen does not poll. One person, one bid, one form — a list that
+ * rebuilds itself every fifteen seconds under a half-typed quantity is an
+ * interruption, not a convenience. So: a button they press, and a stamp saying
+ * when the figures were last read, because a number with no age on it is the
+ * thing that gets trusted longest after it stops being true.
+ */
+.refresh { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.refresh .updated { font-size: 10.5px; color: var(--muted, #64748b); letter-spacing: .02em;
+  white-space: nowrap; }
+@media (max-width: 640px) { .refresh .updated { display: none; } }

@@ -160,6 +160,14 @@
         <div class="cd" id="clientUcc"></div>
       </div>
     </div>
+    <!-- No background polling on this screen: an investor is filling in one bid,
+         and a list that rebuilds itself under a half-typed quantity is an
+         interruption rather than a convenience. They refresh when they want to,
+         and the stamp says when the figures were last read. -->
+    <div class="refresh">
+      <button class="btn btn-o btn-sm" id="cRefresh">Refresh</button>
+      <span class="updated" id="cRefreshed"></span>
+    </div>
     <button class="btn btn-o btn-sm" id="signOutBtn">Sign out</button>
   </div>
 
