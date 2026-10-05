@@ -602,13 +602,21 @@ td.n.neg{color:var(--red);font-weight:650}
    different set of widths, so the eye has to re-find the columns on each line.
    auto-fit means the same markup is four columns beside a monitor, two on a
    laptop and one on a phone, with no breakpoint guessing at the number. */
-.pb-row{display:grid;gap:12px 14px;align-items:start;
+.pb-row{display:grid;gap:14px;align-items:stretch;
   /* Four columns at most, however wide the screen: a track can never be narrower
      than a quarter of the row, so auto-fit cannot fit a fifth. Below ~660px the
      158px floor wins instead and it drops to two, then one. No breakpoints, and
      it measures the column it is actually in rather than the viewport. */
   grid-template-columns:repeat(auto-fit,minmax(max(158px,calc((100% - 42px) / 4)),1fr))}
-.pb-row .f{min-width:0;display:flex;flex-direction:column;gap:5px}
+/* Three bands per field — label, control, hint — so the boxes line up across a
+   line however much hint text each field carries, and a field with no hint at all
+   (Issue, Category) does not sit 30px short of the one beside it. The hint band is
+   the one that absorbs the difference, which is what 1fr is for. Before this the
+   cells were independent columns and every wrapped line started at its own height. */
+.pb-row .f{min-width:0;display:grid;grid-template-rows:auto auto 1fr;row-gap:5px}
+/* The gap above is the spacing; a margin on top of it double-counted it, which is
+   why the first line looked looser than the ones under it. */
+.pb-row .f select,.pb-row .f input{margin-top:0}
 .pb-row .f.wide{grid-column:span 2}      /* the issue name is long, and must stay readable */
 /* One track: a span of 2 would create a second, off-screen one. */
 @media (max-width:520px){
@@ -616,7 +624,7 @@ td.n.neg{color:var(--red);font-weight:650}
   .pb-row .f.wide{grid-column:auto}
 }
 .pb-row .f select,.pb-row .f input{width:100%;min-width:0;box-sizing:border-box}
-.pb-row .f .fh{margin-top:0}
+.pb-row .f .fh{margin-top:0;align-self:start}
 
 /* --------------------------------------------------------- place bid layout --
    The bid on the left, what you consult while placing it on the right: the issue
@@ -897,8 +905,12 @@ td.n.neg{color:var(--red);font-weight:650}
   #pane-place .pb-card .bar { margin: 0 0 8px !important; }
   #pane-place .sec { font-size: 14px; }
 
-  #pane-place .pb-row { gap: 7px 10px; }
-  #pane-place .pb-row .f { gap: 2px; }
+  /* 7px here was the whole complaint: on a desk monitor the form wraps to two or
+     three lines and 7px between them read as no gap at all. 14px is the base
+     spacing, and the row still fits without scrolling because the bands above
+     stopped every cell from carrying its own slack. */
+  #pane-place .pb-row { gap: 14px 10px; }
+  #pane-place .pb-row .f { row-gap: 3px; }
   #pane-place .pb-row .f .k { font-size: 9.5px; letter-spacing: .09em; }
   #pane-place .pb-row .f select,
   #pane-place .pb-row .f input { font-size: 12.5px; padding: 5px 8px; height: 30px; }
