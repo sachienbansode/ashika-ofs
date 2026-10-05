@@ -722,8 +722,7 @@ function placePage(i, mine) {
             esc(c[1]) + '</option>';
         }).join('') + '</select></label>' +
       '<label class="cp-f"><span class="k">Bid type</span><select data-bf="type">' +
-        '<option value="cutoff"' + (mine && mine.is_cutoff ? ' selected' : '') + '>Cut-off price</option>' +
-        '<option value="limit"' + (mine && !mine.is_cutoff ? ' selected' : '') + '>My own price</option>' +
+        bidTypeOptions(i, cat, mine && mine.is_cutoff) +
       '</select></label>' +
       '<label class="cp-f"><span class="k">Quantity</span>' +
         '<input type="number" min="1" step="1" data-bf="qty"' +
@@ -824,6 +823,44 @@ function cutoffPriceFor(i, cat) {
  * from both the Place bid page and the issues list, because two copies of this rule
  * is how the two screens disagreed about whether a cut-off bid has a price.
  */
+/**
+ * The bid types this category may use.
+ *
+ * Cut-off is a RETAIL mechanism — SEBI's non-retail leg is a price bid, always, and
+ * the server refuses an HNI cut-off bid. This form offered it anyway, so a
+ * Non-Retail bidder could pick "Cut-off price", fill the whole form and only be
+ * told after Check. An option that can only be refused is worse than no option, so
+ * it is removed rather than rejected, exactly as the desk's form removes it.
+ */
+function bidTypeOptions(i, cat, wantCutoff) {
+  var allowed = OFS_BIDMATH.cutoffAllowed(i, cat);
+  // undefined means a new bid, which has always started at cut-off where cut-off is
+  // allowed — removing the option must not quietly change that default as well.
+  var cut = allowed && wantCutoff !== false;
+  return (allowed
+      ? '<option value="cutoff"' + (cut ? ' selected' : '') + '>Cut-off price</option>'
+      : '') +
+    '<option value="limit"' + (cut ? '' : ' selected') + '>My own price</option>';
+}
+
+/**
+ * Keep the bid type honest when the category changes.
+ *
+ * Switching Retail -> HNI with "Cut-off price" showing left a bid the server will
+ * refuse sitting in a form that looked complete.
+ */
+function applyBidTypes(box) {
+  if (!box) return;
+  var sel = box.querySelector('[data-bf="type"]');
+  if (!sel) return;
+  var i = ISSUES_BY_ID[box.getAttribute('data-bid-issue')];
+  var cat = (box.querySelector('[data-bf="cat"]') || {}).value || 'Retail';
+  var want = sel.value === 'cutoff';
+  var html = bidTypeOptions(i, cat, want);
+  if (sel.innerHTML !== html) sel.innerHTML = html;
+  if (!OFS_BIDMATH.cutoffAllowed(i, cat)) sel.value = 'limit';
+}
+
 function applyPriceMode(box) {
   if (!box) return;
   var g = function (k) { return box.querySelector('[data-bf="' + k + '"]'); };
@@ -1581,6 +1618,7 @@ async function boot() {
     // The category matters as well as the type: a cut-off bid switched from
     // Retail to HNI is priced at the floor, not at the retail minimum.
     if (e.target.matches('[data-bf="type"]') || e.target.matches('[data-bf="cat"]')) {
+      applyBidTypes(box);
       applyPriceMode(box);
     }
     recalcTotal();
@@ -1621,6 +1659,7 @@ async function boot() {
     if (e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
     // A cut-off bid's price is the offer's, not the investor's — shown, readonly.
     if (e.target.matches('[data-bf="type"]') || e.target.matches('[data-bf="cat"]')) {
+      applyBidTypes(box);
       applyPriceMode(box);
     }
   });

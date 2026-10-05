@@ -151,11 +151,28 @@
     return usable.indexOf(DEFAULT_EXCHANGE) >= 0 ? DEFAULT_EXCHANGE : usable[0];
   }
 
+  /**
+   * May this category bid at cut-off?
+   *
+   * Cut-off is a RETAIL mechanism. SEBI's non-retail leg is a price bid, always —
+   * lib/domain refuses an HNI cut-off bid outright — and on top of that the desk
+   * can switch cut-off off for an issue entirely.
+   *
+   * This lived in the desk's app.js alone, so the investor's own form went on
+   * offering "Cut-off price" to a Non-Retail bidder and only found out it was not
+   * allowed after Check, or after Place bid. One rule, read by all three screens.
+   */
+  function cutoffAllowed(issue, category) {
+    if (category !== 'Retail') return false;
+    return !issue || issue.cutoff_flag !== false;
+  }
+
   w.OFS_BIDMATH = {
     minPriceFor: minPriceFor, minQtyFor: minQtyFor, maxRetailQty: maxRetailQty,
     suggestedBid: suggestedBid, defaultExchange: defaultExchange,
     allowedExchanges: allowedExchanges, exchangesFor: exchangesFor,
     issueTradable: issueTradable, notTradableMessage: notTradableMessage,
+    cutoffAllowed: cutoffAllowed,
     DEFAULT_EXCHANGE: DEFAULT_EXCHANGE
   };
 }(window));

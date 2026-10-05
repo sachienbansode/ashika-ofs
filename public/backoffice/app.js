@@ -1861,9 +1861,10 @@ async function validateBid() {
  */
 
 /** Cut-off is a RETAIL mechanism. SEBI's non-retail leg is a price bid, always. */
+/* The rule itself moved to public/shared/bidmath.js, where the investor's form can
+   read it too — it was offering Non-Retail bidders a cut-off the server refuses. */
 function cutoffAllowed(issue, category) {
-  if (category !== 'Retail') return false;
-  return !issue || issue.cutoff_flag !== false;
+  return window.OFS_BIDMATH.cutoffAllowed(issue, category);
 }
 
 /*
