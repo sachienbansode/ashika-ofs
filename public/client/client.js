@@ -752,7 +752,11 @@ function placePage(i, mine) {
     '<div class="bar" style="padding:0">' +
       '<button class="btn btn-o btn-sm" data-bf="fill">Fill suggested bid</button>' +
       '<button class="btn btn-o btn-sm" data-bf="check">Check</button>' +
-      '<button class="btn btn-p btn-sm" data-bf="submit">' +
+      /* Disabled until Check passes, exactly as the desk and partner forms are.
+         It was live from the moment the card opened, so an investor could send a
+         bid that had never been checked against the band, the window or their
+         margin and meet the refusal only after it was submitted. */
+      '<button class="btn btn-p btn-sm" data-bf="submit" disabled>' +
         (mine ? 'Update bid' : 'Place bid') + '</button>' +
       (mine ? '<button class="btn btn-o btn-sm" data-bf="cancel">Withdraw</button>' : '') +
       '<div class="sp"></div>' +
@@ -986,12 +990,29 @@ function showVerdict(box, kind, lines) {
   v.innerHTML = (lines || []).map(function (l) { return '<div>' + esc(l) + '</div>'; }).join('');
 }
 
+/**
+ * Place bid is armed by Check, and only by Check.
+ *
+ * Every edit disarms it again: a bid checked at 250 shares and then raised to 500
+ * is not a checked bid, and the figure the investor was shown — the order value,
+ * the free margin — is about a bid they are no longer placing. The server
+ * revalidates regardless; this is about not letting the form promise otherwise.
+ */
+function setSubmitReady(box, ok) {
+  if (!box) return;
+  var b = box.querySelector('[data-bf="submit"]');
+  if (!b) return;
+  b.disabled = !ok;
+  b.title = ok ? '' : 'Press Check first — it tests the price band, the window and your margin.';
+}
+
 async function checkBid(box, quiet) {
   var body = readBidBox(box);
   var editing = BIDS_BY_ISSUE[body.issue_id];
   if (editing) body.editingId = editing.id;
   try {
     var r = await api(bidBase() + '/validate', { method: 'POST', body: body });
+    setSubmitReady(box, r.ok);
     if (r.ok) {
       showVerdict(box, 'ok', [
         'Order value ' + rupee(r.value, 0) + '.',
@@ -1002,6 +1023,7 @@ async function checkBid(box, quiet) {
     }
     return r.ok;
   } catch (e) {
+    setSubmitReady(box, false);
     if (e.status === 401) { sessionLost(); return false; }
     if (!quiet) showVerdict(box, 'bad', [e.message]);
     return false;
@@ -1022,6 +1044,13 @@ async function submitBid(box, otp) {
     toast(editing ? 'Bid updated' : 'Bid placed',
       (r.bid && r.bid.ref ? r.bid.ref + ' — ' : '') + 'your bid is with the OFS desk.', 'ok', 20000);
     await loadIssues();
+    /* My bids is a SEPARATE list with its own paging, and it was never told. A
+       bid placed here showed on the offer card and in the toast, then the
+       investor opened My bids and their own bid was not in it — the tab only
+       reloads when it is opened cold, and the fifteen-second poll that used to
+       paper over this is gone. Back to the first page, because a new bid is the
+       newest row and the list is newest first. */
+    await loadBids(0);
     /* loadIssues rebuilds every card, so the confirmation is written AFTER it —
      * into the fresh box, not the one that was just replaced. It stays on the
      * screen rather than fading with the toast, because the condition on it is
@@ -1061,6 +1090,9 @@ async function withdrawBid(box) {
     await api(bidBase() + '/' + editing.id, { method: 'DELETE' });
     toast('Bid withdrawn', editing.ref + ' has been cancelled.', 'ok');
     await loadIssues();
+    // Same reason as placing: the withdrawn bid stayed Live on My bids until the
+    // tab was reopened. withdrawFromList already did this; the card did not.
+    await loadBids(BIDS_PAGE.offset);
   } catch (e) {
     if (e.status === 401) return sessionLost();
     showVerdict(box, 'bad', [e.message]);
@@ -1608,13 +1640,17 @@ async function boot() {
     var box = e.target.closest('.bidbox');
     if (box && e.target.matches('[data-bf]')) {
       DIRTY[box.getAttribute('data-bid-issue')] = true;
+      setSubmitReady(box, false);
       recalcTotal();
     }
   });
   $('#cpForm').addEventListener('change', function (e) {
     var box = e.target.closest('.bidbox');
     if (!box) return;
-    if (e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
+    if (e.target.matches('[data-bf]')) {
+      DIRTY[box.getAttribute('data-bid-issue')] = true;
+      setSubmitReady(box, false);
+    }
     // The category matters as well as the type: a cut-off bid switched from
     // Retail to HNI is priced at the floor, not at the retail minimum.
     if (e.target.matches('[data-bf="type"]') || e.target.matches('[data-bf="cat"]')) {
@@ -1631,6 +1667,7 @@ async function boot() {
       e.preventDefault();
       fillSuggested(box);
       DIRTY[box.getAttribute('data-bid-issue')] = true;
+      setSubmitReady(box, false);
       recalcTotal();
       return;
     }
@@ -1651,12 +1688,18 @@ async function boot() {
   // Typed in, so a background refresh must not overwrite it.
   $('#clientIssues').addEventListener('input', function (e) {
     var box = e.target.closest('.bidbox');
-    if (box && e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
+    if (box && e.target.matches('[data-bf]')) {
+      DIRTY[box.getAttribute('data-bid-issue')] = true;
+      setSubmitReady(box, false);
+    }
   });
   $('#clientIssues').addEventListener('change', function (e) {
     var box = e.target.closest('.bidbox');
     if (!box) return;
-    if (e.target.matches('[data-bf]')) DIRTY[box.getAttribute('data-bid-issue')] = true;
+    if (e.target.matches('[data-bf]')) {
+      DIRTY[box.getAttribute('data-bid-issue')] = true;
+      setSubmitReady(box, false);
+    }
     // A cut-off bid's price is the offer's, not the investor's — shown, readonly.
     if (e.target.matches('[data-bf="type"]') || e.target.matches('[data-bf="cat"]')) {
       applyBidTypes(box);

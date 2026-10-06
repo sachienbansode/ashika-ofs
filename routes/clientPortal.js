@@ -225,8 +225,11 @@ router.get('/me/bids', async (req, res, next) => {
      * forwards to whoever does their tax, identified the account by a bare code
      * and nothing else. It is their own name; there is nothing to withhold. */
     /* A bid on an offer that has closed is not LIVE, whatever the stored status
-       says — lib/bidScope. */
-    bidScope.decorate(b, new Date(), s);
+       says — lib/bidScope. The cut-off hour comes from Settings, and it has to be
+       fetched HERE: this handler has no `s` of its own, and reaching for the one
+       in the issues handler threw a ReferenceError that took the whole of My bids
+       with it. */
+    bidScope.decorate(b, new Date(), await settings.all());
     const withNames = req.portal.kind === 'client'
       ? await ownName(req, b)
       : maskPortalRows(req, await ld.enrich(b, 'client_ucc'));
