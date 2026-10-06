@@ -1078,7 +1078,13 @@ async function submitBid(box, otp) {
     var errs = (e.body && e.body.errors) || [(e.body && e.body.message) || e.message];
     showVerdict(box, 'bad', errs);
     toast(editing ? 'Bid not updated' : 'Bid not placed', errs[0], 'bad');
-  } finally { btn.disabled = false; }
+  } finally {
+    /* NOT btn.disabled = false. A bid that was just refused has to be checked
+       again before it can be sent again — the reasons it was refused, the margin
+       and the window, are exactly what Check tests. On success the card has been
+       rebuilt by then and this is the detached button, which costs nothing. */
+    setSubmitReady(box, false);
+  }
 }
 
 async function withdrawBid(box) {

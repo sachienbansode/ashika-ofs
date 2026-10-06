@@ -23,6 +23,13 @@ test('Place bid is armed by Check and by nothing else', () => {
     'a Check that errored must not leave it armed');
 });
 
+test('a refused bid has to be checked again before it can be sent again', () => {
+  const sub = /async function submitBid[\s\S]*?\n\}/.exec(CLIENT)[0];
+  assert.ok(!/finally \{ btn\.disabled = false; \}/.test(sub),
+    'the reasons a bid was refused — the margin, the window — are what Check tests');
+  assert.match(sub, /finally \{[\s\S]*setSubmitReady\(box, false\);/);
+});
+
 test('every edit disarms it again', () => {
   // A bid checked at 250 shares and then raised to 500 is not a checked bid, and
   // the free margin the investor was shown is about a bid they are not placing.
