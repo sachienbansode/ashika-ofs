@@ -7,7 +7,7 @@ DB, auth/roles, email and PII — see `REUSE.md`. Full spec: `Ashika_OFS_Module_
 ## Layout
 ### Two databases
 
-Both live on `13.233.106.37`. Postgres cannot join across databases, so client
+Both live on the same Postgres box, whose address is in `.env` and nowhere else. Postgres cannot join across databases, so client
 identity is fetched from Ananta and merged in the app — never copied into `ofs_bids`.
 
 | Database | Holds | Adapter | Env prefix |
@@ -110,7 +110,7 @@ file, leaving the box on old code while the deploy looks fine):
 ```bash
 cd /var/apps/ashika-ofs-app && ./scripts/deploy.sh
 ```
-OFS migrations run against **`ofs_bids`** on `13.233.106.37` — never against `uat_ananta_staging`,
+OFS migrations run against **`ofs_bids`** on that box — never against `uat_ananta_staging`,
 which is production. Password via `PGPASSWORD` only.
 
 ## Domain and certificate

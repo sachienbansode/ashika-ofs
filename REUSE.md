@@ -10,7 +10,7 @@
 
 1. **The OFS app READS LD/DWH data and CALLS shared services (auth/email/RMS).** It does **not** copy client master, margin, or notification logic.
 2. **Separate deployment.** OFS is client/AP-facing and time-critical during the bidding window — keep it isolated from the internal ETL/admin console for availability, security and audit. Do not bolt it in as a tab.
-3. **Own database `ofs_bids`** on the prod Postgres box (13.233.106.37), with OFS tables under an `ofs` schema inside it. **Superseded the original plan** of an `ofs` schema inside the Ananta database (decided 2026-09-01, when the prod DB was created).
+3. **Own database `ofs_bids`** on the prod Postgres box (address in `.env`), with OFS tables under an `ofs` schema inside it. **Superseded the original plan** of an `ofs` schema inside the Ananta database (decided 2026-09-01, when the prod DB was created).
    > **Consequence — read this before writing SQL.** Postgres cannot join across databases. OFS state and LD/DWH now live in *different databases on the same server*, so `ofs.ofs_client` could not remain a view. Client identity is read at request time through `db/ldAdapter.js` and merged in the application. Two pools, two adapters, no cross-database SQL — and still no copy of the client master.
 4. **Never duplicate PII handling.** Any client-data view/export must mask via the shared PII rules unless the viewer is explicitly allowed to unmask.
 5. **Confirm the open items with Ashika** (see spec §3) before building exchange/margin integrations.
@@ -19,7 +19,7 @@
 
 ## 1. Databases
 
-### 1.1 Two databases, one server (`13.233.106.37` / `ip-172-31-24-77`)
+### 1.1 Two databases, one server (`ip-172-31-24-77`; address in `.env`)
 
 | Database | Holds | Adapter | Env prefix | Access |
 |---|---|---|---|---|
@@ -110,7 +110,7 @@ pm2 restart <ofs-app>
 pm2 logs <ofs-app> --lines 20
 ```
 
-DB changes run via `psql` on the DB box (`13.233.106.37`, db `uat_ananta_staging`).
+DB changes run via `psql` on the DB box (address in `.env`, db `uat_ananta_staging`).
 
 ---
 

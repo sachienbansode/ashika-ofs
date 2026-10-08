@@ -27,7 +27,7 @@ git reset --hard origin/main
 pm2 restart <ofs-app>
 pm2 logs <ofs-app> --lines 20
 ```
-DB changes: `psql` on the box `13.233.106.37` — OFS migrations against `ofs_bids`, never against `uat_ananta_staging` (which is PRODUCTION despite its name). Password via `PGPASSWORD` only. Verify every JS change with `node --check`, then `npm test`, before deploy; `npm run smoke` proves both connections.
+DB changes: `psql` on the DB box (address in `.env`, printed by `npm run smoke` — it has changed before) — OFS migrations against `ofs_bids`, never against `uat_ananta_staging` (which is PRODUCTION despite its name). Password via `PGPASSWORD` only. Verify every JS change with `node --check`, then `npm test`, before deploy; `npm run smoke` proves both connections.
 
 ## Security invariants (non-negotiable)
 `'*'`-only full access · `requirePage` on every mount · unconditional PII masking · rate-limits on auth/OTP · no CORS origin reflection · CSP on · OTP stored hash-only · UI help text says "Admin" not "Ashika".

@@ -1,6 +1,6 @@
 # Deploying the OFS desk on an Azure VM (Ubuntu 22.04 / 24.04)
 
-The app runs on Azure; both databases stay on the AWS box `13.233.106.37`. That
+The app runs on Azure; both databases stay on the AWS box whose address is in `.env`. That
 cross-cloud hop is the one thing most likely to bite, so it is step 1.
 
 Target state: Node bound to `127.0.0.1:4011`, PM2 keeping it alive across reboots,
@@ -20,7 +20,7 @@ nginx terminating TLS on `ofs.ashikagroup.com`, certificates auto-renewing.
 > Confirm the DB hop before anything else — from the VM:
 > ```bash
 > sudo apt install -y postgresql-client
-> nc -vz 13.233.106.37 5432          # must say "succeeded"
+> nc -vz "$(grep -m1 -oP '(?<=@)[^:]+' .env)" 5432   # the host .env actually names; must say "succeeded"
 > ```
 > If it hangs, it is the AWS security group, not the VM.
 
@@ -88,9 +88,9 @@ Fill these — everything else has a working default:
 
 | Key | Value |
 |---|---|
-| `OFS_DATABASE_URL` | `postgresql://root_admin@13.233.106.37:5432/ofs_bids` |
+| `OFS_DATABASE_URL` | `postgresql://root_admin@13.234.135.5:5432/ofs_bids` (current; verify with `npm run smoke`) |
 | `OFS_PG_PASSWORD` | the `root_admin` password |
-| `ANANTA_DATABASE_URL` | `postgresql://root_admin@13.233.106.37:5432/uat_ananta_staging` |
+| `ANANTA_DATABASE_URL` | `postgresql://root_admin@13.234.135.5:5432/uat_ananta_staging` (current) |
 | `ANANTA_PG_PASSWORD` | same password |
 | `JWT_SECRET` | **exactly** the platform's value, or every login is rejected |
 | `API_KEY_SECRET` | **exactly** the platform's value, or the SMTP password will not decrypt. The portal is a separate host, so this has to be copied from there. If you cannot get it, set `SMTP_HOST` instead — see below |

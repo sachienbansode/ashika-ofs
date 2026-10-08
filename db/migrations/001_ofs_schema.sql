@@ -1,6 +1,6 @@
 -- Ashika OFS - schema bootstrap
 -- Runs on the shared Ananta instance (uat_ananta_staging), alongside stg / dwh.
--- Apply:  psql -h 13.233.106.37 -U <user> -d uat_ananta_staging -f db/migrations/001_ofs_schema.sql
+-- Apply:  psql -h <the host in .env> -U <user> -d uat_ananta_staging -f db/migrations/001_ofs_schema.sql
 -- (password via PGPASSWORD env var only)
 
 CREATE SCHEMA IF NOT EXISTS ofs;
