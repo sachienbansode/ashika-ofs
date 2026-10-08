@@ -132,3 +132,32 @@ test('no real database address is written into the repo', () => {
     assert.ok(!/\b13\.233\.106\.37\b/.test(src), f + ' still names the old database host');
   }
 });
+
+/* ---------------------------------------------------------------------------
+ * Hold the connections, do not reopen them.
+ *
+ * The app is on Azure and both databases are on AWS, so every new connection is
+ * a DNS lookup, a TCP handshake, a TLS handshake and SCRAM across the public
+ * internet. At a 30-second idle timeout a quiet desk threw the pool away and paid
+ * all of it again on the next click, and the outbound NAT in front of the VM
+ * collected a socket per attempt — which shows up as intermittent "connection
+ * timeout" against a database that answers a fresh process perfectly well.
+ * ------------------------------------------------------------------------- */
+test('the pool keeps its connections warm across a quiet spell', () => {
+  const cfg = withEnv({ X_PG_HOST: 'h', X_PG_PORT: '5432', X_PG_DATABASE: 'd', X_PG_USER: 'u' },
+    () => build('X', 'app'));
+  assert.equal(cfg.keepAlive, true, 'without a keepalive the path goes cold behind the NAT');
+  assert.ok(cfg.idleTimeoutMillis >= 300000,
+    'reaping an idle connection after 30s means reconnecting all day');
+  assert.ok(cfg.connectionTimeoutMillis >= 15000,
+    'a cold cross-cloud connection needs more than ten seconds');
+});
+
+test('all three belong to the network, so all three are overridable', () => {
+  const cfg = withEnv({ X_PG_HOST: 'h', X_PG_PORT: '5432', X_PG_DATABASE: 'd', X_PG_USER: 'u',
+                        X_PG_IDLE_MS: '1000', X_PG_CONNECT_MS: '2000', X_PG_POOL_MAX: '25' },
+    () => build('X', 'app'));
+  assert.equal(cfg.idleTimeoutMillis, 1000);
+  assert.equal(cfg.connectionTimeoutMillis, 2000);
+  assert.equal(cfg.max, 25);
+});

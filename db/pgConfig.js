@@ -52,8 +52,24 @@ function build(prefix, appName) {
   // An explicit <PREFIX>_PG_PASSWORD always wins over one embedded in the URL.
   if (pw) cfg.password = pw;
   if (typeof cfg.password !== 'string' || !cfg.password) delete cfg.password;
-  cfg.idleTimeoutMillis = 30000;
-  cfg.connectionTimeoutMillis = 10000;
+  /* Hold the connections open rather than reopening them every half minute.
+   *
+   * These two databases are across the public internet - the app is on Azure, the
+   * Postgres on AWS - so a new connection is a DNS lookup, a TCP handshake, a TLS
+   * handshake and SCRAM, every time. At a 30-second idle timeout a desk that is
+   * quiet for a minute throws the whole pool away and pays all of that again on
+   * the next click, and the outbound NAT in front of the VM collects a socket per
+   * attempt. Intermittent "connection timeout" against a database that answers
+   * perfectly well from a fresh process is what that looks like.
+   *
+   * So: a TCP keepalive to stop the path going cold, ten minutes before an idle
+   * connection is reaped, and fifteen seconds of patience on a cold one. All
+   * three are overridable per connection, because the right numbers belong to the
+   * network rather than to this file. */
+  cfg.keepAlive = true;
+  cfg.keepAliveInitialDelayMillis = 10000;
+  cfg.idleTimeoutMillis = Number(process.env[prefix + '_PG_IDLE_MS'] || 600000);
+  cfg.connectionTimeoutMillis = Number(process.env[prefix + '_PG_CONNECT_MS'] || 15000);
   cfg.application_name = appName;
   return cfg;
 }
