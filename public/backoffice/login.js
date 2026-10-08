@@ -12,6 +12,19 @@
   function show(el, on) { el.classList[on ? 'remove' : 'add']('hide'); }
   function fail(el, msg) { el.textContent = msg; show(el, true); }
 
+  function fallbackFor(status) {
+    if (status === 429) {
+      return 'Too many sign-in attempts from this connection. Please wait about 15 minutes ' +
+             'and try again, or sign in at the portal and open the OFS desk from there.';
+    }
+    if (status >= 500) {
+      return 'Sign-in is not working on the server just now (' + status + '). This is not ' +
+             'your password. Please tell IT, or sign in at the portal.';
+    }
+    if (status === 401 || status === 403) return 'Email or password is incorrect.';
+    return 'Sign-in failed (' + status + ').';
+  }
+
   async function post(url, body) {
     var r = await fetch(url, {
       method: 'POST',
@@ -22,7 +35,12 @@
     var data = {};
     try { data = await r.json(); } catch (e) {}
     if (!r.ok) {
-      var err = new Error(data.message || 'Sign-in failed.');
+      /* The last line of defence. Every refusal the server means to give carries a
+         message; the ones that reach here without one are the ones nobody wrote a
+         sentence for — a plain-text 429 from the rate limiter, a proxy's own 502,
+         a response that was not JSON at all. "Sign-in failed." for all of them
+         told the desk nothing, not even whether the fault was theirs. */
+      var err = new Error(data.message || fallbackFor(r.status));
       err.code = data.error; err.status = r.status;
       throw err;
     }

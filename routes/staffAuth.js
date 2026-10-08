@@ -36,8 +36,24 @@ const COOKIE_OPTS = {
 };
 
 // Password guessing is the whole threat here, so the limit is tight and per-IP.
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
-const verifyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+/* The cap stays; what it SAYS is the fix.
+ *
+ * express-rate-limit answers 429 with a plain-text body, and the sign-in page
+ * parses JSON — so a locked-out desk read "Sign-in failed.", which is the same
+ * sentence a wrong password produces and a server fault produces. Somebody who
+ * has simply tried eleven times in a quarter of an hour cannot tell that from a
+ * broken server, and rightly rings to say sign-in is down.
+ *
+ * It does not say how many attempts are left or when exactly the window opens -
+ * that is a counter for anyone who wants one. It says enough to stop and wait. */
+const TOO_MANY = { error: 'too_many_attempts',
+  message: 'Too many sign-in attempts from this connection. Please wait about 15 minutes '
+         + 'and try again, or sign in at the portal and open the OFS desk from there.' };
+const limitHandler = (req, res) => res.status(429).json(TOO_MANY);
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true,
+  legacyHeaders: false, handler: limitHandler });
+const verifyLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true,
+  legacyHeaders: false, handler: limitHandler });
 
 const ipOf = (req) => (req.ip || '').replace(/^::ffff:/, '') || null;
 
@@ -198,7 +214,12 @@ router.post('/login', loginLimiter, async (req, res) => {
                + 'Tell IT, or sign in from the portal instead.' });
     }
     console.error('[staff-auth] login failed:', e.message);
-    return res.status(500).json({ error: 'server_error' });
+    /* A message, not a bare code. The browser must not learn WHAT broke, but
+       "Sign-in failed." told the desk nothing at all - not even that this was a
+       fault on our side rather than their password. */
+    return res.status(500).json({ error: 'server_error',
+      message: 'Sign-in is not working on the server just now. This is not your password. '
+             + 'Please tell IT, or sign in at the portal and open the OFS desk from there.' });
   }
 });
 
@@ -258,7 +279,9 @@ router.post('/verify', verifyLimiter, async (req, res) => {
     return res.json(await issueSession(res, user, req));
   } catch (e) {
     console.error('[staff-auth] verify failed:', e.message);
-    return res.status(500).json({ error: 'server_error' });
+    return res.status(500).json({ error: 'server_error',
+      message: 'The code could not be checked on the server just now. '
+             + 'Please tell IT, or sign in at the portal and open the OFS desk from there.' });
   }
 });
 
