@@ -67,6 +67,11 @@
 
       <!-- step 1, branch door -->
       <form id="paneBranch" class="hide" novalidate>
+        <!-- Wrapped so the whole ask-for-a-code half can be hidden once the code has
+             been sent and the question becomes WHICH branch. It used to stay on
+             screen under the chooser, so the page offered "Send code" and "which
+             branch are you signing in as?" at the same time. -->
+        <div id="brForm">
         <div class="fg">
           <label class="fl" for="brEmail">Branch or AP email address</label>
           <div class="field">
@@ -81,6 +86,7 @@
         <button class="btn btn-p btn-block" id="brSendBtn" type="submit" disabled>
           <span class="lbl">Send code</span>
         </button>
+        </div><!-- /brForm -->
         <div id="brPick" class="hide" style="margin-top:14px"></div>
         <div class="note" style="margin-top:14px">
           You will see the clients mapped to your branch, and every bid against them —

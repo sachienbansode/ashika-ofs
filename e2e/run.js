@@ -695,6 +695,54 @@ async function main() {
     return { detail: 'refused ' + r.status + ' ' + ((r.json && r.json.error) || '') };
   });
 
+  /* An address registered against TWO branch codes.
+   *
+   * This could not sign in at all. Verifying the code is what spends it, and the
+   * old flow then asked the browser to verify the SAME code a second time to say
+   * which branch — so the only possible answer was "That code has already been
+   * used. Please request a new one.", and requesting a new one repeated the loop.
+   * It is a chooser ticket now, the way the client door has always done it. */
+  await scenario('AP-20', 'An address on two branch codes is asked which, and gets in', async () => {
+    const start = await POST('/client/auth/branch/start', { email: 'ap.two@example.com' }, { session: 'ap2' });
+    must(start.status === 200, 'two-branch sign-in start failed: ' + (start.text || '').slice(0, 160));
+    const code = start.json.test_code;
+    must(code, 'no test code — is OFS_OTP_TEST_MODE on?');
+
+    const v = await POST('/client/auth/branch/verify',
+      { ref: start.json.ref, otp: code }, { session: 'ap2' });
+    eq(v.status, 200, 'the verify that should ask which branch');
+    must(v.json.choose_branch, 'two codes on one address must ask which');
+    must(v.json.choose, 'the chooser ticket is what replaces re-spending the code');
+
+    // The list has to be choosable BY something: K005 and KO05 are one character
+    // apart and that character looks the same in most faces.
+    const cards = v.json.branches || [];
+    eq(cards.length, 2, 'both branch codes offered');
+    must(cards.every((b) => b.city), 'a code alone cannot be told from its look-alike');
+    must(new Set(cards.map((b) => b.city)).size === 2, 'the two cards look identical');
+
+    const pick = await POST('/client/auth/branch/select',
+      { choose: v.json.choose, branch_code: 'KO05' }, { session: 'ap2' });
+    eq(pick.status, 200, 'picking a branch off the ticket failed: ' + (pick.text || '').slice(0, 200));
+
+    const who = await GET('/client/api/me', { session: 'ap2' });
+    eq(who.status, 200, 'the session was not established');
+    return { detail: 'offered ' + cards.map((b) => b.code + ' (' + b.city + ')').join(' and ') +
+      '; signed in as KO05' };
+  });
+
+  await scenario('AP-21', 'The ticket cannot be used to nominate a different branch', async () => {
+    const start = await POST('/client/auth/branch/start', { email: 'ap.two@example.com' }, { session: 'ap3' });
+    const v = await POST('/client/auth/branch/verify',
+      { ref: start.json.ref, otp: start.json.test_code }, { session: 'ap3' });
+    must(v.json.choose, 'no chooser ticket to test with');
+    // A016 is a real, active branch — just not one this code was issued for.
+    const bad = await POST('/client/auth/branch/select',
+      { choose: v.json.choose, branch_code: 'A016' }, { session: 'ap3' });
+    must(bad.status === 403, 'a ticket let a caller pick a branch it was not issued for');
+    return { detail: 'refused ' + bad.status + ' ' + ((bad.json && bad.json.error) || '') };
+  });
+
   await scenario('AP-5', 'A branch signs in and sees ONLY its own clients', async () => {
     const start = await POST('/client/auth/branch/start', { email: 'branch.a016@example.com' }, { session: 'ap' });
     must(start.status === 200, 'branch sign-in start failed: ' + (start.text || '').slice(0, 160));

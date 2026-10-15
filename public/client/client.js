@@ -103,7 +103,7 @@ async function api(path, opts) {
  * the choice is offered from the list the server resolved when it issued the code,
  * never from anything typed here.
  */
-var BR = { ref: null, branches: [] };
+var BR = { ref: null, branches: [], choose: null };
 
 function branchHint(msg, bad) {
   var h = $('#brHint');
@@ -148,28 +148,76 @@ async function sendBranchCode() {
   } finally { btn.disabled = false; }
 }
 
+/**
+ * The branch chooser.
+ *
+ * Three things this screen got wrong. It left the refusal from the spent code
+ * sitting in red above the list, so the one sentence on screen said the sign-in
+ * had failed while the sign-in was in fact waiting for an answer. It called
+ * showPane('branch'), which is the EMAIL form — so "Send code" and the address
+ * field stayed on screen under the question, reading as though a new code were
+ * wanted. And it bound a click handler on every render, so a second pass sent two
+ * requests for one click, the first spending the ticket and the second refused.
+ */
+function showBranchPicker(cards, codes) {
+  var list = (cards && cards.length ? cards : BR.branches || [])
+    .filter(function (b) { return !codes.length || codes.indexOf(b.code) >= 0; });
+
+  branchHint('');                                   // the spent code's refusal, gone
+  show($('#brForm'), false);                        // and no "Send code" under the list
+  $('#brPick').classList.remove('hide');
+  $('#brPick').innerHTML = '<div class="fl">Which branch are you signing in as?</div>' +
+    list.map(function (b) {
+      /* The code in a monospaced face, because the two on a live address differed
+         by letter-O against digit-zero and looked identical in the body font. The
+         city and firm are there for the same reason: something to choose BY. */
+      var sub = [b.city, b.firm ? 'Firm ' + b.firm : ''].filter(Boolean).join(' · ');
+      return '<button type="button" class="acct" data-br="' + esc(b.code) + '">' +
+        '<div><b class="mono">' + esc(b.code) + '</b> — ' + esc(b.name || '') + '</div>' +
+        '<div class="cd">' + esc([b.type_label, sub].filter(Boolean).join(' · ')) + '</div>' +
+        '</button>';
+    }).join('') +
+    '<div class="hint" id="brPickMsg" role="status" aria-live="polite"></div>';
+  showPane('branch');
+}
+
+/** The picker's own message line, since the field hint is hidden with the form. */
+function pickHint(msg, bad) {
+  var h = $('#brPickMsg');
+  if (!h) return branchHint(msg, bad);
+  h.className = 'hint' + (bad ? ' bad' : '');
+  h.textContent = msg || '';
+}
+
+/** Sign in as the branch that was picked. Bound ONCE, from init. */
+async function selectBranch(codeOfBranch) {
+  var btns = $$('#brPick [data-br]');
+  btns.forEach(function (b) { b.disabled = true; });          // one click, one request
+  try {
+    await api('/client/auth/branch/select',
+      { method: 'POST', body: { choose: BR.choose, branch_code: codeOfBranch } });
+    location.href = '/partner/';
+  } catch (e) {
+    btns.forEach(function (b) { b.disabled = false; });
+    pickHint((e.body && e.body.message) || e.message || 'Sign-in failed.', true);
+  }
+}
+
 /** Verify a branch code. Called by the shared OTP box when BR.ref is set. */
 async function verifyBranchCode(code, chosen) {
   var r = await api('/client/auth/branch/verify', { method: 'POST',
     body: { ref: BR.ref, otp: code, branch_code: chosen || null } });
 
   if (r.choose_branch) {
-    // More than one branch on this address: ask, now that the code is verified.
-    $('#brPick').classList.remove('hide');
-    $('#brPick').innerHTML = '<div class="fl">Which branch are you signing in as?</div>' +
-      BR.branches.filter(function (b) { return (r.branch_codes || []).indexOf(b.code) >= 0; })
-        .map(function (b) {
-          return '<button type="button" class="acct" data-br="' + esc(b.code) + '">' +
-            '<div><b>' + esc(b.code) + '</b> — ' + esc(b.name || '') + '</div>' +
-            '<div class="cd">' + esc(b.type_label || '') + '</div></button>';
-        }).join('');
-    showPane('branch');
-    $('#brPick').addEventListener('click', function (ev) {
-      var b = ev.target.closest('[data-br]');
-      if (b) verifyBranchCode(code, b.dataset.br).catch(function (e) {
-        branchHint((e.body && e.body.message) || e.message || 'Sign-in failed.', true);
-      });
-    });
+    /* More than one branch on this address: ask, now that the code is verified.
+     *
+     * The code is SPENT by now — verifying is what spends it. This used to re-call
+     * verify with the same code once a branch was picked, which could only answer
+     * "That code has already been used", so nobody registered against two branch
+     * codes could sign in at all. The server now hands back a short-lived chooser
+     * ticket and the pick goes to /branch/select. */
+    BR.choose = r.choose;
+    showBranchPicker(r.branches || [], r.branch_codes || []);
     return;
   }
 
@@ -1606,6 +1654,13 @@ async function boot() {
     $('#brEmail').parentNode.classList.toggle('valid', ok);
   });
   $('#paneBranch').addEventListener('submit', function (e) { e.preventDefault(); sendBranchCode(); });
+  /* ONCE. This used to be bound inside the chooser's own render, so a second pass
+     left two handlers on the list and one click sent two sign-ins — the first
+     spending the ticket, the second refused for using a spent one. */
+  $('#brPick').addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-br]');
+    if (b && !b.disabled) selectBranch(b.dataset.br);
+  });
 
   $('#paneDetails').addEventListener('submit', function (e) { e.preventDefault(); sendCode(); });
   $('#idInput').addEventListener('input', refreshDetails);

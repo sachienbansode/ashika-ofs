@@ -51,7 +51,14 @@ INSERT INTO "admin-staging-api".users (id, email, first_name, last_name, passwor
 -- ---- branches ------------------------------------------------------------
 INSERT INTO stg.branchho (branchcode, branchname, firmnumber, branchtype, active, email, cmobileno, contactperson, ccity, cstate)
 VALUES ('A016','Andheri Branch','ASK-000001','B','Y','branch.a016@example.com','9000000016','Branch Head','Mumbai','MH'),
-       ('A017','Pune Branch',   'ASK-000001','B','N','branch.a017@example.com','9000000017','Head Two','Pune','MH');
+       ('A017','Pune Branch',   'ASK-000001','B','N','branch.a017@example.com','9000000017','Head Two','Pune','MH'),
+       -- ONE address, TWO codes, and the codes differ by letter-O against digit-zero.
+       -- This is the shape a live Authorised Partner turned out to have (K005 and
+       -- KO05, same firm name on both), and it is the shape that could not sign in
+       -- at all: the code was spent proving who they were, and the old flow then
+       -- asked for it a second time to say which branch.
+       ('K005','Avantikaa Financial','ASK-000001','A','Y','ap.two@example.com','9000000050','AP Desk','Mumbai','MH'),
+       ('KO05','Avantikaa Financial','ASK-000001','A','Y','ap.two@example.com','9000000051','AP Desk','Thane','MH');
 
 -- ---- clients -------------------------------------------------------------
 -- active, belongs to A016

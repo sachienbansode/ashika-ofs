@@ -90,9 +90,7 @@ router.post('/start', startLimiter, async (req, res) => {
       ttl_minutes: ca.OTP_TTL_MIN, resend_after_s: ca.RESEND_COOLDOWN_S,
       // Shown so the person knows which code they are about to sign in as. Safe:
       // they already hold the mailbox these branches publish.
-      branches: eligible.map((b) => ({
-        code: b.branch_code, name: b.branch_name,
-        type: ba.actorTypeOf(b), type_label: ba.actorLabel(ba.actorTypeOf(b)) })),
+      branches: eligible.map((b) => branchCard(b)),
       message: 'A code has been sent to the email registered for this branch.'
     };
 
@@ -123,6 +121,31 @@ router.post('/start', startLimiter, async (req, res) => {
     return res.status(500).json({ error: 'server_error' });
   }
 });
+
+/**
+ * One branch, as the chooser has to show it.
+ *
+ * The code alone is not enough to choose by. A live address came back holding both
+ * K005 and KO05 — letter O against digit zero, the same firm name on both — and
+ * the two buttons were indistinguishable on screen. Whoever is signing in cannot
+ * pick the right one from a string they cannot tell apart, so the city and the
+ * firm number ride along and the screen sets the code in a monospaced face, where
+ * 0 and O are different shapes.
+ */
+function branchCard(b) {
+  return {
+    code: b.branch_code,
+    name: b.branch_name,
+    city: b.city || null,
+    firm: b.firm || null,
+    type: ba.actorTypeOf(b),
+    type_label: ba.actorLabel(ba.actorTypeOf(b))
+  };
+}
+
+/* How long the chooser ticket lives. Long enough to read two lines and click,
+ * short enough that an abandoned one is worthless. */
+const CHOOSE_TTL_MIN = 5;
 
 const VERIFY_MSG = {
   missing: 'Enter the 6-digit code.',
@@ -156,31 +179,94 @@ router.post('/verify', verifyLimiter, async (req, res) => {
 
     // The branch must be one the code was issued for. Sending another code here is
     // the obvious attack, and the list was fixed before the code was sent.
-    const code = candidates.length === 1 ? candidates[0] : wanted;
+    /* A code is spent the moment it verifies — ca.verifyChallenge sets used_at, and
+     * it must, or a code could be replayed.
+     *
+     * This asked the browser to call verify AGAIN with the branch it had chosen,
+     * using the same code. The second call could only ever answer "That code has
+     * already been used. Please request a new one." — so no address registered
+     * against more than one branch code could sign in AT ALL, and requesting a new
+     * code just repeated the loop.
+     *
+     * The client door solved this long ago: when a verified code resolves to more
+     * than one account it issues a short-lived chooser ticket and the browser
+     * calls /select with that. The branch door now does the same thing, which is
+     * also why the list of candidates cannot be widened by the request - the
+     * ticket carries the codes the OTP was issued for. */
+    const code = candidates.length === 1 ? candidates[0] : null;
     if (!code) {
-      return res.status(200).json({ ok: true, choose_branch: true, branch_codes: candidates });
+      const choose = crypto.randomUUID();
+      await query(
+        `INSERT INTO ${SCHEMA}.ofs_client_otp
+           (ref, mobile, email, uccs, branch_codes, actor_type, otp_hash, max_attempts,
+            channel, expires_at, ip, user_agent, used_at)
+         VALUES ($1,NULL,$2,NULL,$3,'branch','chooser',0,'test',
+                 now() + ($4 || ' minutes')::interval, $5, $6, now())`,
+        [choose, r.email, candidates, String(CHOOSE_TTL_MIN), ip, ua.slice(0, 300)]);
+      const cards = (await branches.findMany(candidates)).map(branchCard);
+      return res.status(200).json({ ok: true, choose_branch: true, choose,
+        branch_codes: candidates, branches: cards });
     }
-    if (candidates.indexOf(code) < 0) {
-      return res.status(403).json({ error: 'not_your_branch',
-        message: 'That branch was not one of the options for this sign-in.' });
-    }
-
-    // Re-check against LD and the override at the moment of issue, not at the moment
-    // the code was sent: a branch closed in the last five minutes must not get in.
-    const branch = await branches.findByCode(code);
-    const blocked = await branches.blockedCodes();
-    const block = ba.loginBlock(branch, blocked);
-    if (block) {
-      await ca.logAttempt({ event: 'otp_failed', email: r.email, ip, userAgent: ua, ok: false, reason: block });
-      return res.status(403).json({ error: block, message: ba.blockMessage(block) });
-    }
-
-    return res.json(await establish(res, branch, r.email, ip, ua));
+    return res.json(await signIn(res, code, r.email, ip, ua));
   } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.code, message: e.message });
     console.error('[branch-auth] verify failed:', e.message);
     return res.status(500).json({ error: 'server_error' });
   }
 });
+
+/**
+ * POST /client/auth/branch/select { choose, branch_code }
+ *
+ * Only reachable with a chooser ticket, which is only issued against a code that
+ * has already verified. The branch must be one the ticket carries: the request
+ * cannot nominate a branch of its own, exactly as the verify step could not.
+ */
+router.post('/select', verifyLimiter, async (req, res) => {
+  const ip = ipOf(req);
+  const ua = req.headers['user-agent'] || '';
+  try {
+    const wanted = branches.normCode((req.body || {}).branch_code);
+    const row = await one(
+      `SELECT email, branch_codes FROM ${SCHEMA}.ofs_client_otp
+        WHERE ref = $1 AND otp_hash = 'chooser' AND actor_type = 'branch' AND expires_at > now()`,
+      [(req.body || {}).choose]);
+    if (!row) {
+      return res.status(401).json({ error: 'unknown',
+        message: 'That sign-in attempt is no longer valid. Please request a new code.' });
+    }
+    if (!wanted || (row.branch_codes || []).indexOf(wanted) < 0) {
+      return res.status(403).json({ error: 'not_your_branch',
+        message: 'That branch was not one of the options for this sign-in.' });
+    }
+    return res.json(await signIn(res, wanted, row.email, ip, ua));
+  } catch (e) {
+    /* A disabled or closed branch is a 403 with a sentence, not a server fault —
+       raised inside signIn so verify and select cannot answer it differently. */
+    if (e.status) return res.status(e.status).json({ error: e.code, message: e.message });
+    console.error('[branch-auth] select failed:', e.message);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+/**
+ * The last checks, then the session — shared by verify (one branch) and select
+ * (several), so a chosen branch is never checked less thoroughly than a sole one.
+ */
+async function signIn(res, code, email, ip, ua) {
+  // Re-checked against LD and the override NOW, not at the moment the code was
+  // sent: a branch closed in the last five minutes must not get in.
+  const branch = await branches.findByCode(code);
+  const blocked = await branches.blockedCodes();
+  const block = ba.loginBlock(branch, blocked);
+  if (block) {
+    await ca.logAttempt({ event: 'otp_failed', email, ip, userAgent: ua, ok: false, reason: block });
+    const e = new Error(ba.blockMessage(block));
+    e.status = 403; e.code = block;
+    throw e;
+  }
+  return establish(res, branch, email, ip, ua);
+}
 
 /** Open the branch session and describe it. */
 async function establish(res, branch, email, ip, ua) {

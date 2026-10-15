@@ -87,6 +87,26 @@ async function findByCode(code) {
       LIMIT 1`, [c, FIRM()]);
 }
 
+/**
+ * Several branches by code, in ONE round trip and in the order asked for.
+ *
+ * The sign-in chooser needs the city and the firm number beside each code, because
+ * two codes on one address can differ by a single character that looks the same —
+ * K005 and KO05 — and a list of codes alone cannot be chosen from.
+ */
+async function findMany(codes) {
+  const want = Array.from(new Set((codes || []).map(normCode).filter(Boolean)));
+  if (!want.length) return [];
+  const rows = await ananta.rows(
+    `SELECT ${BRANCH_COLS}
+       FROM ${STG}.branchho b
+      WHERE upper(btrim(b.branchcode)) = ANY($1)
+        AND btrim(b.firmnumber) = $2
+        AND upper(btrim(COALESCE(b.active,''))) = 'Y'`, [want, FIRM()]);
+  const by = new Map(rows.map((r) => [r.branch_code, r]));
+  return want.map((c) => by.get(c)).filter(Boolean);
+}
+
 /** Every active branch of the firm, for the desk's access screen. */
 async function listAll() {
   return ananta.rows(
@@ -170,6 +190,6 @@ async function blockedCodes() {
 
 module.exports = {
   FIRM, emailsOf, normEmail, normCode,
-  findByEmail, findByCode, listAll,
+  findByEmail, findByCode, findMany, listAll,
   uccsOfBranch, branchHasClient, branchOfUccs, blockedCodes
 };
