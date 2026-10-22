@@ -282,6 +282,14 @@ async function start() {
     console.log('[boot] client OTP :', otpLib.explainMode(cfg, 'otp_mode_client', 'OFS_OTP_TEST_MODE'));
     console.log('[boot] staff OTP  :', otpLib.explainMode(cfg, 'otp_mode_staff', 'OFS_STAFF_OTP_TEST_MODE'));
   }
+  {
+    // Every email carries this address — in the logo it fetches and the footer it
+    // links to. Say so at boot rather than discovering it in a client's inbox.
+    const brand = require('./lib/emailBranding');
+    const bad = brand.appUrlProblem();
+    console.log('[boot] email links:', brand.appUrl() + (bad ? '  <-- ' + bad : ''));
+    if (bad) console.warn('[boot] set APP_URL in .env to the address clients use, then restart');
+  }
   if (require('./lib/otp').testMode()) {
     console.warn('[boot] ***********************************************************');
     console.warn('[boot] OTP TEST MODE IS ON - the sign-in code is returned by the API');
