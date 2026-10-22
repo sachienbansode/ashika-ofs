@@ -1,5 +1,14 @@
 'use strict';
-require('dotenv').config();
+/* override: true, because .env IS the single source of configuration here.
+ *
+ * dotenv's default is to leave alone anything already in process.env, and PM2
+ * replays the environment it captured when the app was FIRST started. So a shell
+ * that happened to carry NODE_ENV=dev months ago kept winning over a .env that
+ * said production, and no amount of editing .env or restarting could dislodge it
+ * — the fixed sign-in code stayed on a live desk and nothing on the box said why.
+ * ecosystem.config.js already declares .env the one place configuration lives;
+ * this is what makes that true. */
+require('dotenv').config({ override: true });
 
 const path = require('path');
 const express = require('express');
@@ -264,6 +273,15 @@ async function start() {
   // client's mobile or email can sign in as them and read that client's real data.
   // Fine behind a restricted network, dangerous on an open one - say so every boot
   // rather than leaving it to whoever remembers what is in .env.
+  /* Both doors, every boot, with the reason. "Still in test mode, why?" cost most
+     of a go-live morning because the answer was in three places at once. */
+  {
+    const otpLib = require('./lib/otp');
+    let cfg = null;
+    try { cfg = await settings.all(); } catch (e) { /* the lines below still read env */ }
+    console.log('[boot] client OTP :', otpLib.explainMode(cfg, 'otp_mode_client', 'OFS_OTP_TEST_MODE'));
+    console.log('[boot] staff OTP  :', otpLib.explainMode(cfg, 'otp_mode_staff', 'OFS_STAFF_OTP_TEST_MODE'));
+  }
   if (require('./lib/otp').testMode()) {
     console.warn('[boot] ***********************************************************');
     console.warn('[boot] OTP TEST MODE IS ON - the sign-in code is returned by the API');

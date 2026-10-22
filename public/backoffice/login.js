@@ -52,13 +52,21 @@
     btn.textContent = on ? label : btn.dataset.label;
   }
 
-  /* ---- the portal is the preferred door; show it when one is configured ---- */
+  /* ---- the portal is the preferred door; show it when one is configured ----
+   *
+   * And show NOTHING when one is not. The block used to keep its sentence -
+   * "Open the OFS BackOffice link there" - with no link beside it, pointing at a
+   * door the reader could not find; and when PORTAL_URL still held the UAT host
+   * on a live box, the link that did appear led to staging. Either way the cure
+   * is the same: this block is only ever shown when it can actually be used. */
   var portal = (window.OFS_PORTAL_URL || '').trim();
   if (portal) {
     var a = $('#portalLink');
     a.href = portal.replace(/\/+$/, '') + '/api/sso/ofs';
     show(a, true);
     show($('#portalNote'), false);
+  } else {
+    show($('#portalAlt'), false);
   }
 
   /* ---- why we are here, if the desk sent us ---- */
