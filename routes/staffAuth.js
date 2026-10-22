@@ -173,12 +173,26 @@ router.post('/login', loginLimiter, async (req, res) => {
     return res.status(400).json({ error: 'invalid_input', message: 'Enter your email and password.' });
   }
 
+  /* Where the seconds actually go.
+   *
+   * "Password validation is too slow" has been answered twice by guessing, and
+   * both answers were about a different door. The staff path has four distinct
+   * costs and they live in three systems: a query to the platform database
+   * (Azure to AWS), a bcrypt compare (pure-JS bcryptjs, so CPU and the whole
+   * event loop), writing the one-time code, and sending the mail. Nothing on the
+   * box said which. Now the log does, on every sign-in, in milliseconds. */
+  const t0 = Date.now();
+  const mark = {};
+  const lap = (k) => { mark[k] = Date.now() - t0; };
+
   try {
     const user = await loadStaff(email);
+    lap('lookup');
     const block = sa.directLoginBlock(user);
 
     // Always spend the bcrypt round, even for an unknown or password-less account.
     const ok = await bcrypt.compare(password, (user && user.password_hash) || DUMMY_HASH);
+    lap('bcrypt');
 
     /* "Use Microsoft 365" is a helpful message and an account oracle: it is
      * returned before the password is consulted, so anyone can tell a real, active
@@ -204,8 +218,16 @@ router.post('/login', loginLimiter, async (req, res) => {
                + 'An administrator grants the "ofs-desk" page to the role.' });
     }
 
-    if (sa.needsMfa(user)) return res.json(await startMfa(req, user));
-    return res.json(await issueSession(res, user, req));
+    if (sa.needsMfa(user)) {
+      const out = await startMfa(req, user);
+      lap('code_sent');
+      console.log('[staff-auth] sign-in timing (ms):', JSON.stringify(mark));
+      return res.json(out);
+    }
+    const out = await issueSession(res, user, req);
+    lap('session');
+    console.log('[staff-auth] sign-in timing (ms):', JSON.stringify(mark));
+    return res.json(out);
   } catch (e) {
     if (e.code === 'OTP_SEND_FAILED') {
       return res.status(503).json({ error: 'otp_send_failed',
