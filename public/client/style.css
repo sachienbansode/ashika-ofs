@@ -290,7 +290,14 @@
  * when the figures were last read, because a number with no age on it is the
  * thing that gets trusted longest after it stops being true.
  */
-.refresh { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+/* One LINE, not a column.
+ *
+ * The topbar centres its children, so a two-line column sat the Refresh button
+ * above the centre while Sign out beside it sat on it — the row read as ragged,
+ * and the stamp underneath reached back under Sign out's left edge. The stamp
+ * goes to the LEFT of the button instead: row-reverse, so the button keeps its
+ * place in the DOM and in the tab order while moving to the right of the text. */
+.refresh { display: flex; flex-direction: row-reverse; align-items: center; gap: 9px; }
 .refresh .updated { font-size: 10.5px; color: var(--muted, #64748b); letter-spacing: .02em;
   white-space: nowrap; }
 @media (max-width: 640px) { .refresh .updated { display: none; } }

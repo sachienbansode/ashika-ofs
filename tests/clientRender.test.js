@@ -190,3 +190,29 @@ test('no stray globals survive in the shipped file', () => {
   });
   assert.deepEqual(bad, [], 'branch is used outside the two functions that declare it');
 });
+
+/* ---------------------------------------------------------------------------
+ * The topbar row.
+ *
+ * .topbar centres its children. The refresh control was a COLUMN — button with
+ * the "Updated 19:54" stamp beneath it — so it stood two lines tall: the button
+ * sat above the centre line while Sign out beside it sat on it, and the stamp
+ * reached back underneath Sign out's left edge. One ragged row out of two
+ * controls that should have been level.
+ * ------------------------------------------------------------------------- */
+test('the refresh control is one line tall, so the topbar row is level', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'client', 'style.css'), 'utf8');
+  const rule = /\.refresh \{[^}]*\}/.exec(css)[0];
+  assert.match(rule, /flex-direction: row-reverse/,
+    'a column makes the control taller than the button beside it');
+  assert.match(rule, /align-items: center/);
+  assert.ok(!/flex-direction: column/.test(rule));
+  // row-reverse keeps the button first in the DOM, so focus order is still
+  // Refresh then Sign out while the stamp reads to its left.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'client', 'index.html'), 'utf8');
+  const block = /<div class="refresh">[\s\S]*?<\/div>/.exec(html)[0];
+  assert.ok(block.indexOf('id="cRefresh"') < block.indexOf('id="cRefreshed"'),
+    'the button must stay first in the DOM for the tab order');
+  assert.match(css, /\.refresh \.updated \{[^}]*white-space: nowrap/,
+    'the stamp wrapping would put the row back to two lines');
+});
