@@ -80,7 +80,10 @@ test('a mail failure never stops tomorrow', () => {
 
 test('the mailer can carry an attachment, and only when there is one', () => {
   const src = read('lib/mailer.js');
-  assert.match(src, /async function send\(\{ to, subject, html, purpose, triggeredBy, ip, attachments \}\)/);
+  assert.match(src, /async function send\(\{ to, subject, html, text, purpose, triggeredBy, ip, attachments \}\)/);
+  // A plain-text alternative when the caller has one: HTML-only is a spam signal,
+  // and a sign-in code is the mail that must not land in Junk.
+  assert.match(src, /if \(text\) mail\.text = text;/);
   assert.match(src, /if \(attachments && attachments\.length\) mail\.attachments = attachments;/,
     'an empty attachments array is a malformed multipart message on some servers');
 });

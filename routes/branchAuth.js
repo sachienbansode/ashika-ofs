@@ -19,7 +19,7 @@ const ba = require('../lib/branchAuth');
 const cs = require('../middleware/clientAuth');
 const branches = require('../db/branchAdapter');
 const mailer = require('../lib/mailer');
-const { otpEmail } = require('../lib/templates/otp');
+const { otpEmail, otpText, otpSubject } = require('../lib/templates/otp');
 
 const router = express.Router();
 
@@ -102,12 +102,15 @@ router.post('/start', startLimiter, async (req, res) => {
       return res.json(out);
     }
 
+    /* One object, rendered twice: HTML and plain text have to carry the same code
+       and the same expiry, and building them from two argument lists is how they
+       stop agreeing. */
+    const mail = { name: eligible[0].contact_person || eligible[0].branch_name, code: code,
+                   minutes: ca.OTP_TTL_MIN,
+                   expiresAt: new Date(Date.now() + ca.OTP_TTL_MIN * 60000),
+                   audience: 'branch' };
     const sent = await mailer.send({
-      to: email, subject: 'Your Ashika OFS sign-in code',
-      html: otpEmail({ name: eligible[0].contact_person || eligible[0].branch_name, code: code,
-                       minutes: ca.OTP_TTL_MIN,
-                       expiresAt: new Date(Date.now() + ca.OTP_TTL_MIN * 60000),
-                       audience: 'branch' }),
+      to: email, subject: otpSubject(mail), html: otpEmail(mail), text: otpText(mail),
       purpose: 'ofs_branch_otp', triggeredBy: 'branch-signin', ip });
 
     await ca.logAttempt({ event: 'otp_sent', email, ip, userAgent: ua, ok: !!sent.sent,

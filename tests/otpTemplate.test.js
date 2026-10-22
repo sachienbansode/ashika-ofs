@@ -126,3 +126,49 @@ test('the logo URL points at this app, whatever the environment says', () => {
     if (saved.b) process.env.BRAND_LOGO_URL = saved.b;
   }
 });
+
+/* ---------------------------------------------------------------------------
+ * Going live means these mails have to arrive, not merely be sent.
+ * ------------------------------------------------------------------------- */
+const { otpText, otpSubject } = require('../lib/templates/otp');
+const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
+
+test('every sign-in mail carries a plain-text alternative', () => {
+  const o = { name: 'A N Investor', code: '483921', minutes: 5,
+              expiresAt: new Date('2026-10-22T07:45:00Z'), audience: 'client' };
+  const t = otpText(o);
+  assert.match(t, /483921/, 'the code');
+  assert.match(t, /01:15 PM IST/, 'the same clock time the HTML gives');
+  assert.ok(!/<[a-z]/i.test(t), 'the text part must not contain markup');
+  // HTML-only transactional mail is a spam signal, and this is the one mail that
+  // cannot be allowed into Junk.
+  for (const r of ['routes/clientAuth.js', 'routes/branchAuth.js', 'routes/staffAuth.js']) {
+    assert.match(read(r), /text: otpText\(/, r + ' sends HTML only');
+  }
+});
+
+test('the code is never in the subject', () => {
+  // A subject shows on a locked phone, is read out by a watch, and lives in every
+  // mail index for ever.
+  const s = otpSubject({ audience: 'client' });
+  assert.ok(!/\d/.test(s), 'a digit in the subject line is a leaked credential');
+  assert.match(otpSubject({ audience: 'staff' }), /BackOffice/);
+  for (const r of ['routes/clientAuth.js', 'routes/branchAuth.js', 'routes/staffAuth.js']) {
+    assert.match(read(r), /subject: otpSubject\(/, r + ' still writes its own subject');
+  }
+});
+
+test('the preview line says what the mail is, and not what the code is', () => {
+  const html = otpEmail({ code: '483921', minutes: 5, audience: 'client' });
+  const pre = /mso-hide:all">([^<]*)</.exec(html);
+  assert.ok(pre, 'no preheader — the preview shows the branded header instead');
+  assert.ok(!pre[1].includes('483921'), 'the code must not reach the preview pane');
+  assert.match(pre[1], /one-time code/i);
+});
+
+test('an investor is not told they are on the BackOffice', () => {
+  const client = otpEmail({ code: '1', minutes: 5, audience: 'client' });
+  const staff = otpEmail({ code: '1', minutes: 5, audience: 'staff' });
+  assert.ok(!/BackOffice/.test(client), 'the client shell still says BackOffice');
+  assert.match(staff, /BackOffice/);
+});

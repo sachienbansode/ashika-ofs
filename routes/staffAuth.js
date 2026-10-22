@@ -20,7 +20,7 @@ const sa = require('../lib/staffAuth');
 const otp = require('../lib/otp');
 const settings = require('../lib/settings');
 const mailer = require('../lib/mailer');
-const { otpEmail } = require('../lib/templates/otp');
+const { otpEmail, otpText, otpSubject } = require('../lib/templates/otp');
 const audit = require('../lib/audit');
 const staffSession = require('../lib/staffSession');
 
@@ -141,10 +141,10 @@ async function startMfa(req, user) {
     return out;
   }
 
+  const mail = { name: user.first_name, code: code, minutes: otp.OTP_TTL_MIN,
+                 expiresAt: new Date(Date.now() + otp.OTP_TTL_MIN * 60000), audience: 'staff' };
   const r = await mailer.send({
-    to: user.email, subject: 'Your Ashika OFS BackOffice sign-in code',
-    html: otpEmail({ name: user.first_name, code: code, minutes: otp.OTP_TTL_MIN,
-                     expiresAt: new Date(Date.now() + otp.OTP_TTL_MIN * 60000), audience: 'staff' }),
+    to: user.email, subject: otpSubject(mail), html: otpEmail(mail), text: otpText(mail),
     purpose: 'ofs_staff_otp', triggeredBy: 'desk-signin', ip: ipOf(req)
   });
   if (!r.sent) {

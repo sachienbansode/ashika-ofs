@@ -18,7 +18,7 @@ const { SCHEMA, query, rows, one } = require('../db/ofsAdapter');
 const ca = require('../lib/clientAuth');
 const cs = require('../middleware/clientAuth');
 const mailer = require('../lib/mailer');
-const { otpEmail } = require('../lib/templates/otp');
+const { otpEmail, otpText, otpSubject } = require('../lib/templates/otp');
 const ld = require('../db/ldAdapter');
 const sms = require('../lib/sms');
 const settings = require('../lib/settings');
@@ -151,11 +151,14 @@ router.post('/start', startLimiter, async (req, res) => {
     // Both channels are attempted; one succeeding is enough to sign in.
     const results = await Promise.all([
       target.email
-        ? mailer.send({ to: target.email, subject: 'Your Ashika OFS sign-in code',
-            html: otpEmail({ name: target.name, code: ch.code, minutes: ch.expiresInMin,
-                             expiresAt: new Date(Date.now() + ch.expiresInMin * 60000),
-                             audience: 'client' }),
-            purpose: 'ofs_client_otp', triggeredBy: 'client-signin', ip })
+        ? mailer.send(Object.assign({ to: target.email,
+            purpose: 'ofs_client_otp', triggeredBy: 'client-signin', ip },
+            (function () {
+              const m = { name: target.name, code: ch.code, minutes: ch.expiresInMin,
+                          expiresAt: new Date(Date.now() + ch.expiresInMin * 60000),
+                          audience: 'client' };
+              return { subject: otpSubject(m), html: otpEmail(m), text: otpText(m) };
+            }())))
         : Promise.resolve({ sent: false, error: 'no_email_on_file' }),
       target.mobile
         ? sms.send({ to: target.mobile,
