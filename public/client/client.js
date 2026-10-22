@@ -124,7 +124,11 @@ async function sendBranchCode() {
     S.identifier = email;
     showIdentifier(email, 'email');
 
-    $('#otpSentTo').textContent = r.sent_to ? ('Sent to ' + r.sent_to) : 'Check your branch mailbox';
+    /* A branch or AP code goes to the branch's registered EMAIL and nowhere else:
+       the mobile on a branch record is a desk contact number, not a channel we
+       send credentials to. Saying so stops anyone waiting on an SMS. */
+    $('#otpSentTo').textContent = (r.sent_to ? 'Sent to ' + r.sent_to : 'Check your branch mailbox') +
+      ' — codes for a branch or AP go by email only.';
     $('#otpHint').className = 'hint';
     $('#otpHint').textContent = r.branches && r.branches.length > 1
       ? 'This address is registered against ' + r.branches.length + ' branch codes — you will pick one next.'
@@ -361,7 +365,13 @@ async function sendCode() {
     S.identifier = r.identifier || identifier;
     showIdentifier(S.identifier, r.kind);
 
-    $('#otpSentTo').textContent = r.sent_to ? ('Sent to ' + r.sent_to)
+    /* Name the channels that actually carried it. The server now reports what it
+       managed to send, not what it addressed, so "sent to your mobile" can no
+       longer appear against an SMS that went nowhere. */
+    var ch = r.channels || {};
+    var both = ch.email && ch.sms;
+    $('#otpSentTo').textContent = r.sent_to
+      ? 'Sent to ' + r.sent_to + (both ? ' — use whichever reaches you first' : '')
       : 'Check your registered email and mobile';
     $('#otpHint').className = 'hint';
     $('#otpHint').textContent = r.message || '';

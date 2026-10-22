@@ -100,7 +100,8 @@
       var out = await post('/auth/staff/login', { email: email, password: password });
       if (out.mfa_required) {
         STATE.ref = out.ref;
-        $('#sentTo').textContent = out.sent_to || 'your email';
+        // Staff codes go to the Ashika mailbox on the account, by email only.
+        $('#sentTo').textContent = (out.sent_to || 'your email') + ' (email only)';
         if (out.test_mode) {
           $('#testCode').innerHTML = 'Test environment — no email was sent. Your code is <b>' +
             String(out.test_code).replace(/[^0-9]/g, '') + '</b>.';

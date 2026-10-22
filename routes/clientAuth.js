@@ -134,6 +134,30 @@ router.post('/start', startLimiter, async (req, res) => {
     // Contacts ON FILE — never what was typed. Typing one identifier must not let
     // anyone redirect the code somewhere else.
     const target = clients[0];
+
+    /* Nothing to send to.
+     *
+     * 3,157 of the 36,720 active accounts carry no email address. Until this
+     * check, every one of them was told "We could not send the code just now.
+     * Please try again shortly." — which is false, is the same sentence a real
+     * SMTP outage produces, and sends them round the loop for ever. A missing
+     * contact is not a transient fault and must not be dressed as one.
+     *
+     * SMS is the other half: while no provider is wired, email is the only
+     * channel that can actually deliver, so a mobile on its own is not a way in
+     * either. The moment lib/sms is implemented this stops being true, which is
+     * why the condition asks sms.configured() rather than assuming. */
+    const canSms = sms.configured();
+    if (!target.email && !(target.mobile && canSms)) {
+      const why = !target.email && !target.mobile ? 'no_contact_on_file' : 'no_email_on_file';
+      await ca.logAttempt({ event: 'otp_sent', ip, userAgent: ua, ok: false, reason: why });
+      return res.status(422).json({ error: why, kind, identifier,
+        message: (target.mobile && !canSms
+          ? 'We can only send sign-in codes by email at present, and there is no email '
+            + 'address on your account. '
+          : 'There are no contact details on your account to send a sign-in code to. ')
+          + 'Please contact your relationship manager or the OFS desk to have one added.' });
+    }
     const ch = await ca.createChallenge({
       identifier, mobile: target.mobile, email: target.email,
       uccs: clients.map((c) => c.ucc), ip, userAgent: ua });
@@ -172,6 +196,17 @@ router.post('/start', startLimiter, async (req, res) => {
 
     if (!delivered) return res.status(503).json({ error: 'otp_send_failed',
       message: 'We could not send the code just now. Please try again shortly.' });
+
+    /* Where it ACTUALLY went, not where it was addressed.
+     *
+     * sent_to was built before either send was attempted, so a client whose SMS
+     * went nowhere — no provider wired — was still told the code had been sent to
+     * their mobile, and then waited for it. The screen may only name a channel
+     * that reported success. */
+    out.sent_to = [results[0].sent ? ca.maskEmail(target.email) : null,
+                   results[1].sent ? ca.maskMobile(target.mobile) : null]
+      .filter(Boolean).join(' and ');
+    out.channels = { email: !!results[0].sent, sms: !!results[1].sent };
 
     return res.json(out);
   } catch (e) {
