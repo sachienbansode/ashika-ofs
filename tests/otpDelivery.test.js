@@ -28,7 +28,8 @@ test('a mobile alone is only a way in once SMS can actually deliver', () => {
   // No provider is wired yet, so email is the only channel that delivers. The
   // check asks sms.configured() rather than assuming, so wiring one changes this
   // without anybody remembering to come back here.
-  assert.match(ROUTE, /const canSms = sms\.configured\(\);/);
+  // async now: the gateway's answer lives in the platform's settings row.
+  assert.match(ROUTE, /const canSms = await sms\.configured\(\);/);
   assert.match(ROUTE, /if \(!target\.email && !\(target\.mobile && canSms\)\)/);
   assert.match(ROUTE, /We can only send sign-in codes by email at present/);
 });

@@ -12,6 +12,7 @@
     "check-env": "node scripts/check-env.js",
     "check-feed": "node scripts/check-feed.js",
     "check-mail": "node scripts/check-mail.js",
+    "check-sms": "node scripts/check-sms.js",
     "dev": "node --watch server.js",
     "e2e": "node scripts/e2e-local.js",
     "fetch-issues": "node scripts/fetch-issues.js",

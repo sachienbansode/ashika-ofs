@@ -147,7 +147,7 @@ router.post('/start', startLimiter, async (req, res) => {
      * channel that can actually deliver, so a mobile on its own is not a way in
      * either. The moment lib/sms is implemented this stops being true, which is
      * why the condition asks sms.configured() rather than assuming. */
-    const canSms = sms.configured();
+    const canSms = await sms.configured();
     if (!target.email && !(target.mobile && canSms)) {
       const why = !target.email && !target.mobile ? 'no_contact_on_file' : 'no_email_on_file';
       await ca.logAttempt({ event: 'otp_sent', ip, userAgent: ua, ok: false, reason: why });
@@ -184,9 +184,14 @@ router.post('/start', startLimiter, async (req, res) => {
               return { subject: otpSubject(m), html: otpEmail(m), text: otpText(m) };
             }())))
         : Promise.resolve({ sent: false, error: 'no_email_on_file' }),
+      /* sendOtp, not a sentence written here. India's DLT regime matches the
+         delivered text against the template registered against the sender ID, so
+         a message composed at this call site is refused by the gateway however
+         well it reads. The template and its id come from the platform's SMS
+         settings — the same ones the portal's own 2FA uses. */
       target.mobile
-        ? sms.send({ to: target.mobile,
-            text: `${ch.code} is your Ashika OFS sign-in code. Valid ${ch.expiresInMin} minutes. Never share it.` })
+        ? sms.sendOtp(target.mobile, ch.code,
+            { purpose: 'ofs_client_otp_sms', triggeredBy: 'client-signin', ip })
         : Promise.resolve({ sent: false, skipped: true, reason: 'no_mobile_on_file' })
     ]);
 
